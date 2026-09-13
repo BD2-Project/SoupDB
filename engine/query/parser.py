@@ -14,6 +14,7 @@ from engine.query.ast import (
     ColumnRef,
     CompareExpr,
     Expr,
+    FunctionExpr,
     InExpr,
     LikeExpr,
     Literal,
@@ -29,6 +30,7 @@ from engine.query.lexer import tokenize
 from engine.query.tokens import Token, TokenKind
 
 _COMPARISON_OPS = {"=", "<>", "!=", "<", "<=", ">", ">="}
+_AGGREGATES = {"COUNT", "SUM", "AVG", "MIN", "MAX"}
 
 
 def _number_value(raw: str) -> int | float:
@@ -108,13 +110,22 @@ class _Parser:
         where = None
         if self._match_keyword("WHERE"):
             where = self._parse_boolean_expression()
+        group_by: tuple[Expr, ...] = ()
+        if self._match_keyword("GROUP"):
+            self._expect_keyword("BY")
+            group_by = self._parse_group_by()
         order_by: tuple[OrderByItem, ...] = ()
         if self._match_keyword("ORDER"):
             self._expect_keyword("BY")
             order_by = self._parse_order_by()
         self._error_if_not_eof()
         return SelectStatement(
-            columns=columns, table=table, where=where, order_by=order_by, distinct=distinct
+            columns=columns,
+            table=table,
+            where=where,
+            group_by=group_by,
+            order_by=order_by,
+            distinct=distinct,
         )
 
     def _parse_projection(self) -> tuple[SelectColumn, ...]:
@@ -136,6 +147,12 @@ class _Parser:
         elif self._check_kind(TokenKind.IDENTIFIER):
             alias = self._advance().value
         return SelectColumn(expr=expr, alias=alias)
+
+    def _parse_group_by(self) -> tuple[Expr, ...]:
+        items = [self._parse_expression()]
+        while self._match_comma():
+            items.append(self._parse_expression())
+        return tuple(items)
 
     def _parse_order_by(self) -> tuple[OrderByItem, ...]:
         items = [self._parse_order_by_item()]
@@ -218,6 +235,23 @@ class _Parser:
 
         return value
 
+    def _check_keyword_in(self, keywords: set[str]) -> bool:
+        token = self._peek()
+        return token.kind is TokenKind.KEYWORD and token.value in keywords
+
+    def _checks_lparen_next(self) -> bool:
+        return self._tokens[self._pos + 1].kind is TokenKind.LPAREN
+
+    def _parse_function_call(self) -> FunctionExpr:
+        name = self._advance().value
+        self._expect_kind(TokenKind.LPAREN)
+        distinct = self._match_keyword("DISTINCT")
+        arg = None
+        if not self._match_kind(TokenKind.STAR):
+            arg = self._parse_expression()
+        self._expect_kind(TokenKind.RPAREN)
+        return FunctionExpr(name=name, arg=arg, distinct=distinct)
+
     def _parse_primary(self) -> Expr:
         token = self._peek()
 
@@ -226,6 +260,9 @@ class _Parser:
 
         if self._match_kind(TokenKind.STRING):
             return Literal(token.value)
+
+        if self._check_keyword_in(_AGGREGATES) and self._checks_lparen_next():
+            return self._parse_function_call()
 
         if self._match_kind(TokenKind.IDENTIFIER):
             return ColumnRef(token.value)
