@@ -13,6 +13,7 @@ from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
     CompareExpr,
+    DeleteStatement,
     Expr,
     FunctionExpr,
     InExpr,
@@ -100,7 +101,18 @@ class _Parser:
     def parse_statement(self) -> Statement:
         if self._match_keyword("SELECT"):
             return self._parse_select()
+        if self._match_keyword("DELETE"):
+            return self._parse_delete()
         raise QueryParseError(f"unsupported statement at position {self._peek().position}")
+
+    def _parse_delete(self) -> DeleteStatement:
+        self._expect_keyword("FROM")
+        table = self._expect_kind(TokenKind.IDENTIFIER).value
+        where = None
+        if self._match_keyword("WHERE"):
+            where = self._parse_boolean_expression()
+        self._error_if_not_eof()
+        return DeleteStatement(table=table, where=where)
 
     def _parse_select(self) -> SelectStatement:
         distinct = self._match_keyword("DISTINCT")
