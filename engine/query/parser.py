@@ -100,6 +100,7 @@ class _Parser:
         raise QueryParseError(f"unsupported statement at position {self._peek().position}")
 
     def _parse_select(self) -> SelectStatement:
+        distinct = self._match_keyword("DISTINCT")
         columns = self._parse_projection()
         self._expect_keyword("FROM")
         table = self._expect_kind(TokenKind.IDENTIFIER).value
@@ -107,10 +108,13 @@ class _Parser:
         if self._match_keyword("WHERE"):
             where = self._parse_boolean_expression()
         self._error_if_not_eof()
-        return SelectStatement(columns=columns, table=table, where=where)
+        return SelectStatement(columns=columns, table=table, where=where, distinct=distinct)
 
     def _parse_projection(self) -> tuple[SelectColumn, ...]:
         if self._match_kind(TokenKind.STAR):
+            if self._check_kind(TokenKind.COMMA):
+                token = self._peek()
+                raise QueryParseError(f"star cannot mix with columns at position {token.position}")
             return ()
         columns = [self._parse_select_column()]
         while self._match_comma():
@@ -119,7 +123,12 @@ class _Parser:
 
     def _parse_select_column(self) -> SelectColumn:
         expr = self._parse_expression()
-        return SelectColumn(expr=expr)
+        alias = None
+        if self._match_keyword("AS"):
+            alias = self._expect_kind(TokenKind.IDENTIFIER).value
+        elif self._check_kind(TokenKind.IDENTIFIER):
+            alias = self._advance().value
+        return SelectColumn(expr=expr, alias=alias)
 
     def _parse_expression(self) -> Expr:
         """Parse any expression used in projections and clause keys.

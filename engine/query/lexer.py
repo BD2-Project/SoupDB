@@ -11,6 +11,7 @@ from engine.query.tokens import Token, TokenKind
 
 _KEYWORDS = {
     "SELECT",
+    "AS",
     "FROM",
     "WHERE",
     "AND",
