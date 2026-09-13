@@ -17,6 +17,7 @@ from engine.query.ast import (
     Expr,
     FunctionExpr,
     InExpr,
+    InsertStatement,
     LikeExpr,
     Literal,
     LogicalExpr,
@@ -103,6 +104,8 @@ class _Parser:
             return self._parse_select()
         if self._match_keyword("DELETE"):
             return self._parse_delete()
+        if self._match_keyword("INSERT"):
+            return self._parse_insert()
         raise QueryParseError(f"unsupported statement at position {self._peek().position}")
 
     def _parse_delete(self) -> DeleteStatement:
@@ -113,6 +116,38 @@ class _Parser:
             where = self._parse_boolean_expression()
         self._error_if_not_eof()
         return DeleteStatement(table=table, where=where)
+
+    def _parse_insert(self) -> InsertStatement:
+        self._expect_keyword("INTO")
+        table = self._expect_kind(TokenKind.IDENTIFIER).value
+        columns: tuple[str, ...] = ()
+        if self._match_kind(TokenKind.LPAREN):
+            columns = self._parse_column_name_list()
+        self._expect_keyword("VALUES")
+        values = self._parse_value_rows()
+        self._error_if_not_eof()
+        return InsertStatement(table=table, columns=columns, values=values)
+
+    def _parse_column_name_list(self) -> tuple[str, ...]:
+        names = [self._expect_kind(TokenKind.IDENTIFIER).value]
+        while self._match_comma():
+            names.append(self._expect_kind(TokenKind.IDENTIFIER).value)
+        self._expect_kind(TokenKind.RPAREN)
+        return tuple(names)
+
+    def _parse_value_rows(self) -> tuple[tuple[Expr, ...], ...]:
+        rows = [self._parse_value_row()]
+        while self._match_comma():
+            rows.append(self._parse_value_row())
+        return tuple(rows)
+
+    def _parse_value_row(self) -> tuple[Expr, ...]:
+        self._expect_kind(TokenKind.LPAREN)
+        values = [self._parse_expression()]
+        while self._match_comma():
+            values.append(self._parse_expression())
+        self._expect_kind(TokenKind.RPAREN)
+        return tuple(values)
 
     def _parse_select(self) -> SelectStatement:
         distinct = self._match_keyword("DISTINCT")
