@@ -11,8 +11,11 @@ Expression precedence (low to high):
 
 from engine.query.ast import (
     BetweenExpr,
+    ColumnDef,
     ColumnRef,
+    ColumnType,
     CompareExpr,
+    CreateTableStatement,
     DeleteStatement,
     Expr,
     FunctionExpr,
@@ -106,6 +109,8 @@ class _Parser:
             return self._parse_delete()
         if self._match_keyword("INSERT"):
             return self._parse_insert()
+        if self._match_keyword("CREATE"):
+            return self._parse_create_table()
         raise QueryParseError(f"unsupported statement at position {self._peek().position}")
 
     def _parse_delete(self) -> DeleteStatement:
@@ -134,6 +139,34 @@ class _Parser:
             names.append(self._expect_kind(TokenKind.IDENTIFIER).value)
         self._expect_kind(TokenKind.RPAREN)
         return tuple(names)
+
+    def _parse_create_table(self) -> CreateTableStatement:
+        self._expect_keyword("TABLE")
+        table = self._expect_kind(TokenKind.IDENTIFIER).value
+        self._expect_kind(TokenKind.LPAREN)
+        columns = [self._parse_column_def()]
+        while self._match_comma():
+            columns.append(self._parse_column_def())
+        self._expect_kind(TokenKind.RPAREN)
+        self._error_if_not_eof()
+        return CreateTableStatement(table=table, columns=tuple(columns))
+
+    def _parse_column_def(self) -> ColumnDef:
+        name = self._expect_kind(TokenKind.IDENTIFIER).value
+        type_token = self._expect_kind(TokenKind.IDENTIFIER)
+        type_name = self._column_type(type_token.value)
+        length = None
+        if type_name is ColumnType.VARCHAR and self._match_kind(TokenKind.LPAREN):
+            length = int(self._expect_kind(TokenKind.NUMBER).value)
+            self._expect_kind(TokenKind.RPAREN)
+        return ColumnDef(name=name, type_name=type_name, length=length)
+
+    @staticmethod
+    def _column_type(raw: str) -> ColumnType:
+        try:
+            return ColumnType(raw.upper())
+        except ValueError:
+            raise QueryParseError(f"unknown column type {raw.upper()!r}") from None
 
     def _parse_value_rows(self) -> tuple[tuple[Expr, ...], ...]:
         rows = [self._parse_value_row()]
