@@ -19,6 +19,7 @@ from engine.query.ast import (
     Literal,
     LogicalExpr,
     NotExpr,
+    OrderByItem,
     SelectColumn,
     SelectStatement,
     Statement,
@@ -107,8 +108,14 @@ class _Parser:
         where = None
         if self._match_keyword("WHERE"):
             where = self._parse_boolean_expression()
+        order_by: tuple[OrderByItem, ...] = ()
+        if self._match_keyword("ORDER"):
+            self._expect_keyword("BY")
+            order_by = self._parse_order_by()
         self._error_if_not_eof()
-        return SelectStatement(columns=columns, table=table, where=where, distinct=distinct)
+        return SelectStatement(
+            columns=columns, table=table, where=where, order_by=order_by, distinct=distinct
+        )
 
     def _parse_projection(self) -> tuple[SelectColumn, ...]:
         if self._match_kind(TokenKind.STAR):
@@ -129,6 +136,21 @@ class _Parser:
         elif self._check_kind(TokenKind.IDENTIFIER):
             alias = self._advance().value
         return SelectColumn(expr=expr, alias=alias)
+
+    def _parse_order_by(self) -> tuple[OrderByItem, ...]:
+        items = [self._parse_order_by_item()]
+        while self._match_comma():
+            items.append(self._parse_order_by_item())
+        return tuple(items)
+
+    def _parse_order_by_item(self) -> OrderByItem:
+        expr = self._parse_expression()
+        ascending = True
+        if self._match_keyword("DESC"):
+            ascending = False
+        elif self._match_keyword("ASC"):
+            ascending = True
+        return OrderByItem(expr=expr, ascending=ascending)
 
     def _parse_expression(self) -> Expr:
         """Parse any expression used in projections and clause keys.
