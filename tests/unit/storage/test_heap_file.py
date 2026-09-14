@@ -271,7 +271,30 @@ def test_remove_updates_cached_page_capacity(tmp_path: Path) -> None:
     assert hf._page_capacity[0] == 32
 
 
-def test_page_capacity_metadata_is_rebuilt_after_reopen(tmp_path: Path) -> None:
+def test_reopen_does_not_read_any_page_in_constructor(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=2)
+    hf = HeapFile(dm, bm)
+    data = b"x" * 20
+    for _ in range(5):
+        hf.insert(Record(data))
+        hf.insert(Record(data))
+    bm.flush_all()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=2)
+
+    reads_before = dm2.reads
+    hf2 = HeapFile(dm2, bm2)
+
+    assert dm2.reads == reads_before
+    assert hf2._page_capacity == {}
+    assert hf2._unmeasured_pages == set(range(5))
+
+
+def test_page_capacity_is_measured_lazily_after_reopen(tmp_path: Path) -> None:
     path = tmp_path / "data.db"
     dm = DiskManager(path, page_size=PAGE_SIZE)
     bm = BufferManager(dm, capacity=2)
@@ -289,11 +312,61 @@ def test_page_capacity_metadata_is_rebuilt_after_reopen(tmp_path: Path) -> None:
     bm2 = BufferManager(dm2, capacity=2)
     hf2 = HeapFile(dm2, bm2)
 
-    assert hf2._page_capacity == {0: 32}
+    assert hf2._page_capacity == {}
+    assert hf2._unmeasured_pages == {0}
 
-    r2 = hf2.insert(Record(data))  # debe reutilizar la 0 via la metadata reconstruida
+    r2 = hf2.insert(Record(data))  # descubre y reutiliza el espacio de forma perezosa
+
     assert r2.page_id == 0
     assert dm2.page_count == 1
+    assert hf2._page_capacity == {0: 8}  # 32 libres - 24 consumidos por r2 (20 + SLOT_SIZE)
+    assert hf2._unmeasured_pages == set()
+
+
+def test_measured_old_pages_are_not_reread_on_later_inserts(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=3)
+    hf = HeapFile(dm, bm)
+    data = b"x" * 20
+    for _ in range(3):
+        hf.insert(Record(data))
+        hf.insert(Record(data))  # 3 paginas llenas, sin espacio recuperable
+    bm.flush_all()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=3)
+    hf2 = HeapFile(dm2, bm2)
+
+    hf2.insert(Record(data))  # mide las 3 antiguas (no caben) y crea una pagina nueva
+    assert hf2._unmeasured_pages == set()
+
+    reads_before = dm2.reads
+    hf2.insert(Record(data))  # debe usar la pagina activa recien creada, no repasar las 3 viejas
+
+    assert dm2.reads - reads_before <= 2
+
+
+def test_selects_known_candidate_among_many_full_pages_without_extra_reads(
+    tmp_path: Path,
+) -> None:
+    hf, dm, _bm = _make_heap_file(tmp_path, buffer_capacity=4)
+    data = b"x" * 20
+
+    for _ in range(20):
+        hf.insert(Record(data))
+        hf.insert(Record(data))  # 20 paginas llenas, todas medidas al crearse
+
+    hf.remove(RID(page_id=10, slot=0))  # deja espacio recuperable en una pagina conocida
+    assert dm.page_count == 20
+
+    reads_before = dm.reads
+    rid = hf.insert(Record(data))
+
+    assert rid.page_id == 10
+    assert dm.page_count == 20
+    assert dm.reads - reads_before <= 1
 
 
 def test_insert_into_new_page_does_not_read_every_existing_page(tmp_path: Path) -> None:
