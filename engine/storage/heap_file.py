@@ -11,16 +11,25 @@ from engine.storage.disk_manager import DiskManager
 
 
 class HeapFile(FileOrganization):
-    """Records stored in arrival order across slotted pages, addressed by RID."""
+    """Heap file with free-space reuse and physical page/slot scanning."""
 
     def __init__(self, disk_manager: DiskManager, buffer_manager: BufferManager) -> None:
         self._disk_manager = disk_manager
         self._buffer_manager = buffer_manager
+        self._page_capacity: dict[int, int] = {}
 
         if disk_manager.page_count == 0:
             self._active_page_id = self._new_page()
         else:
+            for page_id in range(disk_manager.page_count):
+                self._page_capacity[page_id] = self._measure_capacity(page_id)
             self._active_page_id = disk_manager.page_count - 1
+
+    def _measure_capacity(self, page_id: int) -> int:
+        frame = self._buffer_manager.pin(page_id)
+        capacity = codec.free_space(frame) + codec.reclaimable_space(frame)
+        self._buffer_manager.unpin(page_id, dirty=False)
+        return capacity
 
     def insert(self, record: Record) -> RID:
         data = record.data
@@ -43,6 +52,7 @@ class HeapFile(FileOrganization):
             slot = codec.insert_record(frame, data)
         assert slot is not None
 
+        self._page_capacity[page_id] = codec.free_space(frame) + codec.reclaimable_space(frame)
         self._buffer_manager.unpin(page_id, dirty=True)
         return RID(page_id=page_id, slot=slot)
 
@@ -64,6 +74,10 @@ class HeapFile(FileOrganization):
 
         frame = self._buffer_manager.pin(rid.page_id)
         removed = codec.delete_record(frame, rid.slot)
+        if removed:
+            self._page_capacity[rid.page_id] = codec.free_space(frame) + codec.reclaimable_space(
+                frame
+            )
         self._buffer_manager.unpin(rid.page_id, dirty=removed)
         return removed
 
@@ -82,22 +96,14 @@ class HeapFile(FileOrganization):
         return 0 <= page_id < self._disk_manager.page_count
 
     def _find_page_with_room_for(self, data: bytes) -> int | None:
-        """Find an existing page that can hold data, directly or after compaction."""
+        """Find a page with enough cached capacity, without pinning any page."""
         required = len(data) + codec.SLOT_SIZE
 
-        candidates = [self._active_page_id]
-        candidates += [
-            page_id
-            for page_id in range(self._disk_manager.page_count)
-            if page_id != self._active_page_id
-        ]
+        if self._page_capacity.get(self._active_page_id, 0) >= required:
+            return self._active_page_id
 
-        for page_id in candidates:
-            frame = self._buffer_manager.pin(page_id)
-            capacity = codec.free_space(frame) + codec.reclaimable_space(frame)
-            self._buffer_manager.unpin(page_id, dirty=False)
-
-            if capacity >= required:
+        for page_id, capacity in self._page_capacity.items():
+            if page_id != self._active_page_id and capacity >= required:
                 return page_id
 
         return None
@@ -106,5 +112,6 @@ class HeapFile(FileOrganization):
         page_id = self._disk_manager.allocate_page()
         frame = self._buffer_manager.pin(page_id)
         frame[:] = codec.new_page(self._disk_manager.page_size)
+        self._page_capacity[page_id] = codec.free_space(frame) + codec.reclaimable_space(frame)
         self._buffer_manager.unpin(page_id, dirty=True)
         return page_id

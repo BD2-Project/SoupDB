@@ -260,6 +260,59 @@ def test_insert_after_reopen_reuses_existing_page_with_space(tmp_path: Path) -> 
     assert dm2.page_count == 1
 
 
+def test_remove_updates_cached_page_capacity(tmp_path: Path) -> None:
+    hf, _dm, _bm = _make_heap_file(tmp_path)
+    data = b"x" * 20
+    r0 = hf.insert(Record(data))
+    hf.insert(Record(data))
+
+    hf.remove(r0)
+
+    assert hf._page_capacity[0] == 32
+
+
+def test_page_capacity_metadata_is_rebuilt_after_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=2)
+    hf = HeapFile(dm, bm)
+
+    data = b"x" * 20
+    r0 = hf.insert(Record(data))
+    hf.insert(Record(data))
+    hf.remove(r0)
+
+    bm.flush_all()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=2)
+    hf2 = HeapFile(dm2, bm2)
+
+    assert hf2._page_capacity == {0: 32}
+
+    r2 = hf2.insert(Record(data))  # debe reutilizar la 0 via la metadata reconstruida
+    assert r2.page_id == 0
+    assert dm2.page_count == 1
+
+
+def test_insert_into_new_page_does_not_read_every_existing_page(tmp_path: Path) -> None:
+    hf, dm, _bm = _make_heap_file(tmp_path, buffer_capacity=2)
+    data = b"x" * 20  # sin remove: cada pagina llena no tiene espacio recuperable
+
+    for _ in range(5):
+        hf.insert(Record(data))
+        hf.insert(Record(data))
+
+    assert dm.page_count == 5
+
+    reads_before = dm.reads
+    hf.insert(Record(data))  # debe crear la pagina 5 sin repasar las 5 anteriores
+
+    assert dm.page_count == 6
+    assert dm.reads - reads_before <= 2
+
+
 def test_scan_after_cross_page_reuse_yields_all_live_records(tmp_path: Path) -> None:
     hf, dm, _bm = _make_heap_file(tmp_path)
     data = b"x" * 20  # 2 caben directo por pagina de 64 bytes
