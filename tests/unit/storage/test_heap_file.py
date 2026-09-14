@@ -87,7 +87,7 @@ def test_remove_unknown_slot_returns_false(tmp_path: Path) -> None:
     assert hf.remove(RID(page_id=0, slot=99)) is False
 
 
-def test_scan_yields_all_live_records_in_insertion_order(tmp_path: Path) -> None:
+def test_scan_yields_all_live_records(tmp_path: Path) -> None:
     hf, _dm, _bm = _make_heap_file(tmp_path)
     inserted = [hf.insert(Record(bytes([i]) * 5)) for i in range(3)]
 
@@ -140,6 +140,108 @@ def test_persistence_after_flush_and_reopen(tmp_path: Path) -> None:
     assert hf2.fetch(rid) == Record(b"persisted")
 
 
+def test_insert_after_remove_reuses_same_page_via_compaction(tmp_path: Path) -> None:
+    hf, dm, _bm = _make_heap_file(tmp_path)
+    data = b"x" * 20  # con page_size=64 caben 2 directo, no 3
+
+    r0 = hf.insert(Record(data))
+    r1 = hf.insert(Record(data))
+    hf.remove(r0)
+    hf.remove(r1)
+
+    r2 = hf.insert(Record(data))
+
+    assert r2.page_id == 0
+    assert dm.page_count == 1  # no debio crear una pagina nueva
+    assert hf.fetch(r2) == Record(data)
+
+
+def test_insert_after_remove_does_not_increase_page_count_when_space_is_recoverable(
+    tmp_path: Path,
+) -> None:
+    hf, dm, _bm = _make_heap_file(tmp_path)
+    data = b"x" * 20
+    r0 = hf.insert(Record(data))
+    hf.insert(Record(data))
+    hf.remove(r0)
+
+    before = dm.page_count
+    hf.insert(Record(data))  # requiere compactar para caber
+
+    assert dm.page_count == before
+
+
+def test_rid_of_live_record_still_resolves_after_compaction_triggered_by_insert(
+    tmp_path: Path,
+) -> None:
+    hf, _dm, _bm = _make_heap_file(tmp_path)
+    r0 = hf.insert(Record(b"x" * 20))
+    r1 = hf.insert(Record(bytes([9]) * 20))
+    hf.remove(r0)  # r1 sigue viva
+
+    hf.insert(Record(b"z" * 20))  # dispara compactacion de la pagina 0
+
+    assert hf.fetch(r1) == Record(bytes([9]) * 20)  # el RID original de r1 sigue sirviendo
+    assert (r1.page_id, r1.slot) == (0, 1)  # su slot no cambio, solo su offset interno
+
+
+def test_scan_correct_after_compaction(tmp_path: Path) -> None:
+    hf, _dm, _bm = _make_heap_file(tmp_path)
+    r0 = hf.insert(Record(b"x" * 20))
+    r1 = hf.insert(Record(bytes([9]) * 20))
+    hf.remove(r0)
+
+    r2 = hf.insert(Record(bytes([7]) * 20))  # dispara compactacion
+
+    result = dict(hf.scan())
+    assert result == {r1: Record(bytes([9]) * 20), r2: Record(bytes([7]) * 20)}
+    assert r0 not in result
+
+
+def test_multiple_tombstones_then_reuse(tmp_path: Path) -> None:
+    hf, dm, _bm = _make_heap_file(tmp_path)
+    data = b"x" * 20
+    r0 = hf.insert(Record(data))
+    r1 = hf.insert(Record(data))
+    hf.remove(r0)
+    hf.remove(r1)
+
+    r2 = hf.insert(Record(data))
+    r3 = hf.insert(Record(b"y" * 20))
+
+    assert dm.page_count == 1  # ambos reutilizan el espacio liberado en la misma pagina
+    assert (r2.page_id, r3.page_id) == (0, 0)
+    assert hf.fetch(r0) is None
+    assert hf.fetch(r1) is None
+    assert hf.fetch(r2) == Record(data)
+    assert hf.fetch(r3) == Record(b"y" * 20)
+
+
+def test_reused_space_persists_after_flush_and_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=2)
+    hf = HeapFile(dm, bm)
+
+    data = b"x" * 20
+    r0 = hf.insert(Record(data))
+    r1 = hf.insert(Record(data))
+    hf.remove(r0)
+    r2 = hf.insert(Record(data))  # reutiliza via compactacion
+
+    bm.flush_all()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=2)
+    hf2 = HeapFile(dm2, bm2)
+
+    assert dm2.page_count == 1
+    assert hf2.fetch(r0) is None
+    assert hf2.fetch(r1) == Record(data)
+    assert hf2.fetch(r2) == Record(data)
+
+
 def test_insert_after_reopen_reuses_existing_page_with_space(tmp_path: Path) -> None:
     path = tmp_path / "data.db"
     dm = DiskManager(path, page_size=PAGE_SIZE)
@@ -156,3 +258,22 @@ def test_insert_after_reopen_reuses_existing_page_with_space(tmp_path: Path) -> 
 
     assert rid.page_id == 0  # reutiliza la pagina existente, no crea una nueva
     assert dm2.page_count == 1
+
+
+def test_scan_after_cross_page_reuse_yields_all_live_records(tmp_path: Path) -> None:
+    hf, dm, _bm = _make_heap_file(tmp_path)
+    data = b"x" * 20  # 2 caben directo por pagina de 64 bytes
+
+    r0 = hf.insert(Record(data))
+    r1 = hf.insert(Record(data))
+    r2 = hf.insert(Record(data))  # llena page 0, crea page 1
+    r3 = hf.insert(Record(data))  # llena page 1
+    hf.remove(r0)  # libera espacio en page 0
+
+    r4 = hf.insert(Record(data))  # reutiliza page 0 via compactacion
+
+    assert dm.page_count == 2
+    result = dict(hf.scan())
+    assert set(result) == {r1, r2, r3, r4}
+    assert r0 not in result
+    assert all(record == Record(data) for record in result.values())

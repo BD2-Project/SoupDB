@@ -30,17 +30,18 @@ class HeapFile(FileOrganization):
                 f"record of {len(data)} bytes can never fit in a page of {page_size} bytes"
             )
 
-        page_id = self._active_page_id
+        page_id = self._find_page_with_room_for(data)
+        if page_id is None:
+            page_id = self._new_page()
+        self._active_page_id = page_id
+
         frame = self._buffer_manager.pin(page_id)
         slot = codec.insert_record(frame, data)
-
         if slot is None:
-            self._buffer_manager.unpin(page_id, dirty=False)
-            page_id = self._new_page()
-            self._active_page_id = page_id
-            frame = self._buffer_manager.pin(page_id)
+            # cabia solo tras compactar (ya lo confirmo _find_page_with_room_for)
+            codec.compact(frame)
             slot = codec.insert_record(frame, data)
-            assert slot is not None  # ya validamos que cabe en una pagina vacia
+        assert slot is not None
 
         self._buffer_manager.unpin(page_id, dirty=True)
         return RID(page_id=page_id, slot=slot)
@@ -79,6 +80,27 @@ class HeapFile(FileOrganization):
 
     def _page_exists(self, page_id: int) -> bool:
         return 0 <= page_id < self._disk_manager.page_count
+
+    def _find_page_with_room_for(self, data: bytes) -> int | None:
+        """Find an existing page that can hold data, directly or after compaction."""
+        required = len(data) + codec.SLOT_SIZE
+
+        candidates = [self._active_page_id]
+        candidates += [
+            page_id
+            for page_id in range(self._disk_manager.page_count)
+            if page_id != self._active_page_id
+        ]
+
+        for page_id in candidates:
+            frame = self._buffer_manager.pin(page_id)
+            capacity = codec.free_space(frame) + codec.reclaimable_space(frame)
+            self._buffer_manager.unpin(page_id, dirty=False)
+
+            if capacity >= required:
+                return page_id
+
+        return None
 
     def _new_page(self) -> int:
         page_id = self._disk_manager.allocate_page()
