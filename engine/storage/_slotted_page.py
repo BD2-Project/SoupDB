@@ -1,20 +1,7 @@
-"""Private slotted-page codec used internally by HeapFile.
+"""Slotted-page codec used internally by HeapFile.
 
-Not part of any public contract: operates on raw ``bytearray``/``bytes`` page
-buffers exactly as handed out by :class:`BufferManager`.
-
-Layout (all integers little-endian, unsigned 16-bit)::
-
-    [0:2)                          num_slots
-    [2:4)                          free_space_offset
-    [4 : 4 + 4*num_slots)          slot directory: (offset, length) pairs
-    ... free space ...
-    [free_space_offset:page_size)  record bytes, packed backward from the end
-
-Records grow from the end of the page backward; the slot directory grows
-forward from the header. ``offset == 0`` in a slot entry marks it as
-tombstoned (deleted): offset 0 always falls inside the header/directory
-region, so it can never be a real record's start.
+Layout: header (num_slots, free_space_offset), followed by (offset, length)
+slots. Records grow backward from the page end; offset == 0 marks a tombstone.
 """
 
 import struct
@@ -78,6 +65,46 @@ def read_record(page: bytes, slot: int) -> bytes | None:
         return None
 
     return bytes(page[offset : offset + length])
+
+
+def reclaimable_space(page: bytes) -> int:
+    """Dead bytes (from tombstoned records) that compaction would recover."""
+    _, free_space_offset = _read_header(page)
+    return (len(page) - free_space_offset) - _live_bytes(page)
+
+
+def compact(page: bytearray) -> None:
+    """Repack live records contiguously, preserving slot indices."""
+    num_slots, _ = _read_header(page)
+    page_size = len(page)
+
+    live_entries = []
+    for slot in range(num_slots):
+        offset, length = _read_slot(page, slot)
+        if offset != TOMBSTONE_OFFSET:
+            live_entries.append((slot, offset, length))
+
+    # offset desciende segun el orden de insercion original
+    live_entries.sort(key=lambda entry: entry[1], reverse=True)
+
+    snapshot = bytes(page)
+    cursor = page_size
+    for slot, offset, length in live_entries:
+        cursor -= length
+        page[cursor : cursor + length] = snapshot[offset : offset + length]
+        _write_slot(page, slot, cursor, length)
+
+    _write_header(page, num_slots, cursor)
+
+
+def _live_bytes(page: bytes) -> int:
+    num_slots, _ = _read_header(page)
+    total = 0
+    for slot in range(num_slots):
+        offset, length = _read_slot(page, slot)
+        if offset != TOMBSTONE_OFFSET:
+            total += length
+    return total
 
 
 def delete_record(page: bytearray, slot: int) -> bool:
