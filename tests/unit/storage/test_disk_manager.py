@@ -204,3 +204,32 @@ def test_read_page_raises_on_short_read(tmp_path: Path) -> None:
     dm._file.truncate(100)  # simulate a corrupted/truncated page on disk
     with pytest.raises(ValueError):
         dm.read_page(page_id)
+
+
+def test_page_size_property(tmp_path: Path) -> None:
+    dm = DiskManager(tmp_path / "data.db", page_size=4096)
+    assert dm.page_size == 4096
+
+
+def test_page_count_starts_at_zero(tmp_path: Path) -> None:
+    dm = DiskManager(tmp_path / "data.db", page_size=4096)
+    assert dm.page_count == 0
+
+
+def test_page_count_increments_with_allocate_page(tmp_path: Path) -> None:
+    dm = DiskManager(tmp_path / "data.db", page_size=4096)
+    dm.allocate_page()
+    assert dm.page_count == 1
+    dm.allocate_page()
+    assert dm.page_count == 2
+
+
+def test_page_count_reflects_existing_file_after_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=4096)
+    dm.allocate_page()
+    dm.allocate_page()
+    dm.close()
+
+    reopened = DiskManager(path, page_size=4096)
+    assert reopened.page_count == 2

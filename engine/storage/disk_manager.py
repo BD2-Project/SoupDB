@@ -27,6 +27,14 @@ class DiskManager:
 
         self._next_page_id = size // page_size
 
+    @property
+    def page_size(self) -> int:
+        return self._page_size
+
+    @property
+    def page_count(self) -> int:
+        return self._next_page_id
+
     def _validate_page_id(self, page_id: int) -> None:
         if page_id < 0 or page_id >= self._next_page_id:
             raise ValueError(f"page_id {page_id} does not reference an allocated page")
