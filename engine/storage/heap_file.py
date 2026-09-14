@@ -128,6 +128,14 @@ class HeapFile(FileOrganization):
         self._unmeasured_pages.discard(page_id)
         self._page_capacity[page_id] = capacity
         heapq.heappush(self._capacity_heap, (-capacity, page_id))
+        self._compact_capacity_heap_if_needed()
+
+    def _compact_capacity_heap_if_needed(self) -> None:
+        if len(self._capacity_heap) > 2 * len(self._page_capacity):
+            self._capacity_heap = [
+                (-capacity, page_id) for page_id, capacity in self._page_capacity.items()
+            ]
+            heapq.heapify(self._capacity_heap)
 
     @staticmethod
     def _frame_capacity(frame: bytes) -> int:

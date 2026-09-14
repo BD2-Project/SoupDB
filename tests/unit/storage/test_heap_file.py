@@ -403,3 +403,22 @@ def test_scan_after_cross_page_reuse_yields_all_live_records(tmp_path: Path) -> 
     assert set(result) == {r1, r2, r3, r4}
     assert r0 not in result
     assert all(record == Record(data) for record in result.values())
+
+
+def test_capacity_heap_stays_bounded_after_many_insert_remove_cycles(tmp_path: Path) -> None:
+    # pagina grande para que las 50 entradas de slot (directorio, no reutilizable)
+    # nunca obliguen a crear una segunda pagina
+    dm = DiskManager(tmp_path / "data.db", page_size=1024)
+    bm = BufferManager(dm, capacity=2)
+    hf = HeapFile(dm, bm)
+    data = b"x" * 5
+
+    for _ in range(50):
+        rid = hf.insert(Record(data))
+        hf.remove(rid)
+
+    assert len(hf._page_capacity) == 1
+    assert len(hf._capacity_heap) <= 2 * len(hf._page_capacity)
+
+    rid = hf.insert(Record(data))
+    assert rid.page_id == 0
