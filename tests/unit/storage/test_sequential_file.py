@@ -221,6 +221,20 @@ def test_insert_record_too_large_raises_value_error(tmp_path: Path) -> None:
         sf.insert(too_big)
 
 
+def test_insert_record_too_large_error_reports_real_page_size_and_max_payload(
+    tmp_path: Path,
+) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    too_big = Record(b"\x00" * PAGE_SIZE)  # 64 bytes: mayor al payload maximo real (47)
+    with pytest.raises(ValueError) as exc_info:
+        sf.insert(too_big)
+
+    message = str(exc_info.value)
+    assert "64" in message  # tamano fisico real de la pagina
+    assert "55" not in message  # nunca mostrar body_size como si fuera el tamano de pagina
+    assert "47" in message  # payload maximo real (body_size - header/slot de _slotted_page)
+
+
 def test_empty_file_scan_is_empty(tmp_path: Path) -> None:
     sf, _dm, _bm = _make_sequential_file(tmp_path)
     assert list(sf.scan()) == []
@@ -465,6 +479,94 @@ def test_compaction_inside_page_preserves_surviving_rids(tmp_path: Path) -> None
     assert sf.fetch(rid_a) == _record(10)
     assert sf.fetch(rid_c) == _record(30)
     assert (rid_a.page_id, rid_c.page_id) == (0, 0)
+
+
+# --- _page_max_key debe reflejar el maximo VIVO actual, no un high-water mark ---
+
+
+def test_max_key_updates_immediately_after_removing_bucket_max(tmp_path: Path) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    sf.insert(_record(10))
+    sf.insert(_record(20))
+    r30 = sf.insert(_record(30))  # llena la pagina principal 0
+    sf.insert(_record(40))  # bucket principal siguiente
+
+    sf.remove(r30)
+
+    assert sf._page_max_key[0] == 20  # no debe seguir siendo 30
+
+
+def test_max_key_recomputed_when_max_lives_in_overflow(tmp_path: Path) -> None:
+    sf, dm, _bm = _make_sequential_file(tmp_path)
+    sf.insert(_record(10))
+    sf.insert(_record(20))
+    r30 = sf.insert(_record(30))  # llena la pagina principal, max=30
+    r28 = sf.insert(_record(28))  # dentro del rango: va a overflow
+
+    assert dm.page_count == 2
+
+    sf.remove(r30)  # el maximo real pasa a ser 28, que vive en overflow
+    assert sf._page_max_key[0] == 28
+
+    sf.remove(r28)  # r28 esta en una pagina overflow: prueba resolucion del main propietario
+    assert sf._page_max_key[0] == 20
+
+
+def test_max_key_becomes_none_when_bucket_fully_emptied(tmp_path: Path) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    rids = [sf.insert(_record(k)) for k in (10, 20, 30)]
+    for rid in rids:
+        sf.remove(rid)
+
+    assert sf._page_max_key[0] is None
+
+
+def test_rids_remain_stable_when_remove_triggers_max_recompute(tmp_path: Path) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    r10 = sf.insert(_record(10))
+    r20 = sf.insert(_record(20))
+    r30 = sf.insert(_record(30))
+
+    sf.remove(r30)
+
+    assert sf.fetch(r10) == _record(10)
+    assert sf.fetch(r20) == _record(20)
+    assert (r10.page_id, r20.page_id) == (0, 0)
+
+
+def test_routing_of_key_is_consistent_before_and_after_reopen(tmp_path: Path) -> None:
+    # sesion A: nunca se reabre
+    dm_a = DiskManager(tmp_path / "a.db", page_size=PAGE_SIZE)
+    bm_a = BufferManager(dm_a, capacity=4)
+    sf_a = SequentialFile(dm_a, bm_a, _key_fn)
+    sf_a.insert(_record(10))
+    sf_a.insert(_record(20))
+    r30_a = sf_a.insert(_record(30))
+    sf_a.insert(_record(40))
+    sf_a.remove(r30_a)
+    rid_a = sf_a.insert(_record(25))
+    owner_a = sf_a._page_owner_main[rid_a.page_id]
+
+    # sesion B: operaciones identicas, pero se reabre justo antes de insertar 25
+    path_b = tmp_path / "b.db"
+    dm_b = DiskManager(path_b, page_size=PAGE_SIZE)
+    bm_b = BufferManager(dm_b, capacity=4)
+    sf_b = SequentialFile(dm_b, bm_b, _key_fn)
+    sf_b.insert(_record(10))
+    sf_b.insert(_record(20))
+    r30_b = sf_b.insert(_record(30))
+    sf_b.insert(_record(40))
+    sf_b.remove(r30_b)
+    bm_b.flush_all()
+    dm_b.close()
+
+    dm_b2 = DiskManager(path_b, page_size=PAGE_SIZE)
+    bm_b2 = BufferManager(dm_b2, capacity=4)
+    sf_b2 = SequentialFile(dm_b2, bm_b2, _key_fn)
+    rid_b = sf_b2.insert(_record(25))
+    owner_b = sf_b2._page_owner_main[rid_b.page_id]
+
+    assert owner_a == owner_b
 
 
 def test_stress_random_inserts_preserve_order_and_all_rids(tmp_path: Path) -> None:

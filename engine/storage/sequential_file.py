@@ -37,6 +37,7 @@ class SequentialFile(FileOrganization):
         self._key_fn = key_fn
         self._page_max_key: dict[int, Any] = {}
         self._main_next: dict[int, int | None] = {}
+        self._page_owner_main: dict[int, int] = {}
 
         if disk_manager.page_count == 0:
             self._new_page(seqpage.MAIN)
@@ -45,10 +46,12 @@ class SequentialFile(FileOrganization):
 
     def insert(self, record: Record) -> RID:
         data = record.data
-        body_size = seqpage.body_size(self._disk_manager.page_size)
-        if len(data) > slotted.max_record_size(body_size):
+        page_size = self._disk_manager.page_size
+        max_payload = slotted.max_record_size(seqpage.body_size(page_size))
+        if len(data) > max_payload:
             raise ValueError(
-                f"record of {len(data)} bytes can never fit in a page of {body_size} bytes"
+                f"record of {len(data)} bytes can never fit in a {page_size}-byte page "
+                f"(maximum record payload is {max_payload} bytes)"
             )
 
         key = self._key_fn(record)
@@ -95,6 +98,11 @@ class SequentialFile(FileOrganization):
         frame = self._buffer_manager.pin(rid.page_id)
         removed = slotted.delete_record(seqpage.body(frame), rid.slot)
         self._buffer_manager.unpin(rid.page_id, dirty=removed)
+
+        if removed:
+            owner_main_id = self._page_owner_main[rid.page_id]
+            self._page_max_key[owner_main_id] = self._bucket_max(owner_main_id)
+
         return removed
 
     def scan(self) -> Iterator[tuple[RID, Record]]:
@@ -137,6 +145,7 @@ class SequentialFile(FileOrganization):
 
         if current is None:
             new_overflow = self._new_page(seqpage.OVERFLOW)
+            self._page_owner_main[new_overflow] = main_id
             frame = self._buffer_manager.pin(main_id)
             seqpage.set_first_overflow_page_id(frame, new_overflow)
             self._buffer_manager.unpin(main_id, dirty=True)
@@ -161,6 +170,7 @@ class SequentialFile(FileOrganization):
 
             if next_overflow is None:
                 new_overflow = self._new_page(seqpage.OVERFLOW)
+                self._page_owner_main[new_overflow] = main_id
                 frame = self._buffer_manager.pin(current)
                 seqpage.set_next_page_id(frame, new_overflow)
                 self._buffer_manager.unpin(current, dirty=True)
@@ -194,25 +204,41 @@ class SequentialFile(FileOrganization):
         if kind == seqpage.MAIN:
             self._page_max_key[page_id] = None
             self._main_next[page_id] = None
+            self._page_owner_main[page_id] = page_id
         return page_id
+
+    def _bucket_max(self, main_id: int) -> Any:
+        frame = self._buffer_manager.pin(main_id)
+        keys = self._body_keys(seqpage.body(frame))
+        overflow_id = seqpage.first_overflow_page_id(frame)
+        self._buffer_manager.unpin(main_id, dirty=False)
+
+        while overflow_id is not None:
+            frame = self._buffer_manager.pin(overflow_id)
+            keys += self._body_keys(seqpage.body(frame))
+            next_overflow = seqpage.next_page_id(frame)
+            self._buffer_manager.unpin(overflow_id, dirty=False)
+            overflow_id = next_overflow
+
+        return max(keys) if keys else None
 
     def _rebuild_chain_metadata(self) -> None:
         main_id: int | None = _MAIN_HEAD
         while main_id is not None:
+            self._page_owner_main[main_id] = main_id
             frame = self._buffer_manager.pin(main_id)
-            keys = self._body_keys(seqpage.body(frame))
             overflow_id = seqpage.first_overflow_page_id(frame)
             next_main = seqpage.next_page_id(frame)
             self._buffer_manager.unpin(main_id, dirty=False)
 
             while overflow_id is not None:
+                self._page_owner_main[overflow_id] = main_id
                 frame = self._buffer_manager.pin(overflow_id)
-                keys += self._body_keys(seqpage.body(frame))
                 next_overflow = seqpage.next_page_id(frame)
                 self._buffer_manager.unpin(overflow_id, dirty=False)
                 overflow_id = next_overflow
 
-            self._page_max_key[main_id] = max(keys) if keys else None
+            self._page_max_key[main_id] = self._bucket_max(main_id)
             self._main_next[main_id] = next_main
             main_id = next_main
 
