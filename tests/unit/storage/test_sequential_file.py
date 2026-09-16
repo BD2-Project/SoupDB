@@ -1,4 +1,5 @@
 import random
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from engine.common.record import Record
 from engine.common.rid import RID
 from engine.storage import _sequential_page as seqpage
+from engine.storage import _slotted_page as slotted
 from engine.storage.buffer_manager import BufferManager
 from engine.storage.disk_manager import DiskManager
 from engine.storage.sequential_file import SequentialFile
@@ -584,3 +586,157 @@ def test_stress_random_inserts_preserve_order_and_all_rids(tmp_path: Path) -> No
 
     for rid, expected in inserted:
         assert sf.fetch(rid) == expected
+
+
+# --- exception safety: ningun pin debe filtrarse si key_fn lanza ---
+
+
+def test_scan_unpins_main_page_when_key_fn_raises(tmp_path: Path) -> None:
+    sf, _dm, bm = _make_sequential_file(tmp_path)
+    sf.insert(_record(10))
+
+    sf._key_fn = _raise_boom
+
+    with pytest.raises(RuntimeError):
+        list(sf.scan())
+
+    assert bm.is_pinned(0) is False
+
+
+def test_scan_unpins_overflow_page_when_key_fn_raises(tmp_path: Path) -> None:
+    sf, dm, bm = _make_sequential_file(tmp_path)
+    for key in (10, 20, 30):
+        sf.insert(_record(key))
+    sf.insert(_record(15))  # crea overflow (pagina 1)
+    assert dm.page_count == 2
+
+    sf._key_fn = _boom_on_key(15)
+
+    with pytest.raises(RuntimeError):
+        list(sf.scan())
+
+    assert bm.is_pinned(0) is False
+    assert bm.is_pinned(1) is False
+
+
+def test_bucket_max_unpins_main_page_when_key_fn_raises(tmp_path: Path) -> None:
+    sf, _dm, bm = _make_sequential_file(tmp_path)
+    sf.insert(_record(10))
+
+    sf._key_fn = _raise_boom
+
+    with pytest.raises(RuntimeError):
+        sf._bucket_max(0)
+
+    assert bm.is_pinned(0) is False
+
+
+def test_bucket_max_unpins_overflow_page_when_key_fn_raises(tmp_path: Path) -> None:
+    sf, dm, bm = _make_sequential_file(tmp_path)
+    for key in (10, 20, 30):
+        sf.insert(_record(key))
+    sf.insert(_record(15))  # overflow en pagina 1
+    assert dm.page_count == 2
+
+    sf._key_fn = _boom_on_key(15)
+
+    with pytest.raises(RuntimeError):
+        sf._bucket_max(0)
+
+    assert bm.is_pinned(0) is False
+    assert bm.is_pinned(1) is False
+
+
+def test_remove_does_not_leak_pin_when_key_fn_raises_during_recompute(tmp_path: Path) -> None:
+    sf, _dm, bm = _make_sequential_file(tmp_path)
+    sf.insert(_record(10))
+    r20 = sf.insert(_record(20))
+
+    sf._key_fn = _boom_on_key(10)
+
+    with pytest.raises(RuntimeError):
+        sf.remove(r20)
+
+    assert bm.is_pinned(0) is False
+
+
+def _raise_boom(record: Record) -> int:
+    raise RuntimeError("boom")
+
+
+def _boom_on_key(trigger_key: int) -> Callable[[Record], int]:
+    def _key_fn_that_booms(record: Record) -> int:
+        if record.data[0] == trigger_key:
+            raise RuntimeError("boom")
+        return _key_fn(record)
+
+    return _key_fn_that_booms
+
+
+# --- una pagina compactada, pero que sigue sin tener espacio, debe persistir ---
+
+
+def test_main_compaction_persists_when_record_still_does_not_fit(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=4)
+    sf = SequentialFile(dm, bm, _key_fn)
+
+    r10 = sf.insert(_record(10))
+    r20 = sf.insert(_record(20))
+    r30 = sf.insert(_record(30))  # llena la pagina principal 0
+    sf.insert(_record(15))  # crea overflow1 (pagina 1), ya enlazada desde main0
+    sf.remove(r20)  # tombstone en main0, con espacio recuperable
+    bm.flush_all()  # limpia dirty: el bug de persistencia importa de verdad ahora
+
+    rid_new = sf.insert(_record(16, size=16))  # no cabe en main0 ni compactando
+
+    assert rid_new.page_id != 0
+
+    bm.flush_all()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=4)
+    frame = bm2.pin(0)
+    reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+    bm2.unpin(0, dirty=False)
+    sf2 = SequentialFile(dm2, bm2, _key_fn)
+
+    assert reclaimable == 0
+    assert sf2.fetch(r10) == _record(10)
+    assert sf2.fetch(r30) == _record(30)
+
+
+def test_overflow_compaction_persists_when_record_still_does_not_fit(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=4)
+    sf = SequentialFile(dm, bm, _key_fn)
+
+    sf.insert(_record(10))
+    sf.insert(_record(20))
+    sf.insert(_record(30))  # llena main0
+    sf.insert(_record(11))
+    r12 = sf.insert(_record(12))
+    sf.insert(_record(13))  # llena overflow1 (pagina 1)
+    sf.insert(_record(14))  # crea overflow2 (pagina 2), enlazada desde overflow1
+
+    sf.remove(r12)  # tombstone en overflow1
+    bm.flush_all()  # limpia dirty: el bug de persistencia importa de verdad ahora
+
+    rid_new = sf.insert(_record(16, size=16))  # no cabe en overflow1 ni compactando
+
+    assert rid_new.page_id == 2  # termina en la siguiente overflow ya existente
+
+    bm.flush_all()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=4)
+    frame = bm2.pin(1)
+    reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+    bm2.unpin(1, dirty=False)
+    dm2.close()
+
+    assert reclaimable == 0

@@ -60,8 +60,10 @@ class SequentialFile(FileOrganization):
         frame = self._buffer_manager.pin(main_id)
         body = seqpage.body(frame)
         slot = slotted.insert_record(body, data)
-        if slot is None:
+        compacted = False
+        if slot is None and slotted.reclaimable_space(body) > 0:
             slotted.compact(body)
+            compacted = True
             slot = slotted.insert_record(body, data)
 
         if slot is not None:
@@ -70,7 +72,7 @@ class SequentialFile(FileOrganization):
             self._buffer_manager.unpin(main_id, dirty=True)
             return rid
 
-        self._buffer_manager.unpin(main_id, dirty=False)
+        self._buffer_manager.unpin(main_id, dirty=compacted)
 
         if not in_range:
             new_main = self._new_page(seqpage.MAIN)
@@ -109,16 +111,20 @@ class SequentialFile(FileOrganization):
         main_id: int | None = _MAIN_HEAD
         while main_id is not None:
             frame = self._buffer_manager.pin(main_id)
-            entries = self._entries(seqpage.body(frame), main_id)
-            overflow_id = seqpage.first_overflow_page_id(frame)
-            next_main = seqpage.next_page_id(frame)
-            self._buffer_manager.unpin(main_id, dirty=False)
+            try:
+                entries = self._entries(seqpage.body(frame), main_id)
+                overflow_id = seqpage.first_overflow_page_id(frame)
+                next_main = seqpage.next_page_id(frame)
+            finally:
+                self._buffer_manager.unpin(main_id, dirty=False)
 
             while overflow_id is not None:
                 frame = self._buffer_manager.pin(overflow_id)
-                entries += self._entries(seqpage.body(frame), overflow_id)
-                next_overflow = seqpage.next_page_id(frame)
-                self._buffer_manager.unpin(overflow_id, dirty=False)
+                try:
+                    entries += self._entries(seqpage.body(frame), overflow_id)
+                    next_overflow = seqpage.next_page_id(frame)
+                finally:
+                    self._buffer_manager.unpin(overflow_id, dirty=False)
                 overflow_id = next_overflow
 
             entries.sort(key=lambda entry: (entry[0], entry[1], entry[2]))
@@ -155,8 +161,10 @@ class SequentialFile(FileOrganization):
             frame = self._buffer_manager.pin(current)
             body = seqpage.body(frame)
             slot = slotted.insert_record(body, data)
-            if slot is None:
+            compacted = False
+            if slot is None and slotted.reclaimable_space(body) > 0:
                 slotted.compact(body)
+                compacted = True
                 slot = slotted.insert_record(body, data)
 
             if slot is not None:
@@ -166,7 +174,7 @@ class SequentialFile(FileOrganization):
                 return rid
 
             next_overflow = seqpage.next_page_id(frame)
-            self._buffer_manager.unpin(current, dirty=False)
+            self._buffer_manager.unpin(current, dirty=compacted)
 
             if next_overflow is None:
                 new_overflow = self._new_page(seqpage.OVERFLOW)
@@ -209,15 +217,19 @@ class SequentialFile(FileOrganization):
 
     def _bucket_max(self, main_id: int) -> Any:
         frame = self._buffer_manager.pin(main_id)
-        keys = self._body_keys(seqpage.body(frame))
-        overflow_id = seqpage.first_overflow_page_id(frame)
-        self._buffer_manager.unpin(main_id, dirty=False)
+        try:
+            keys = self._body_keys(seqpage.body(frame))
+            overflow_id = seqpage.first_overflow_page_id(frame)
+        finally:
+            self._buffer_manager.unpin(main_id, dirty=False)
 
         while overflow_id is not None:
             frame = self._buffer_manager.pin(overflow_id)
-            keys += self._body_keys(seqpage.body(frame))
-            next_overflow = seqpage.next_page_id(frame)
-            self._buffer_manager.unpin(overflow_id, dirty=False)
+            try:
+                keys += self._body_keys(seqpage.body(frame))
+                next_overflow = seqpage.next_page_id(frame)
+            finally:
+                self._buffer_manager.unpin(overflow_id, dirty=False)
             overflow_id = next_overflow
 
         return max(keys) if keys else None
