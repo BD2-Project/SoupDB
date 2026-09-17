@@ -22,7 +22,7 @@ def test_parse_select_star_is_case_insensitive() -> None:
 
 
 def test_parse_single_column_select() -> None:
-    stmt = parse("SELECT * FROM papers")
+    stmt = parse("SELECT titulo FROM papers")
     assert isinstance(stmt, SelectStatement)
 
 

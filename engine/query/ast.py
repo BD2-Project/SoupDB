@@ -1,15 +1,4 @@
-"""SQL abstract syntax tree nodes for query processing.
-
-Nodes are grouped in three families:
-
-- :class:`Statement`: any top-level SQL command (SELECT, INSERT, DELETE,
-  CREATE TABLE).
-- :class:`Expr`: expressions used in projections and predicates.
-- Helper nodes (``SelectColumn``, ``OrderByItem``, ``ColumnDef``) that
-  decorate statements.
-
-All nodes are plain data containers; no logic lives here.
-"""
+"""SQL abstract syntax tree nodes for query processing."""
 
 from dataclasses import dataclass
 from enum import Enum

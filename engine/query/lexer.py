@@ -1,10 +1,4 @@
-"""SQL tokenizer.
-
-Turns a SQL string into a list of :class:`engine.query.tokens.Token`. The
-lexer is keyword-aware (keywords are normalized to uppercase), recognizes
-single-quoted string literals, integer and float numbers, and the comparison
-operators required by the query language.
-"""
+"""SQL tokenizer"""
 
 from engine.query.errors import QueryParseError
 from engine.query.tokens import Token, TokenKind
@@ -81,11 +75,19 @@ def _scan_identifier(sql: str, i: int) -> tuple[str, int]:
 
 
 def _scan_number(sql: str, i: int) -> tuple[str, int]:
-    chars: list[str] = []
-    while i < len(sql) and (sql[i] in _DIGITS or sql[i] == "."):
-        chars.append(sql[i])
+    start = i
+    while i < len(sql) and sql[i] in _DIGITS:
         i += 1
-    return "".join(chars), i
+    
+    if i < len(sql) and sql[i] == ".":
+        i += 1
+        while i < len(sql) and sql[i] in _DIGITS:
+            i += 1
+
+    if i < len(sql) and (sql[i] == "." or _is_identifier_start(sql[i])):
+        raise QueryParseError(f"invalid number literal at position {start}")
+
+    return sql[start:i], i
 
 
 def tokenize(sql: str) -> list[Token]:

@@ -157,8 +157,11 @@ class _Parser:
         type_name = self._column_type(type_token.value)
         length = None
         if type_name is ColumnType.VARCHAR and self._match_kind(TokenKind.LPAREN):
-            length = int(self._expect_kind(TokenKind.NUMBER).value)
-            self._expect_kind(TokenKind.RPAREN)
+            length_token = self._expect_kind(TokenKind.NUMBER)
+            if "." in length_token.value:
+                raise QueryParseError(
+                    f"VARCHAR length must be an interger at position {length_token.position}")
+            length = int(length_token.value)
         return ColumnDef(name=name, type_name=type_name, length=length)
 
     @staticmethod
@@ -260,12 +263,22 @@ class _Parser:
     def _parse_boolean_expression(self) -> Expr:
         """Parse a WHERE predicate, which must be a boolean-capable node."""
         expr = self._parse_expression()
-        if isinstance(expr, (ColumnRef, Literal)):
+        if not self._is_boolean_expression(expr):
             token = self._peek()
             raise QueryParseError(
-                f"expected comparison at position {token.position}, got {token.value!r}"
+                f"expected boolean expression at position {token.position}, got {token.value!r}"
             )
         return expr
+
+    @staticmethod
+    def _is_boolean_expression(expr: Expr) -> bool:
+        if isinstance(expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr)):
+            return True
+        if isinstance(expr, NotExpr):
+            return _Parser._is_boolean_expression(expr.operand)
+        if isinstance(expr, LogicalExpr):
+            return (_Parser._is_boolean_expression(expr.left) and _Parser._is_boolean_expression(expr.right))
+        return False
 
     def _parse_or(self) -> Expr:
         left = self._parse_and()
@@ -327,7 +340,10 @@ class _Parser:
         self._expect_kind(TokenKind.LPAREN)
         distinct = self._match_keyword("DISTINCT")
         arg = None
-        if not self._match_kind(TokenKind.STAR):
+        if self._match_kind(TokenKind.STAR):
+            if name != "COUNT" or distinct:
+                raise QueryParseError("only COUNT(*) is supported")
+        else:
             arg = self._parse_expression()
         self._expect_kind(TokenKind.RPAREN)
         return FunctionExpr(name=name, arg=arg, distinct=distinct)
