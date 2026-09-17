@@ -160,7 +160,8 @@ class _Parser:
             length_token = self._expect_kind(TokenKind.NUMBER)
             if "." in length_token.value:
                 raise QueryParseError(
-                    f"VARCHAR length must be an integer at position {length_token.position}")
+                    f"VARCHAR length must be an integer at position {length_token.position}"
+                )
             length = int(length_token.value)
             self._expect_kind(TokenKind.RPAREN)
         return ColumnDef(name=name, type_name=type_name, length=length)
@@ -278,9 +279,9 @@ class _Parser:
         if isinstance(expr, NotExpr):
             return _Parser._is_boolean_expression(expr.operand)
         if isinstance(expr, LogicalExpr):
-            return _Parser._is_boolean_expression(
-                expr.left
-            ) and _Parser._is_boolean_expression(expr.right)
+            return _Parser._is_boolean_expression(expr.left) and _Parser._is_boolean_expression(
+                expr.right
+            )
         return False
 
     def _parse_or(self) -> Expr:

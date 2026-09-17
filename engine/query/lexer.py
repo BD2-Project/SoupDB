@@ -78,7 +78,7 @@ def _scan_number(sql: str, i: int) -> tuple[str, int]:
     start = i
     while i < len(sql) and sql[i] in _DIGITS:
         i += 1
-    
+
     if i < len(sql) and sql[i] == ".":
         i += 1
         while i < len(sql) and sql[i] in _DIGITS:
