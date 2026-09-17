@@ -278,7 +278,9 @@ class _Parser:
         if isinstance(expr, NotExpr):
             return _Parser._is_boolean_expression(expr.operand)
         if isinstance(expr, LogicalExpr):
-            return (_Parser._is_boolean_expression(expr.left) and _Parser._is_boolean_expression(expr.right))
+            return _Parser._is_boolean_expression(
+                expr.left
+            ) and _Parser._is_boolean_expression(expr.right)
         return False
 
     def _parse_or(self) -> Expr:
