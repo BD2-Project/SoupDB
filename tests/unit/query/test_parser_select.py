@@ -15,6 +15,18 @@ def test_parse_select_star_from_table() -> None:
     assert stmt.where is None
 
 
+def test_parse_select_star_with_trailing_semicolon() -> None:
+    stmt = parse("SELECT * FROM papers;")
+    assert isinstance(stmt, SelectStatement)
+    assert stmt.table == "papers"
+    assert stmt.columns == ()
+
+
+def test_parse_select_rejects_double_semicolon() -> None:
+    with pytest.raises(QueryParseError):
+        parse("SELECT * FROM papers;;")
+
+
 def test_parse_select_star_is_case_insensitive() -> None:
     stmt = parse("select * from papers")
     assert isinstance(stmt, SelectStatement)

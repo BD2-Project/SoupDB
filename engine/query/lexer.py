@@ -20,6 +20,8 @@ _KEYWORDS = {
     "ASC",
     "DESC",
     "DISTINCT",
+    "TRUE",
+    "FALSE",
     "INSERT",
     "INTO",
     "VALUES",

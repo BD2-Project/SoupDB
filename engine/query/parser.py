@@ -98,6 +98,7 @@ class _Parser:
         return self._advance()
 
     def _error_if_not_eof(self) -> None:
+        self._match_kind(TokenKind.SEMICOLON)
         token = self._peek()
         if token.kind is not TokenKind.EOF:
             raise QueryParseError(f"unexpected token {token.value!r} at position {token.position}")
@@ -154,9 +155,10 @@ class _Parser:
     def _parse_column_def(self) -> ColumnDef:
         name = self._expect_kind(TokenKind.IDENTIFIER).value
         type_token = self._expect_kind(TokenKind.IDENTIFIER)
-        type_name = self._column_type(type_token.value)
+        type_name = self._column_type(type_token.value, type_token.position)
         length = None
-        if type_name is ColumnType.VARCHAR and self._match_kind(TokenKind.LPAREN):
+        if type_name is ColumnType.VARCHAR:
+            self._expect_kind(TokenKind.LPAREN)
             length_token = self._expect_kind(TokenKind.NUMBER)
             if "." in length_token.value:
                 raise QueryParseError(
@@ -167,11 +169,13 @@ class _Parser:
         return ColumnDef(name=name, type_name=type_name, length=length)
 
     @staticmethod
-    def _column_type(raw: str) -> ColumnType:
+    def _column_type(raw: str, position: int) -> ColumnType:
         try:
             return ColumnType(raw.upper())
         except ValueError:
-            raise QueryParseError(f"unknown column type {raw.upper()!r}") from None
+            raise QueryParseError(
+                f"unknown column type {raw.upper()!r} at position {position}"
+            ) from None
 
     def _parse_value_rows(self) -> tuple[tuple[Expr, ...], ...]:
         rows = [self._parse_value_row()]
@@ -344,9 +348,12 @@ class _Parser:
         self._expect_kind(TokenKind.LPAREN)
         distinct = self._match_keyword("DISTINCT")
         arg = None
-        if self._match_kind(TokenKind.STAR):
+        if self._check_kind(TokenKind.STAR):
+            star_token = self._advance()
             if name != "COUNT" or distinct:
-                raise QueryParseError("only COUNT(*) is supported")
+                raise QueryParseError(
+                    f"only COUNT(*) is supported at position {star_token.position}"
+                )
         else:
             arg = self._parse_expression()
         self._expect_kind(TokenKind.RPAREN)
@@ -360,6 +367,12 @@ class _Parser:
 
         if self._match_kind(TokenKind.STRING):
             return Literal(token.value)
+
+        if self._match_keyword("TRUE"):
+            return Literal(True)
+
+        if self._match_keyword("FALSE"):
+            return Literal(False)
 
         if self._check_keyword_in(_AGGREGATES) and self._checks_lparen_next():
             return self._parse_function_call()

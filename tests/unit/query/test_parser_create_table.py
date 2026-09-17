@@ -47,3 +47,8 @@ def test_create_table_missing_columns_raises() -> None:
 def test_create_table_unknown_type_raises() -> None:
     with pytest.raises(QueryParseError):
         parse("CREATE TABLE papers (id MYTYPE)")
+
+
+def test_create_table_varchar_without_length_raises() -> None:
+    with pytest.raises(QueryParseError):
+        parse("CREATE TABLE papers (titulo VARCHAR)")

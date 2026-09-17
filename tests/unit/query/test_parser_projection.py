@@ -55,3 +55,11 @@ def test_select_distinct_star() -> None:
 def test_select_literal_projection() -> None:
     stmt = parse("SELECT 1 FROM papers")
     assert stmt.columns == (SelectColumn(Literal(1)),)
+
+
+def test_select_boolean_literals() -> None:
+    stmt = parse("SELECT TRUE, FALSE FROM papers")
+    assert stmt.columns == (
+        SelectColumn(Literal(True)),
+        SelectColumn(Literal(False)),
+    )

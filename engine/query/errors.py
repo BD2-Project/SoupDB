@@ -1,13 +1,10 @@
 """Query processing own exceptions.
 
-These subscribe :class:`engine.common.errors.SoupDBError` so the engine keeps
-its "no bare Exception" rule while keeping the query domain decoupled from
-``common/`` (frozen zone). Can be moved to ``common/errors.py`` by team
-agreement.
+``QueryParseError`` is defined in :mod:`engine.common.errors` (canonical path
+per ``docs/contratos.md``) and re-exported here so the query domain can import
+it without a second source of truth.
 """
 
-from engine.common.errors import SoupDBError
+from engine.common.errors import QueryParseError
 
-
-class QueryParseError(SoupDBError):
-    """Invalid SQL syntax found while tokenizing or parsing."""
+__all__ = ["QueryParseError"]
