@@ -122,6 +122,22 @@ def test_where_bare_identifier_raises() -> None:
         parse_where("a")
 
 
+def test_where_boolean_literal_true() -> None:
+    expr = parse_where("TRUE")
+    assert expr == Literal(True)
+
+
+def test_where_boolean_literal_false() -> None:
+    expr = parse_where("FALSE")
+    assert expr == Literal(False)
+
+
+def test_where_not_boolean_literal() -> None:
+    expr = parse_where("NOT FALSE")
+    assert isinstance(expr, NotExpr)
+    assert expr.operand == Literal(False)
+
+
 def test_where_literal_only_raises() -> None:
     with pytest.raises(QueryParseError):
         parse_where("1 ==")

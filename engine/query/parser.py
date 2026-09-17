@@ -280,6 +280,8 @@ class _Parser:
     def _is_boolean_expression(expr: Expr) -> bool:
         if isinstance(expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr)):
             return True
+        if isinstance(expr, Literal) and isinstance(expr.value, bool):
+            return True
         if isinstance(expr, NotExpr):
             return _Parser._is_boolean_expression(expr.operand)
         if isinstance(expr, LogicalExpr):

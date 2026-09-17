@@ -25,7 +25,8 @@ class Token:
     """A lexical unit with its position in the source string.
 
     ``value`` holds the raw source text, except keywords which are normalized
-    to uppercase. ``position`` is the offset of the first character.
+    to uppercase and string literals which store the unquoted content.
+    ``position`` is the offset of the first character.
     """
 
     kind: TokenKind
