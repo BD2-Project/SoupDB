@@ -50,6 +50,7 @@ from engine.query.operators import (
     TableScan,
 )
 from engine.storage.base import FileOrganization
+from engine.storage.disk_manager import DiskManager
 
 
 @dataclass(frozen=True)
@@ -81,28 +82,31 @@ def plan(statement: Statement, catalog: Any) -> Plan:
 def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
+    # Si el contrato del catálogo llega a exponer su DiskManager, los planes
+    # reportan I/O real en explain(); sin él las métricas de disco son cero.
+    disk_manager = getattr(catalog, "disk_manager", None)
     aggregates = _collect_aggregates(statement)
     grouped = bool(statement.group_by) or bool(aggregates)
     if grouped and not statement.columns:
         raise QueryExecutionError(
             "SELECT * cannot be combined with GROUP BY or aggregate functions"
         )
-    root: Operator = _scan_or_index(catalog, statement, file_org, schema)
+    root: Operator = _scan_or_index(catalog, statement, file_org, schema, disk_manager)
     if statement.where is not None:
         _validate_columns(statement.where, schema)
-        root = Filter(root, statement.where, schema)
+        root = Filter(root, statement.where, schema, disk_manager)
     if grouped:
-        root = Aggregate(root, statement.group_by, aggregates)
+        root = Aggregate(root, statement.group_by, aggregates, disk_manager)
     if statement.order_by:
         order_by = _resolve_aggregate_order_by(statement.order_by, aggregates)
         for item in order_by:
             _validate_columns(item.expr, root.schema)
-        root = Sort(root, order_by)
+        root = Sort(root, order_by, disk_manager=disk_manager)
     if statement.columns:
         selections = _resolve_aggregate_projections(statement.columns, aggregates)
-        root = Project(root, selections)
+        root = Project(root, selections, disk_manager)
     if statement.distinct:
-        root = Distinct(root)
+        root = Distinct(root, None, disk_manager)
     return Plan(statement=statement, root=root, output_schema=root.schema)
 
 
@@ -141,17 +145,18 @@ def _scan_or_index(
     statement: SelectStatement,
     file_org: FileOrganization,
     schema: Schema,
+    disk_manager: DiskManager | None,
 ) -> Operator:
     """Pick the access path: index leaf when the WHERE allows it, else scan."""
     try:
         index_map = catalog.indexes(statement.table)
     except (AttributeError, NotImplementedError):
-        return TableScan(file_org, schema)
+        return TableScan(file_org, schema, disk_manager)
     if not index_map:
-        return TableScan(file_org, schema)
+        return TableScan(file_org, schema, disk_manager)
     where = statement.where
     if where is None:
-        return TableScan(file_org, schema)
+        return TableScan(file_org, schema, disk_manager)
     if (
         isinstance(where, CompareExpr)
         and where.op == "="
@@ -160,7 +165,7 @@ def _scan_or_index(
     ):
         index = index_map.get(where.left.name)
         if index is not None:
-            return IndexLookup(index, file_org.fetch, where.right.value, schema)
+            return IndexLookup(index, file_org.fetch, where.right.value, schema, disk_manager)
     if (
         isinstance(where, BetweenExpr)
         and isinstance(where.value, ColumnRef)
@@ -169,8 +174,10 @@ def _scan_or_index(
     ):
         index = index_map.get(where.value.name)
         if index is not None and index.supports_range:
-            return IndexRangeScan(index, file_org.fetch, where.lo.value, where.hi.value, schema)
-    return TableScan(file_org, schema)
+            return IndexRangeScan(
+                index, file_org.fetch, where.lo.value, where.hi.value, schema, disk_manager
+            )
+    return TableScan(file_org, schema, disk_manager)
 
 
 def _collect_aggregates(statement: SelectStatement) -> tuple[FunctionExpr, ...]:

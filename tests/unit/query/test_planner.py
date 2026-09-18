@@ -1,11 +1,14 @@
 """Tests for the query planner."""
 
+import pathlib
+
 import pytest
 
 from engine.common.errors import QueryExecutionError
 from engine.common.schema import ColumnDef, ColumnType
 from engine.query.parser import parse
 from engine.query.planner import Plan, plan
+from engine.storage.disk_manager import DiskManager
 from tests.fakes.fake_catalog import FakeCatalog
 from tests.fakes.fake_index import FakeIndex
 
@@ -106,6 +109,15 @@ def test_plan_star_with_group_by_raises() -> None:
 def test_plan_select_unknown_table_raises() -> None:
     with pytest.raises(QueryExecutionError):
         plan_select("SELECT * FROM nope", make_catalog())
+
+
+def test_plan_select_disk_manager_propagated(tmp_path: pathlib.Path) -> None:
+    catalog = make_catalog()
+    catalog.disk_manager = DiskManager(tmp_path / "db.bin", page_size=4096)
+    tree = plan_select("SELECT anio FROM papers WHERE anio = 2020", catalog).root.explain()
+    assert tree.op == "Project"
+    assert tree.disk_reads == 0
+    assert tree.disk_writes == 0
 
 
 def test_plan_select_unknown_column_in_where_raises() -> None:
