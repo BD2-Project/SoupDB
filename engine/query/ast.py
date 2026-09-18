@@ -124,6 +124,29 @@ class OrderByItem:
 
 
 @dataclass(frozen=True)
+class HavingClause:
+    """Filter applied to grouped rows, ``HAVING expr``."""
+
+    expr: Expr
+
+
+@dataclass(frozen=True)
+class LimitClause:
+    """``LIMIT n`` with optional ``OFFSET m``."""
+
+    limit: Literal
+    offset: Literal | None = None
+
+
+@dataclass(frozen=True)
+class JoinClause:
+    """A JOIN against ``table`` on predicate ``on``."""
+
+    table: str
+    on: Expr
+
+
+@dataclass(frozen=True)
 class SelectStatement(Statement):
     """A SELECT query with optional WHERE, GROUP BY and ORDER BY clauses."""
 

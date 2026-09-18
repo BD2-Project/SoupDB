@@ -10,10 +10,13 @@ from engine.query.ast import (
     CreateTableStatement,
     DeleteStatement,
     FunctionExpr,
+    HavingClause,
     InExpr,
     InsertStatement,
     IsNullExpr,
+    JoinClause,
     LikeExpr,
+    LimitClause,
     Literal,
     LogicalExpr,
     NotExpr,
@@ -126,3 +129,29 @@ def test_is_null_expression() -> None:
     assert not_null.negated is True
     assert null == IsNullExpr(ColumnRef("titulo"))
     assert null != not_null
+
+
+def test_having_clause_shape() -> None:
+    having = HavingClause(
+        CompareExpr(FunctionExpr("COUNT", ColumnRef("id")), ">", Literal(10)),
+    )
+    assert having.expr.op == ">"
+    assert having == HavingClause(having.expr)
+
+
+def test_limit_clause_shape() -> None:
+    limit_only = LimitClause(limit=Literal(10))
+    limit_offset = LimitClause(limit=Literal(10), offset=Literal(20))
+    assert limit_only.limit == Literal(10)
+    assert limit_only.offset is None
+    assert limit_offset.offset == Literal(20)
+    assert limit_only == LimitClause(limit=Literal(10))
+    assert limit_only != limit_offset
+
+
+def test_join_clause_shape() -> None:
+    on_expr = CompareExpr(ColumnRef("p.author_id"), "=", ColumnRef("a.id"))
+    join = JoinClause("authors", on_expr)
+    assert join.table == "authors"
+    assert isinstance(join.on, CompareExpr)
+    assert join == JoinClause("authors", on_expr)
