@@ -10,13 +10,21 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from engine.common.errors import UnsupportedOperation
 from engine.common.rid import RID
+from engine.indexes.extendible_hash import ExtendibleHash
 from tests.fakes.fake_index import FakeIndex
 
 
-@pytest.fixture(params=[FakeIndex])
+def _build(kind, tmp_path):
+    if kind is ExtendibleHash:
+        return ExtendibleHash.open(tmp_path / "idx.db")
+    return kind()
+
+
+@pytest.fixture(params=[FakeIndex, ExtendibleHash])
 def index(request, tmp_path):
-    idx = request.param()
+    idx = _build(request.param, tmp_path)
     yield idx
     idx.close()
 
@@ -52,9 +60,28 @@ def test_remove_all_under_key(index) -> None:
     assert index.search(7) == []
 
 
-@pytest.mark.skip(reason="requires a disk-backed index (BPlusTree, ExtendibleHash)")
-def test_persistence(index, tmp_path) -> None:
-    """Cerrar, reabrir desde el mismo path y verificar que los datos siguen ahí."""
+def test_persistence(tmp_path) -> None:
+    """Cerrar, reabrir desde el mismo path y verificar que los datos siguen ahí.
+
+    Solo aplica a los índices en disco: FakeIndex vive en memoria.
+    """
+    idx = ExtendibleHash.open(tmp_path / "persist.db")
+    rid = RID(page_id=4, slot=2)
+    idx.insert("chunks", rid)
+    idx.insert(11, RID(page_id=1, slot=1))
+    idx.close()
+
+    reopened = ExtendibleHash.open(tmp_path / "persist.db")
+    assert reopened.search("chunks") == [rid]
+    assert reopened.search(11) == [RID(page_id=1, slot=1)]
+    reopened.close()
+
+
+def test_range_search_is_rejected_when_unsupported(index) -> None:
+    if index.supports_range:
+        pytest.skip("el índice soporta rangos")
+    with pytest.raises(UnsupportedOperation):
+        index.range_search(0, 10)
 
 
 @given(st.lists(st.integers(min_value=0, max_value=1000), max_size=200))
