@@ -152,15 +152,10 @@ Evalúa el efecto del límite de memoria sobre:
 
 Los algoritmos están implementados de forma independiente de la capa SQL.
 
-Actualmente:
+En la rama actual el stack de consultas (lexer, parser, planner, executor y
+operadores volcano) ya consume estas estructuras: el planner selecciona entre
+sequential scan, index lookup/range scan y el modo spill de Sort/Aggregate
+activándose cuando el plan incluye un `memory_limit_bytes`.
 
-* `engine/query/lexer.py`
-* `engine/query/parser.py`
-* `engine/query/planner.py`
-* `engine/query/executor.py`
-
-todavía no contienen una implementación completa en `dev`.
-
-Por esta razón, la selección automática de estas estructuras y algoritmos
-desde sentencias SQL deberá integrarse cuando el parser, planner y executor
-del equipo estén disponibles.
+La integración está lista para pruebas locales con catálogos fakes. El
+contrato real del catálogo se cerrará con el equipo antes de la integración.
