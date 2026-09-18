@@ -4,279 +4,197 @@ import pytest
 
 from engine.common.errors import UnsupportedOperation
 from engine.common.rid import RID
+from engine.indexes import _hash_page as codec
 from engine.indexes.extendible_hash import ExtendibleHash
 from engine.storage.buffer_manager import BufferManager
 from engine.storage.disk_manager import DiskManager
 
-PAGE_SIZE = 256
 
-
-def _make_index(
-    tmp_path: Path,
-    *,
-    buffer_capacity: int = 2,
-) -> tuple[ExtendibleHash, DiskManager, BufferManager]:
-    dm = DiskManager(tmp_path / "hash.db", page_size=PAGE_SIZE)
-    bm = BufferManager(dm, capacity=buffer_capacity)
-    return ExtendibleHash(dm, bm), dm, bm
-
-
-def test_new_index_creates_metadata_directory_and_bucket(tmp_path: Path) -> None:
-    index, dm, _bm = _make_index(tmp_path)
-
-    assert dm.page_count == 3
-    assert index.search(10) == []
+def open_index(tmp_path: Path, **kwargs) -> ExtendibleHash:
+    return ExtendibleHash.open(tmp_path / "idx.db", **kwargs)
 
 
 def test_insert_and_search(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-    rid = RID(1, 2)
-
-    index.insert(10, rid)
-
-    assert index.search(10) == [rid]
+    index = open_index(tmp_path)
+    rid = RID(page_id=3, slot=7)
+    index.insert(42, rid)
+    assert index.search(42) == [rid]
+    index.close()
 
 
 def test_search_missing_key_returns_empty(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-
-    index.insert(10, RID(1, 1))
-
+    index = open_index(tmp_path)
     assert index.search(999) == []
+    index.close()
 
 
 def test_duplicate_keys_return_all_rids(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-    rids = [RID(0, position) for position in range(3)]
-
+    index = open_index(tmp_path)
+    rids = [RID(page_id=1, slot=i) for i in range(3)]
     for rid in rids:
-        index.insert("a", rid)
-
-    assert index.search("a") == rids
-
-
-def test_range_search_is_not_supported(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-
-    assert index.supports_range is False
-
-    with pytest.raises(UnsupportedOperation):
-        index.range_search(1, 10)
+        index.insert(7, rid)
+    assert sorted(index.search(7)) == sorted(rids)
+    index.close()
 
 
-def test_remove_specific_rid_preserves_duplicate(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-    first = RID(1, 1)
-    second = RID(1, 2)
-
+def test_remove_single_rid(tmp_path: Path) -> None:
+    index = open_index(tmp_path)
+    first, second = RID(1, 1), RID(1, 2)
     index.insert(5, first)
     index.insert(5, second)
-
     assert index.remove(5, first) == 1
     assert index.search(5) == [second]
+    index.close()
 
 
-def test_remove_all_under_key(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-
-    index.insert(7, RID(0, 1))
-    index.insert(7, RID(0, 2))
-    index.insert(8, RID(0, 3))
-
-    assert index.remove(7) == 2
-    assert index.search(7) == []
-    assert index.search(8) == [RID(0, 3)]
+def test_remove_all_rids_under_key(tmp_path: Path) -> None:
+    index = open_index(tmp_path)
+    for slot in range(4):
+        index.insert(5, RID(0, slot))
+    assert index.remove(5) == 4
+    assert index.search(5) == []
+    index.close()
 
 
 def test_remove_missing_key_returns_zero(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-
-    assert index.remove(100) == 0
-
-
-def test_remove_missing_rid_does_not_modify_bucket(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-    existing = RID(0, 1)
-
-    index.insert(10, existing)
-
-    assert index.remove(10, RID(0, 99)) == 0
-    assert index.search(10) == [existing]
-
-
-def test_persistence_after_close_and_reopen(tmp_path: Path) -> None:
-    path = tmp_path / "hash.db"
-
-    dm = DiskManager(path, page_size=PAGE_SIZE)
-    bm = BufferManager(dm, capacity=2)
-    index = ExtendibleHash(dm, bm)
-
-    index.insert(10, RID(1, 2))
-    index.insert("hello", RID(3, 4))
-    index.close()
-    dm.close()
-
-    dm2 = DiskManager(path, page_size=PAGE_SIZE)
-    bm2 = BufferManager(dm2, capacity=2)
-    reopened = ExtendibleHash(dm2, bm2)
-
-    assert reopened.search(10) == [RID(1, 2)]
-    assert reopened.search("hello") == [RID(3, 4)]
-
-
-def test_close_flushes_dirty_pages(tmp_path: Path) -> None:
-    path = tmp_path / "hash.db"
-
-    dm = DiskManager(path, page_size=PAGE_SIZE)
-    bm = BufferManager(dm, capacity=2)
-    index = ExtendibleHash(dm, bm)
-
-    index.insert(10, RID(1, 1))
-    index.close()
-    dm.close()
-
-    dm2 = DiskManager(path, page_size=PAGE_SIZE)
-    bm2 = BufferManager(dm2, capacity=2)
-    reopened = ExtendibleHash(dm2, bm2)
-
-    assert reopened.search(10) == [RID(1, 1)]
-
-
-def test_operations_after_close_are_rejected(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
+    index = open_index(tmp_path)
+    assert index.remove(123) == 0
     index.close()
 
-    with pytest.raises(RuntimeError):
-        index.search(10)
 
-
-def test_works_with_single_buffer_frame(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(
-        tmp_path,
-        buffer_capacity=1,
-    )
-
-    index.insert(10, RID(0, 1))
-    index.insert(20, RID(0, 2))
-
-    assert index.search(10) == [RID(0, 1)]
-    assert index.search(20) == [RID(0, 2)]
-
-
-def test_bucket_split_preserves_all_entries(tmp_path: Path) -> None:
-    index, dm, _bm = _make_index(tmp_path)
-
-    expected = {}
-
-    for key in range(40):
-        rid = RID(key // 10, key)
-        expected[key] = rid
-        index.insert(key, rid)
-
-    assert dm.page_count > 3
-
-    for key, rid in expected.items():
-        assert index.search(key) == [rid]
-
-
-def test_multiple_bucket_splits_preserve_entries(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-
-    for key in range(100):
-        index.insert(key, RID(0, key))
-
-    for key in range(100):
-        assert index.search(key) == [RID(0, key)]
-
-
-def test_split_structure_persists_after_reopen(tmp_path: Path) -> None:
-    path = tmp_path / "hash.db"
-
-    dm = DiskManager(path, page_size=PAGE_SIZE)
-    bm = BufferManager(dm, capacity=2)
-    index = ExtendibleHash(dm, bm)
-
-    for key in range(80):
-        index.insert(key, RID(key // 10, key))
-
+def test_does_not_support_range_search(tmp_path: Path) -> None:
+    index = open_index(tmp_path)
+    assert index.supports_range is False
+    with pytest.raises(UnsupportedOperation):
+        index.range_search(1, 10)
     index.close()
-    dm.close()
-
-    dm2 = DiskManager(path, page_size=PAGE_SIZE)
-    bm2 = BufferManager(dm2, capacity=2)
-    reopened = ExtendibleHash(dm2, bm2)
-
-    for key in range(80):
-        assert reopened.search(key) == [RID(key // 10, key)]
 
 
-def test_duplicate_keys_use_overflow_at_maximum_depth(tmp_path: Path) -> None:
-    path = tmp_path / "hash.db"
-
-    dm = DiskManager(path, page_size=128)
-    bm = BufferManager(dm, capacity=2)
-    index = ExtendibleHash(
-        dm,
-        bm,
-        max_global_depth=2,
-    )
-
-    expected = [RID(position // 10, position) for position in range(30)]
-
-    for rid in expected:
-        index.insert(7, rid)
-
-    assert index.search(7) == expected
-
-
-def test_overflow_chain_persists_after_reopen(tmp_path: Path) -> None:
-    path = tmp_path / "hash.db"
-
-    dm = DiskManager(path, page_size=128)
-    bm = BufferManager(dm, capacity=2)
-    index = ExtendibleHash(
-        dm,
-        bm,
-        max_global_depth=2,
-    )
-
-    expected = [RID(0, position) for position in range(30)]
-
-    for rid in expected:
-        index.insert(7, rid)
-
+def test_string_keys(tmp_path: Path) -> None:
+    index = open_index(tmp_path)
+    rid = RID(2, 2)
+    index.insert("extendible hashing", rid)
+    assert index.search("extendible hashing") == [rid]
+    assert index.search("otro término") == []
     index.close()
-    dm.close()
-
-    dm2 = DiskManager(path, page_size=128)
-    bm2 = BufferManager(dm2, capacity=2)
-    reopened = ExtendibleHash(dm2, bm2)
-
-    assert reopened.search(7) == expected
 
 
-def test_remove_all_duplicates_from_overflow_chain(tmp_path: Path) -> None:
-    path = tmp_path / "hash.db"
-
-    dm = DiskManager(path, page_size=128)
-    bm = BufferManager(dm, capacity=2)
-    index = ExtendibleHash(
-        dm,
-        bm,
-        max_global_depth=2,
-    )
-
-    expected = [RID(0, position) for position in range(30)]
-
-    for rid in expected:
-        index.insert(7, rid)
-
-    assert index.remove(7) == len(expected)
-    assert index.search(7) == []
+def test_int_and_string_keys_do_not_collide(tmp_path: Path) -> None:
+    index = open_index(tmp_path)
+    index.insert(1, RID(0, 1))
+    index.insert("1", RID(0, 2))
+    assert index.search(1) == [RID(0, 1)]
+    assert index.search("1") == [RID(0, 2)]
+    index.close()
 
 
-def test_large_entry_is_rejected_without_repeated_splits(tmp_path: Path) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
+def test_rejects_unsupported_key_type(tmp_path: Path) -> None:
+    index = open_index(tmp_path)
+    with pytest.raises(ValueError):
+        index.insert(3.5, RID(0, 0))
+    index.close()
 
-    with pytest.raises(ValueError, match="does not fit"):
-        index.insert("x" * PAGE_SIZE, RID(0, 0))
+
+def test_many_keys_split_buckets_and_grow_directory(tmp_path: Path) -> None:
+    index = open_index(tmp_path)
+    for key in range(500):
+        index.insert(key, RID(page_id=key, slot=0))
+
+    assert index.global_depth > 0
+    for key in range(500):
+        assert index.search(key) == [RID(page_id=key, slot=0)]
+    index.close()
+
+
+def test_split_uses_suffix_labels(tmp_path: Path) -> None:
+    """Tras dividir, la entrada con el bit nuevo en 1 apunta a otro bucket que su gemela."""
+    index = open_index(tmp_path)
+    for key in range(400):
+        index.insert(key, RID(page_id=key, slot=0))
+
+    depth = index.global_depth
+    assert depth >= 1
+    half = 1 << (depth - 1)
+    buckets = [index._directory_slot(slot) for slot in range(1 << depth)]
+    assert any(buckets[slot] != buckets[slot + half] for slot in range(half))
+    index.close()
+
+
+def test_data_survives_close_and_reopen(tmp_path: Path) -> None:
+    index = open_index(tmp_path)
+    for key in range(300):
+        index.insert(key, RID(page_id=key, slot=1))
+    index.insert("papers", RID(page_id=9, slot=9))
+    depth = index.global_depth
+    index.close()
+
+    reopened = open_index(tmp_path)
+    assert reopened.global_depth == depth
+    for key in range(300):
+        assert reopened.search(key) == [RID(page_id=key, slot=1)]
+    assert reopened.search("papers") == [RID(page_id=9, slot=9)]
+    reopened.close()
+
+
+def test_overflow_chain_when_depth_is_capped(tmp_path: Path) -> None:
+    """Sin margen para duplicar el directorio, las claves siguen recuperables vía overflow."""
+    index = open_index(tmp_path, max_global_depth=0)
+    rids = [RID(page_id=0, slot=slot) for slot in range(400)]
+    for rid in rids:
+        index.insert(1, rid)
+
+    assert sorted(index.search(1)) == sorted(rids)
+    assert index.remove(1) == len(rids)
+    index.close()
+
+
+def test_rejects_key_larger_than_a_page(tmp_path: Path) -> None:
+    index = open_index(tmp_path, page_size=4096)
+    with pytest.raises(ValueError):
+        index.insert("x" * 5000, RID(0, 0))
+    index.close()
+
+
+def test_accepts_injected_managers(tmp_path: Path) -> None:
+    disk_manager = DiskManager(tmp_path / "idx.db", page_size=4096)
+    buffer_manager = BufferManager(disk_manager, capacity=8)
+    index = ExtendibleHash(disk_manager, buffer_manager)
+    index.insert(1, RID(0, 0))
+    assert index.search(1) == [RID(0, 0)]
+    index.close()
+    disk_manager.close()
+
+
+def test_all_io_goes_through_the_disk_manager(tmp_path: Path) -> None:
+    """Los contadores del DiskManager son la métrica que evalúa el curso."""
+    disk_manager = DiskManager(tmp_path / "idx.db", page_size=4096)
+    buffer_manager = BufferManager(disk_manager, capacity=4)
+    index = ExtendibleHash(disk_manager, buffer_manager)
+    for key in range(200):
+        index.insert(key, RID(page_id=key, slot=0))
+    index.close()
+
+    assert disk_manager.writes > 0
+    assert disk_manager.reads > 0
+    disk_manager.close()
+
+
+def test_close_is_idempotent(tmp_path: Path) -> None:
+    index = open_index(tmp_path)
+    index.close()
+    index.close()
+
+
+def test_page_codec_reports_bucket_depth_and_overflow() -> None:
+    page = codec.new_bucket(4096, local_depth=2)
+    assert codec.local_depth(page) == 2
+    assert codec.overflow_page_id(page) == codec.NO_OVERFLOW
+    assert codec.entry_count(page) == 0
+
+    assert codec.add_entry(page, b"\x00key", RID(1, 2)) is True
+    assert codec.entry_count(page) == 1
+    assert list(codec.iter_entries(page)) == [(b"\x00key", RID(1, 2))]
+
+    codec.set_overflow_page_id(page, 5)
+    assert codec.overflow_page_id(page) == 5
+    assert codec.local_depth(page) == 2

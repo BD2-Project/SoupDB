@@ -1,395 +1,296 @@
-"""Persistent extendible-hash index."""
+"""Disk-backed extendible hashing index."""
+
+import hashlib
+import struct
+from pathlib import Path
 
 from engine.common.errors import UnsupportedOperation
 from engine.common.rid import RID
-from engine.indexes import _extendible_hash_page as codec
-from engine.indexes._stable_hash import directory_index
+from engine.indexes import _hash_page as codec
 from engine.indexes.base import Index, Key
 from engine.storage.buffer_manager import BufferManager
 from engine.storage.disk_manager import DiskManager
 
-_METADATA_PAGE_ID = 0
+#: Tope de duplicaciones del directorio; al alcanzarlo se encadenan buckets de overflow.
+HASH_GLOBAL_DEPTH_MAX = 16
+
+_INT_TAG = 0
+_STR_TAG = 1
+_INT_FORMAT = "<q"
+_MASK64 = (1 << 64) - 1
+
+
+def _encode_key(key: Key) -> bytes:
+    """Encode a key as tag + payload so int and str keys can share one index."""
+    if isinstance(key, bool):
+        raise ValueError("bool is not a valid key type")
+    if isinstance(key, int):
+        return bytes([_INT_TAG]) + struct.pack(_INT_FORMAT, key)
+    if isinstance(key, str):
+        return bytes([_STR_TAG]) + key.encode("utf-8")
+    raise ValueError(f"unsupported key type {type(key).__name__}")
+
+
+def _hash_encoded(encoded: bytes) -> int:
+    """Hash an encoded key; its low bits are the bucket label read as a suffix."""
+    if encoded[0] == _INT_TAG:
+        (value,) = struct.unpack_from(_INT_FORMAT, encoded, 1)
+        return value & _MASK64
+    # blake2b y no hash(): hash() cambia entre procesos y rompería la persistencia.
+    return int.from_bytes(hashlib.blake2b(encoded[1:], digest_size=8).digest(), "little")
 
 
 class ExtendibleHash(Index):
-    """Persistent equality index based on extendible hashing."""
+    """Extendible hashing over pages, with the directory and buckets kept on disk."""
 
     def __init__(
         self,
         disk_manager: DiskManager,
         buffer_manager: BufferManager,
         *,
-        max_global_depth: int = 16,
+        max_global_depth: int = HASH_GLOBAL_DEPTH_MAX,
     ) -> None:
-        if max_global_depth < 0 or max_global_depth > 64:
-            raise ValueError("max_global_depth must be between 0 and 64")
-
         self._disk_manager = disk_manager
         self._buffer_manager = buffer_manager
-        self._page_size = disk_manager.page_size
+        self._owns_managers = False
         self._closed = False
+        self._page_size = disk_manager.page_size
+        self._slots_per_page = codec.directory_slots_per_page(self._page_size)
 
         if disk_manager.page_count == 0:
-            self._max_global_depth = max_global_depth
-            self._initialize()
+            self._create(max_global_depth)
         else:
-            self._load_metadata()
+            self._load()
+
+    @classmethod
+    def open(
+        cls,
+        path: str | Path,
+        *,
+        page_size: int = 4096,
+        buffer_capacity: int = 64,
+        max_global_depth: int = HASH_GLOBAL_DEPTH_MAX,
+    ) -> "ExtendibleHash":
+        """Open (or create) an index at path, owning its DiskManager and BufferManager."""
+        disk_manager = DiskManager(path, page_size=page_size)
+        buffer_manager = BufferManager(disk_manager, capacity=buffer_capacity)
+        index = cls(disk_manager, buffer_manager, max_global_depth=max_global_depth)
+        index._owns_managers = True
+        return index
 
     @property
     def supports_range(self) -> bool:
         return False
 
-    def insert(self, key: Key, rid: RID) -> None:
-        self._ensure_open()
+    @property
+    def global_depth(self) -> int:
+        return self._global_depth
 
-        self._ensure_entry_fits(key, rid)
+    def insert(self, key: Key, rid: RID) -> None:
+        encoded = _encode_key(key)
+        if len(encoded) > codec.max_key_size(self._page_size):
+            raise ValueError(
+                f"key of {len(encoded)} bytes does not fit in a page of {self._page_size} bytes"
+            )
+        digest = _hash_encoded(encoded)
 
         while True:
-            bucket_page_id = self._bucket_page_id(key)
-            bucket = self._read_bucket(bucket_page_id)
+            slot = digest & self._directory_mask
+            bucket_id = self._directory_slot(slot)
 
-            updated = codec.BucketPage(
-                local_depth=bucket.local_depth,
-                overflow_page_id=bucket.overflow_page_id,
-                entries=(*bucket.entries, (key, rid)),
-            )
+            frame = self._buffer_manager.pin(bucket_id)
+            added = codec.add_entry(frame, encoded, rid)
+            local_depth = codec.local_depth(frame)
+            self._buffer_manager.unpin(bucket_id, dirty=added)
+            if added:
+                return
 
-            try:
-                encoded = codec.encode_bucket(self._page_size, updated)
-            except ValueError:
-                if bucket.local_depth >= self._max_global_depth:
-                    self._insert_into_overflow(bucket_page_id, key, rid)
-                    return
+            # Sin margen para dividir: solo queda encadenar overflow.
+            if local_depth >= self._max_depth:
+                self._insert_into_overflow(bucket_id, encoded, rid)
+                return
 
-                self._split_bucket(bucket_page_id, bucket)
-                continue
-
-            self._write_page(bucket_page_id, encoded)
-            return
+            self._split_bucket(slot, bucket_id, local_depth)
 
     def search(self, key: Key) -> list[RID]:
-        self._ensure_open()
-
-        bucket_page_id = self._bucket_page_id(key)
-        result: list[RID] = []
-
-        while bucket_page_id is not None:
-            bucket = self._read_bucket(bucket_page_id)
-
-            result.extend(rid for entry_key, rid in bucket.entries if entry_key == key)
-
-            bucket_page_id = bucket.overflow_page_id
-
-        return result
+        encoded = _encode_key(key)
+        rids: list[RID] = []
+        for page_id in self._chain(self._bucket_for(encoded)):
+            frame = self._buffer_manager.pin(page_id)
+            try:
+                rids.extend(rid for stored, rid in codec.iter_entries(frame) if stored == encoded)
+            finally:
+                self._buffer_manager.unpin(page_id, dirty=False)
+        return rids
 
     def range_search(self, lo: Key, hi: Key) -> list[RID]:
-        self._ensure_open()
+        # El planner debe elegir B+ o secuencial para un BETWEEN: simular un scan aquí
+        # escondería la diferencia que mide la comparación experimental.
         raise UnsupportedOperation("ExtendibleHash does not support range searches")
 
     def remove(self, key: Key, rid: RID | None = None) -> int:
-        self._ensure_open()
-
-        bucket_page_id = self._bucket_page_id(key)
+        encoded = _encode_key(key)
         removed = 0
-
-        while bucket_page_id is not None:
-            bucket = self._read_bucket(bucket_page_id)
-            remaining: list[tuple[Key, RID]] = []
-
-            for entry_key, entry_rid in bucket.entries:
-                should_remove = entry_key == key and (
-                    rid is None or (removed == 0 and entry_rid == rid)
-                )
-
-                if should_remove:
-                    removed += 1
-                else:
-                    remaining.append((entry_key, entry_rid))
-
-            if len(remaining) != len(bucket.entries):
-                updated = codec.BucketPage(
-                    local_depth=bucket.local_depth,
-                    overflow_page_id=bucket.overflow_page_id,
-                    entries=tuple(remaining),
-                )
-                self._write_page(
-                    bucket_page_id,
-                    codec.encode_bucket(self._page_size, updated),
-                )
-
-                if rid is not None:
-                    return removed
-
-            bucket_page_id = bucket.overflow_page_id
-
+        for page_id in self._chain(self._bucket_for(encoded)):
+            frame = self._buffer_manager.pin(page_id)
+            page_removed = codec.remove_entries(frame, encoded, rid)
+            self._buffer_manager.unpin(page_id, dirty=page_removed > 0)
+            removed += page_removed
         return removed
 
     def close(self) -> None:
         if self._closed:
             return
-
-        self._buffer_manager.flush_all()
         self._closed = True
+        self._buffer_manager.flush_all()
+        if self._owns_managers:
+            self._disk_manager.close()
 
-    def _initialize(self) -> None:
-        metadata_page_id = self._disk_manager.allocate_page()
-        directory_page_id = self._disk_manager.allocate_page()
-        bucket_page_id = self._disk_manager.allocate_page()
+    # --- internals ---------------------------------------------------------
 
-        if metadata_page_id != _METADATA_PAGE_ID:
-            raise ValueError("extendible-hash metadata page must be page 0")
+    @property
+    def _directory_mask(self) -> int:
+        return (1 << self._global_depth) - 1
+
+    def _create(self, max_global_depth: int) -> None:
+        if max_global_depth < 0:
+            raise ValueError(f"max_global_depth must be non-negative, got {max_global_depth}")
 
         self._global_depth = 0
-        self._first_directory_page_id = directory_page_id
+        self._max_depth = max_global_depth
 
-        bucket = codec.BucketPage(
-            local_depth=0,
-            overflow_page_id=None,
-            entries=(),
-        )
-        self._write_page(
-            bucket_page_id,
-            codec.encode_bucket(self._page_size, bucket),
-        )
+        metadata_id = self._disk_manager.allocate_page()
+        frame = self._buffer_manager.pin(metadata_id)
+        frame[:] = codec.new_metadata(self._page_size, global_depth=0, max_depth=max_global_depth)
+        self._buffer_manager.unpin(metadata_id, dirty=True)
 
-        directory = codec.DirectoryPage(
-            next_page_id=None,
-            bucket_page_ids=(bucket_page_id,),
-        )
-        self._write_page(
-            directory_page_id,
-            codec.encode_directory(self._page_size, directory),
-        )
+        self._directory_pages = [self._new_directory_page()]
+        self._write_directory_slot(0, self._new_bucket(local_depth=0))
+        self._flush_metadata()
 
-        self._write_metadata()
+    def _load(self) -> None:
+        frame = self._buffer_manager.pin(0)
+        try:
+            self._global_depth, self._max_depth, self._directory_pages = codec.read_metadata(frame)
+        finally:
+            self._buffer_manager.unpin(0, dirty=False)
 
-    def _load_metadata(self) -> None:
-        if self._disk_manager.page_count < 3:
-            raise ValueError("incomplete extendible-hash index file")
-
-        metadata = codec.decode_metadata(self._read_page(_METADATA_PAGE_ID))
-
-        self._global_depth = metadata.global_depth
-        self._first_directory_page_id = metadata.first_directory_page_id
-        self._max_global_depth = metadata.max_global_depth
-
-        expected_entries = 1 << self._global_depth
-        actual_entries = len(self._read_directory())
-
-        if actual_entries != expected_entries:
-            raise ValueError("extendible-hash directory size does not match global depth")
-
-    def _write_metadata(self) -> None:
-        page = codec.encode_metadata(
-            self._page_size,
+    def _flush_metadata(self) -> None:
+        frame = self._buffer_manager.pin(0)
+        codec.write_metadata(
+            frame,
             global_depth=self._global_depth,
-            first_directory_page_id=self._first_directory_page_id,
-            max_global_depth=self._max_global_depth,
+            max_depth=self._max_depth,
+            directory_pages=self._directory_pages,
         )
-        self._write_page(_METADATA_PAGE_ID, page)
+        self._buffer_manager.unpin(0, dirty=True)
 
-    def _read_directory(self) -> tuple[int, ...]:
-        page_id: int | None = self._first_directory_page_id
-        entries: list[int] = []
-
-        while page_id is not None:
-            directory = codec.decode_directory(self._read_page(page_id))
-            entries.extend(directory.bucket_page_ids)
-            page_id = directory.next_page_id
-
-        return tuple(entries)
-
-    def _directory_page_ids(self) -> list[int]:
-        page_id: int | None = self._first_directory_page_id
-        page_ids: list[int] = []
-
-        while page_id is not None:
-            page_ids.append(page_id)
-            directory = codec.decode_directory(self._read_page(page_id))
-            page_id = directory.next_page_id
-
-        return page_ids
-
-    def _write_directory(self, entries: tuple[int, ...]) -> None:
-        capacity = codec.directory_capacity(self._page_size)
-
-        chunks = [
-            entries[position : position + capacity] for position in range(0, len(entries), capacity)
-        ]
-
-        if not chunks:
-            raise ValueError("extendible-hash directory cannot be empty")
-
-        page_ids = self._directory_page_ids()
-
-        while len(page_ids) < len(chunks):
-            page_ids.append(self._disk_manager.allocate_page())
-
-        for position, chunk in enumerate(chunks):
-            next_page_id = page_ids[position + 1] if position + 1 < len(chunks) else None
-
-            directory = codec.DirectoryPage(
-                next_page_id=next_page_id,
-                bucket_page_ids=tuple(chunk),
-            )
-
-            self._write_page(
-                page_ids[position],
-                codec.encode_directory(self._page_size, directory),
-            )
-
-    def _bucket_page_id(self, key: Key) -> int:
-        directory = self._read_directory()
-        index = directory_index(key, self._global_depth)
-        return directory[index]
-
-    def _split_bucket(
-        self,
-        bucket_page_id: int,
-        bucket: codec.BucketPage,
-    ) -> None:
-        directory = list(self._read_directory())
-        old_local_depth = bucket.local_depth
-
-        if old_local_depth >= self._max_global_depth:
-            raise ValueError("maximum extendible-hash depth reached")
-
-        if old_local_depth == self._global_depth:
-            if self._global_depth >= self._max_global_depth:
-                raise ValueError("maximum extendible-hash depth reached")
-
-            directory.extend(directory)
-            self._global_depth += 1
-
-        new_local_depth = old_local_depth + 1
-        split_bit = 1 << old_local_depth
-
-        new_bucket_page_id = self._disk_manager.allocate_page()
-
-        for index, page_id in enumerate(directory):
-            if page_id == bucket_page_id and index & split_bit:
-                directory[index] = new_bucket_page_id
-
-        left_entries: list[tuple[Key, RID]] = []
-        right_entries: list[tuple[Key, RID]] = []
-
-        for entry_key, entry_rid in bucket.entries:
-            index = directory_index(entry_key, self._global_depth)
-
-            if directory[index] == bucket_page_id:
-                left_entries.append((entry_key, entry_rid))
-            else:
-                right_entries.append((entry_key, entry_rid))
-
-        left = codec.BucketPage(
-            local_depth=new_local_depth,
-            overflow_page_id=None,
-            entries=tuple(left_entries),
-        )
-        right = codec.BucketPage(
-            local_depth=new_local_depth,
-            overflow_page_id=None,
-            entries=tuple(right_entries),
-        )
-
-        self._write_page(
-            bucket_page_id,
-            codec.encode_bucket(self._page_size, left),
-        )
-        self._write_page(
-            new_bucket_page_id,
-            codec.encode_bucket(self._page_size, right),
-        )
-
-        self._write_directory(tuple(directory))
-        self._write_metadata()
-
-    def _insert_into_overflow(
-        self,
-        bucket_page_id: int,
-        key: Key,
-        rid: RID,
-    ) -> None:
-        current_page_id = bucket_page_id
-
-        while True:
-            bucket = self._read_bucket(current_page_id)
-
-            updated = codec.BucketPage(
-                local_depth=bucket.local_depth,
-                overflow_page_id=bucket.overflow_page_id,
-                entries=(*bucket.entries, (key, rid)),
-            )
-
-            try:
-                encoded = codec.encode_bucket(self._page_size, updated)
-            except ValueError:
-                if bucket.overflow_page_id is not None:
-                    current_page_id = bucket.overflow_page_id
-                    continue
-
-                overflow_page_id = self._disk_manager.allocate_page()
-
-                linked = codec.BucketPage(
-                    local_depth=bucket.local_depth,
-                    overflow_page_id=overflow_page_id,
-                    entries=bucket.entries,
-                )
-                self._write_page(
-                    current_page_id,
-                    codec.encode_bucket(self._page_size, linked),
-                )
-
-                overflow = codec.BucketPage(
-                    local_depth=bucket.local_depth,
-                    overflow_page_id=None,
-                    entries=((key, rid),),
-                )
-                self._write_page(
-                    overflow_page_id,
-                    codec.encode_bucket(self._page_size, overflow),
-                )
-                return
-
-            self._write_page(current_page_id, encoded)
-            return
-
-    def _ensure_entry_fits(self, key: Key, rid: RID) -> None:
-        probe = codec.BucketPage(
-            local_depth=0,
-            overflow_page_id=None,
-            entries=((key, rid),),
-        )
-
-        try:
-            codec.encode_bucket(self._page_size, probe)
-        except ValueError as exc:
-            raise ValueError("index entry does not fit in a hash bucket page") from exc
-
-    def _read_bucket(self, page_id: int) -> codec.BucketPage:
-        page = self._read_page(page_id)
-
-        if codec.page_type(page) != codec.PAGE_TYPE_BUCKET:
-            raise ValueError("expected extendible-hash bucket page")
-
-        return codec.decode_bucket(page)
-
-    def _read_page(self, page_id: int) -> bytes:
+    def _new_directory_page(self) -> int:
+        page_id = self._disk_manager.allocate_page()
         frame = self._buffer_manager.pin(page_id)
+        frame[:] = bytearray(self._page_size)
+        self._buffer_manager.unpin(page_id, dirty=True)
+        return page_id
 
+    def _new_bucket(self, *, local_depth: int) -> int:
+        page_id = self._disk_manager.allocate_page()
+        frame = self._buffer_manager.pin(page_id)
+        frame[:] = codec.new_bucket(self._page_size, local_depth=local_depth)
+        self._buffer_manager.unpin(page_id, dirty=True)
+        return page_id
+
+    def _directory_slot(self, slot: int) -> int:
+        page_id = self._directory_pages[slot // self._slots_per_page]
+        frame = self._buffer_manager.pin(page_id)
         try:
-            return bytes(frame)
+            return codec.read_directory_slot(frame, slot % self._slots_per_page)
         finally:
             self._buffer_manager.unpin(page_id, dirty=False)
 
-    def _write_page(self, page_id: int, data: bytes) -> None:
+    def _write_directory_slot(self, slot: int, bucket_id: int) -> None:
+        page_id = self._directory_pages[slot // self._slots_per_page]
         frame = self._buffer_manager.pin(page_id)
+        codec.write_directory_slot(frame, slot % self._slots_per_page, bucket_id)
+        self._buffer_manager.unpin(page_id, dirty=True)
 
-        try:
-            frame[:] = data
-        finally:
-            self._buffer_manager.unpin(page_id, dirty=True)
+    def _bucket_for(self, encoded: bytes) -> int:
+        return self._directory_slot(_hash_encoded(encoded) & self._directory_mask)
 
-    def _ensure_open(self) -> None:
-        if self._closed:
-            raise RuntimeError("extendible hash is closed")
+    def _chain(self, bucket_id: int) -> list[int]:
+        """Bucket page ids of a bucket, following its overflow chain."""
+        chain = []
+        page_id = bucket_id
+        while page_id != codec.NO_OVERFLOW:
+            chain.append(page_id)
+            frame = self._buffer_manager.pin(page_id)
+            try:
+                next_id = codec.overflow_page_id(frame)
+            finally:
+                self._buffer_manager.unpin(page_id, dirty=False)
+            page_id = next_id
+        return chain
+
+    def _split_bucket(self, slot: int, bucket_id: int, local_depth: int) -> None:
+        if local_depth == self._global_depth:
+            self._double_directory()
+
+        new_bucket_id = self._new_bucket(local_depth=local_depth + 1)
+
+        frame = self._buffer_manager.pin(bucket_id)
+        stay: list[tuple[bytes, RID]] = []
+        move: list[tuple[bytes, RID]] = []
+        for stored_key, stored_rid in codec.iter_entries(frame):
+            moves = (_hash_encoded(stored_key) >> local_depth) & 1
+            (move if moves else stay).append((stored_key, stored_rid))
+        codec.write_entries(frame, stay)
+        codec.set_local_depth(frame, local_depth + 1)
+        self._buffer_manager.unpin(bucket_id, dirty=True)
+
+        new_frame = self._buffer_manager.pin(new_bucket_id)
+        codec.write_entries(new_frame, move)
+        self._buffer_manager.unpin(new_bucket_id, dirty=True)
+
+        # Convención del curso: la etiqueta es sufijo; el bucket original conserva el 0
+        # antepuesto y el nuevo recibe el 1, o sea las entradas con ese bit en 1.
+        suffix = slot & ((1 << local_depth) - 1)
+        first = suffix | (1 << local_depth)
+        step = 1 << (local_depth + 1)
+        for directory_slot in range(first, 1 << self._global_depth, step):
+            self._write_directory_slot(directory_slot, new_bucket_id)
+
+    def _double_directory(self) -> None:
+        old_size = 1 << self._global_depth
+        needed_pages = -(-(old_size * 2) // self._slots_per_page)
+        if needed_pages > codec.max_directory_pages(self._page_size):
+            raise ValueError("directory does not fit in the metadata page")
+
+        while len(self._directory_pages) < needed_pages:
+            self._directory_pages.append(self._new_directory_page())
+
+        # Cada entrada nueva apunta al mismo bucket que su gemela por sufijo.
+        for directory_slot in range(old_size):
+            self._write_directory_slot(
+                directory_slot + old_size, self._directory_slot(directory_slot)
+            )
+
+        self._global_depth += 1
+        self._flush_metadata()
+
+    def _insert_into_overflow(self, bucket_id: int, encoded: bytes, rid: RID) -> None:
+        chain = self._chain(bucket_id)
+        last_id = chain[-1]
+
+        frame = self._buffer_manager.pin(last_id)
+        added = codec.add_entry(frame, encoded, rid)
+        self._buffer_manager.unpin(last_id, dirty=added)
+        if added:
+            return
+
+        overflow_id = self._new_bucket(local_depth=self._max_depth)
+        overflow_frame = self._buffer_manager.pin(overflow_id)
+        codec.add_entry(overflow_frame, encoded, rid)
+        self._buffer_manager.unpin(overflow_id, dirty=True)
+
+        frame = self._buffer_manager.pin(last_id)
+        codec.set_overflow_page_id(frame, overflow_id)
+        self._buffer_manager.unpin(last_id, dirty=True)
