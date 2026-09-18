@@ -54,7 +54,7 @@ _KEYWORDS = {
     "EXPLAIN",
 }
 
-_OPERATORS = {">=", "<=", "<>", "!=", ">", "<", "="}
+_OPERATORS = {">=", "<=", "<>", "!=", ">", "<", "=", "+", "-", "/", "%"}
 _DIGITS = set("0123456789")
 _WHITESPACE = {" ", "\t", "\r", "\n"}
 _PUNCTUATION = {

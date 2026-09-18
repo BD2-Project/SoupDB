@@ -93,9 +93,34 @@ def test_negative_number_tokens() -> None:
     assert (TokenKind.NUMBER, "-1.5") in toks
 
 
-def test_bare_minus_still_raises() -> None:
-    with pytest.raises(QueryParseError):
-        tokenize("a = 5 -")
+def test_arithmetic_operators() -> None:
+    toks = token_values("a + b - c * d / e % f")
+    ops = [v for k, v in toks if k is TokenKind.OPERATOR]
+    assert ops == ["+", "-", "/", "%"]
+    assert (TokenKind.STAR, "*") in toks
+
+
+def test_arithmetic_and_comparison_mix() -> None:
+    toks = token_values("a + 1 >= b - 2 AND c <= 3")
+    ops = [v for k, v in toks if k is TokenKind.OPERATOR]
+    assert ops == ["+", ">=", "-", "<="]
+
+
+def test_minus_operator_between_numbers() -> None:
+    toks = token_values("5 - 1")
+    assert (TokenKind.NUMBER, "5") in toks
+    assert (TokenKind.OPERATOR, "-") in toks
+    assert (TokenKind.NUMBER, "1") in toks
+
+
+def test_trailing_minus_is_operator_not_error() -> None:
+    toks = token_values("a = 5 -")
+    assert toks == [
+        (TokenKind.IDENTIFIER, "a"),
+        (TokenKind.OPERATOR, "="),
+        (TokenKind.NUMBER, "5"),
+        (TokenKind.OPERATOR, "-"),
+    ]
 
 
 def test_string_literal_single_quotes() -> None:
