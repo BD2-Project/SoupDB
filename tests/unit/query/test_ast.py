@@ -9,6 +9,7 @@ from engine.query.ast import (
     CompareExpr,
     CreateTableStatement,
     DeleteStatement,
+    ExplainStatement,
     FunctionExpr,
     HavingClause,
     InExpr,
@@ -23,6 +24,7 @@ from engine.query.ast import (
     OrderByItem,
     SelectColumn,
     SelectStatement,
+    UpdateStatement,
 )
 
 
@@ -201,3 +203,39 @@ def test_select_statement_new_fields_default() -> None:
     assert stmt.having is None
     assert stmt.limit is None
     assert stmt.joins == ()
+
+
+def test_update_statement_shape() -> None:
+    stmt = UpdateStatement(
+        table="papers",
+        assignments=(("anio", Literal(2021)), ("titulo", Literal("New"))),
+        where=CompareExpr(ColumnRef("id"), "=", Literal(1)),
+    )
+    assert stmt.table == "papers"
+    assert stmt.assignments[0] == ("anio", Literal(2021))
+    assert stmt.assignments[1] == ("titulo", Literal("New"))
+    assert stmt.where is not None
+    assert stmt == UpdateStatement(
+        table="papers",
+        assignments=(("anio", Literal(2021)), ("titulo", Literal("New"))),
+        where=CompareExpr(ColumnRef("id"), "=", Literal(1)),
+    )
+
+
+def test_explain_statement_shape() -> None:
+    inner = SelectStatement(
+        columns=(SelectColumn(ColumnRef("titulo")),),
+        table="papers",
+    )
+    stmt = ExplainStatement(sql="SELECT titulo FROM papers", statement=inner)
+    assert stmt.sql == "SELECT titulo FROM papers"
+    assert stmt.statement == inner
+    assert stmt == ExplainStatement(
+        sql="SELECT titulo FROM papers",
+        statement=inner,
+    )
+
+
+def test_explain_statement_without_parsed() -> None:
+    stmt = ExplainStatement(sql="SELECT 1")
+    assert stmt.statement is None

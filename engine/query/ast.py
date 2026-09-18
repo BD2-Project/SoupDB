@@ -180,6 +180,27 @@ class DeleteStatement(Statement):
 
 
 @dataclass(frozen=True)
+class UpdateStatement(Statement):
+    """``UPDATE table SET col = expr, ... [WHERE condition]``."""
+
+    table: str
+    assignments: tuple[tuple[str, Expr], ...]
+    where: Expr | None = None
+
+
+@dataclass(frozen=True)
+class ExplainStatement(Statement):
+    """``EXPLAIN <inner statement>``.
+
+    ``sql`` keeps the raw inner text and ``statement`` its parsed AST when
+    available, otherwise None.
+    """
+
+    sql: str
+    statement: Statement | None = None
+
+
+@dataclass(frozen=True)
 class CreateTableStatement(Statement):
     """``CREATE TABLE name (col type, ...) [ENGINE strategy]``.
 
