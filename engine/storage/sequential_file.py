@@ -98,14 +98,90 @@ class SequentialFile(FileOrganization):
             return False
 
         frame = self._buffer_manager.pin(rid.page_id)
-        removed = slotted.delete_record(seqpage.body(frame), rid.slot)
-        self._buffer_manager.unpin(rid.page_id, dirty=removed)
+        removed = False
+        try:
+            removed = slotted.delete_record(seqpage.body(frame), rid.slot)
+        finally:
+            self._buffer_manager.unpin(rid.page_id, dirty=removed)
 
-        if removed:
-            owner_main_id = self._page_owner_main[rid.page_id]
-            self._page_max_key[owner_main_id] = self._bucket_max(owner_main_id)
+        if not removed:
+            return False
 
-        return removed
+        owner_main_id = self._page_owner_main[rid.page_id]
+        self._page_max_key[owner_main_id] = self._bucket_max(owner_main_id)
+
+        reclaimable, occupied = self._global_waste_stats()
+        if self._should_reorganize_globally(reclaimable, occupied):
+            self._reorganize_globally()
+
+        return True
+
+    def _should_reorganize_globally(self, reclaimable: int, occupied: int) -> bool:
+        return occupied > 0 and reclaimable * 100 > occupied * 30
+
+    def _global_waste_stats(self) -> tuple[int, int]:
+        reclaimable_total = 0
+        occupied_total = 0
+        main_id: int | None = _MAIN_HEAD
+        while main_id is not None:
+            frame = self._buffer_manager.pin(main_id)
+            try:
+                body = seqpage.body(frame)
+                reclaimable_total += slotted.reclaimable_space(body)
+                occupied_total += self._occupied_payload_bytes(body)
+                overflow_id = seqpage.first_overflow_page_id(frame)
+                next_main = seqpage.next_page_id(frame)
+            finally:
+                self._buffer_manager.unpin(main_id, dirty=False)
+
+            while overflow_id is not None:
+                frame = self._buffer_manager.pin(overflow_id)
+                try:
+                    body = seqpage.body(frame)
+                    reclaimable_total += slotted.reclaimable_space(body)
+                    occupied_total += self._occupied_payload_bytes(body)
+                    next_overflow = seqpage.next_page_id(frame)
+                finally:
+                    self._buffer_manager.unpin(overflow_id, dirty=False)
+                overflow_id = next_overflow
+
+            main_id = next_main
+
+        return reclaimable_total, occupied_total
+
+    def _reorganize_globally(self) -> None:
+        main_id: int | None = _MAIN_HEAD
+        while main_id is not None:
+            frame = self._buffer_manager.pin(main_id)
+            dirty = False
+            try:
+                body = seqpage.body(frame)
+                if slotted.reclaimable_space(body) > 0:
+                    slotted.compact(body)
+                    dirty = True
+                overflow_id = seqpage.first_overflow_page_id(frame)
+                next_main = seqpage.next_page_id(frame)
+            finally:
+                self._buffer_manager.unpin(main_id, dirty=dirty)
+
+            while overflow_id is not None:
+                frame = self._buffer_manager.pin(overflow_id)
+                dirty = False
+                try:
+                    body = seqpage.body(frame)
+                    if slotted.reclaimable_space(body) > 0:
+                        slotted.compact(body)
+                        dirty = True
+                    next_overflow = seqpage.next_page_id(frame)
+                finally:
+                    self._buffer_manager.unpin(overflow_id, dirty=dirty)
+                overflow_id = next_overflow
+
+            main_id = next_main
+
+    def _occupied_payload_bytes(self, body: memoryview) -> int:
+        directory_end = slotted.HEADER_SIZE + slotted.slot_count(body) * slotted.SLOT_SIZE
+        return len(body) - slotted.free_space(body) - directory_end
 
     def scan(self) -> Iterator[tuple[RID, Record]]:
         main_id: int | None = _MAIN_HEAD

@@ -5,7 +5,8 @@ El proyecto tiene presentación final con preguntas. Cada decisión debe poder d
 - **Página de 4096 bytes:** coincide con el tamaño de bloque típico del sistema de archivos.
 - **RID = (page_id, slot)** en vez de offset absoluto: permite compactar dentro de la página.
 - **Clave compuesta** para índices sobre campos con duplicados.
-- **Borrado lazy y RIDs estables en el archivo secuencial:** los borrados generan tombstones y las inserciones no mueven registros vivos; no se realiza reorganización global automática.
+- **Borrado lazy + reorganización al 30%** en el archivo secuencial: el 30% se mide de forma GLOBAL (espacio reclamable / espacio ocupado en todo el archivo, no por página) y, al superarse, compacta todas las páginas con espacio reclamable. La compactación solo reordena bytes dentro de cada página; nunca mueve registros entre páginas, así que el RID `(page_id, slot)` no cambia.
+>>>>>>> parent of 54d1982 (Revert "feat(storage): reorganizar SequentialFile cuando supera el 30% de desperdicio")
 - **Modelo Volcano en el ejecutor:** permite componer operadores sin materializar resultados.
 - **Layout de registros:** codec con longitud variable en `common/`. `INT` = 4 bytes, `FLOAT` = 8 bytes, `BOOL` = 1 byte, `VARCHAR(n)`/`TEXT` = prefijo `uint32` + bytes UTF-8. Little-endian, sin alineación. `ColumnType` y `ColumnDef` viven en `common/schema.py` (capa base) y `engine/query/ast.py` los re-exporta.
 - **Overflow de registros grandes:** en *stand by*. Hasta que el dominio de storage lo defina, un registro que exceda el tamaño de página no tiene soporte.
