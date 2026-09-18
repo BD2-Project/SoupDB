@@ -96,6 +96,23 @@ def test_insert_reordered_columns() -> None:
     assert run("SELECT * FROM papers", catalog).rows == ((9, 2020, "ICDE"),)
 
 
+def test_insert_maintains_indexes() -> None:
+    catalog = make_catalog(rows=())
+    catalog.add_index("papers", "anio")
+    result = run("INSERT INTO papers VALUES (5, 2022, 'VLDB')", catalog)
+    assert result.affected == 1
+    assert run("SELECT * FROM papers WHERE anio = 2022", catalog).rows == ((5, 2022, "VLDB"),)
+    anio_index = catalog.indexes("papers")["anio"]
+    assert len(anio_index.search(2022)) == 1
+
+
+def test_insert_reordered_columns_maintains_indexes() -> None:
+    catalog = make_catalog(rows=())
+    catalog.add_index("papers", "anio")
+    run("INSERT INTO papers (venue, id, anio) VALUES ('ICDE', 9, 2020)", catalog)
+    assert run("SELECT * FROM papers WHERE anio = 2020", catalog).rows == ((9, 2020, "ICDE"),)
+
+
 def test_delete_filtered() -> None:
     catalog = make_catalog()
     result = run("DELETE FROM papers WHERE anio = 2020", catalog)

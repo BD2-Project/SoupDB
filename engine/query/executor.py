@@ -56,6 +56,10 @@ def _execute_select(plan: Plan) -> ResultSet:
 def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
+    try:
+        indexes: dict[str, Index] = catalog.indexes(statement.table)
+    except (AttributeError, NotImplementedError):
+        indexes = {}
     columns = statement.columns or tuple(column.name for column in schema)
     positions = [_column_index(schema, name) for name in columns]
     affected = 0
@@ -63,7 +67,11 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
         values: list[object] = [None] * len(schema)
         for position, expr in zip(positions, row_exprs, strict=True):
             values[position] = evaluate(expr, (), ())
-        file_org.insert(Record(data=encode_row(tuple(values), schema)))
+        rid = file_org.insert(Record(data=encode_row(tuple(values), schema)))
+        for position, column in enumerate(schema):
+            index = indexes.get(column.name)
+            if index is not None:
+                index.insert(values[position], rid)
         affected += 1
     return ResultSet(columns=(), affected=affected)
 
