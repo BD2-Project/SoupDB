@@ -41,7 +41,11 @@ def encode_value(out: bytearray, value: object, column: ColumnDef) -> None:
             raise QueryExecutionError(
                 f"column {column.name!r} expects INT, got {type(value).__name__}"
             )
-        out += value.to_bytes(4, "little")
+        if not -(2**31) <= value < 2**31:
+            raise QueryExecutionError(
+                f"column {column.name!r} expects a signed 32-bit INT, got {value}"
+            )
+        out += value.to_bytes(4, "little", signed=True)
         return
 
     if column.type_name is ColumnType.FLOAT:
@@ -96,7 +100,7 @@ def decode_value(data: bytes, offset: int, column: ColumnDef) -> tuple[object, i
     """Decode one column value from ``data`` at ``offset``; returns value and new offset."""
     if column.type_name is ColumnType.INT:
         value, offset = _take_bytes(data, offset, 4)
-        return int.from_bytes(value, "little"), offset
+        return int.from_bytes(value, "little", signed=True), offset
 
     if column.type_name is ColumnType.FLOAT:
         value, offset = _take_bytes(data, offset, 8)

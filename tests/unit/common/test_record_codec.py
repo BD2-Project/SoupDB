@@ -40,6 +40,34 @@ def test_decode_int() -> None:
     assert decode_row(data, (ColumnDef("id", ColumnType.INT),)) == (2020,)
 
 
+def test_encode_decode_negative_int_roundtrip() -> None:
+    data = encode_row((-5,), (ColumnDef("id", ColumnType.INT),))
+    assert data == (-5).to_bytes(4, "little", signed=True)
+    assert decode_row(data, (ColumnDef("id", ColumnType.INT),)) == (-5,)
+
+
+def test_decode_int_signed() -> None:
+    column = ColumnDef("id", ColumnType.INT)
+    assert decode_row((0xFF).to_bytes(4, "little"), (column,)) == (255,)
+    assert decode_row((-1).to_bytes(4, "little", signed=True), (column,)) == (-1,)
+
+
+def test_encode_int_32bit_bounds() -> None:
+    column = ColumnDef("id", ColumnType.INT)
+    lo = -(2**31)
+    hi = 2**31 - 1
+    assert decode_row(encode_row((lo,), (column,)), (column,)) == (lo,)
+    assert decode_row(encode_row((hi,), (column,)), (column,)) == (hi,)
+
+
+def test_encode_int_out_of_range_raises() -> None:
+    column = ColumnDef("id", ColumnType.INT)
+    with pytest.raises(QueryExecutionError, match="32-bit"):
+        encode_row((2**31,), (column,))
+    with pytest.raises(QueryExecutionError, match="32-bit"):
+        encode_row((-(2**31) - 1,), (column,))
+
+
 def test_encode_float() -> None:
     import struct
 
