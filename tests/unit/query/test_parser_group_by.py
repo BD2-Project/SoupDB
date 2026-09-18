@@ -65,6 +65,11 @@ def test_aggregate_without_parens_raises() -> None:
         parse("SELECT COUNT id FROM papers")
 
 
+def test_aggregate_name_at_eof_is_parse_error() -> None:
+    with pytest.raises(QueryParseError):
+        parse("SELECT COUNT")
+
+
 def test_group_by_without_column_raises() -> None:
     with pytest.raises(QueryParseError):
         parse("SELECT * FROM papers GROUP BY")

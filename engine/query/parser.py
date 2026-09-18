@@ -343,6 +343,8 @@ class _Parser:
         return token.kind is TokenKind.KEYWORD and token.value in keywords
 
     def _checks_lparen_next(self) -> bool:
+        if self._pos + 1 >= len(self._tokens):
+            return False
         return self._tokens[self._pos + 1].kind is TokenKind.LPAREN
 
     def _parse_function_call(self) -> FunctionExpr:
