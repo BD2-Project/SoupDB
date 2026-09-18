@@ -1,8 +1,4 @@
-"""Conformance suite for every Index implementation.
-
-The suite parametrizes over all implementations; real disk-backed indexes
-(BPlusTree, ExtendibleHash) join the params when they exist.
-"""
+"""Conformance suite for every Index implementation."""
 
 from collections import defaultdict
 
@@ -12,14 +8,41 @@ from hypothesis import strategies as st
 
 from engine.common.errors import UnsupportedOperation
 from engine.common.rid import RID
+from engine.indexes.bplus_tree import BPlusTree
+from engine.storage.buffer_manager import BufferManager
+from engine.storage.disk_manager import DiskManager
 from tests.fakes.fake_index import FakeIndex
 
+PAGE_SIZE = 256
 
-@pytest.fixture(params=[FakeIndex])
+
+@pytest.fixture(params=["fake", "bplus"])
 def index(request, tmp_path):
-    idx = request.param()
-    yield idx
-    idx.close()
+    disk_manager = None
+
+    if request.param == "fake":
+        idx = FakeIndex()
+    else:
+        disk_manager = DiskManager(
+            tmp_path / "index.db",
+            page_size=PAGE_SIZE,
+        )
+        buffer_manager = BufferManager(
+            disk_manager,
+            capacity=2,
+        )
+        idx = BPlusTree(
+            disk_manager,
+            buffer_manager,
+        )
+
+    try:
+        yield idx
+    finally:
+        idx.close()
+
+        if disk_manager is not None:
+            disk_manager.close()
 
 
 def test_insert_and_search(index) -> None:
@@ -116,11 +139,6 @@ def test_index_without_range_support_raises_unsupported_operation() -> None:
             index.range_search(0, 20)
     finally:
         index.close()
-
-
-@pytest.mark.skip(reason="requires a disk-backed index (BPlusTree, ExtendibleHash)")
-def test_persistence(index, tmp_path) -> None:
-    """Cerrar, reabrir desde el mismo path y verificar que los datos siguen ahí."""
 
 
 @given(st.lists(st.integers(min_value=0, max_value=1000), max_size=200))
