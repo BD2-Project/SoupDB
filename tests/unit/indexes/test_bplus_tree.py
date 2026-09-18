@@ -7,7 +7,7 @@ from engine.indexes.bplus_tree import BPlusTree
 from engine.storage.buffer_manager import BufferManager
 from engine.storage.disk_manager import DiskManager
 
-PAGE_SIZE = 256
+PAGE_SIZE = 128
 
 
 def _make_tree(
@@ -54,7 +54,7 @@ def test_duplicate_keys_return_all_rids(tmp_path: Path) -> None:
     assert tree.search(10) == rids
 
 
-def test_entries_are_stored_in_key_order(tmp_path: Path) -> None:
+def test_entries_are_returned_in_key_order(tmp_path: Path) -> None:
     tree, _dm, _bm = _make_tree(tmp_path)
 
     tree.insert(30, RID(0, 3))
@@ -110,6 +110,72 @@ def test_remove_missing_key_returns_zero(tmp_path: Path) -> None:
     assert tree.remove(100) == 0
 
 
+def test_leaf_split_preserves_all_entries(tmp_path: Path) -> None:
+    tree, dm, _bm = _make_tree(tmp_path)
+
+    expected = {}
+    for key in range(18):
+        rid = RID(key // 4, key)
+        expected[key] = rid
+        tree.insert(key, rid)
+
+    assert dm.page_count > 2
+
+    for key, rid in expected.items():
+        assert tree.search(key) == [rid]
+
+
+def test_range_search_crosses_leaf_boundaries(tmp_path: Path) -> None:
+    tree, _dm, _bm = _make_tree(tmp_path)
+
+    for key in range(18):
+        tree.insert(key, RID(0, key))
+
+    assert tree.range_search(4, 13) == [RID(0, key) for key in range(4, 14)]
+
+
+def test_duplicate_key_can_span_multiple_leaves(tmp_path: Path) -> None:
+    tree, dm, _bm = _make_tree(tmp_path)
+    rids = [RID(index // 3, index) for index in range(14)]
+
+    for rid in rids:
+        tree.insert(7, rid)
+
+    assert dm.page_count > 3
+    assert tree.search(7) == rids
+
+
+def test_remove_all_duplicates_across_multiple_leaves(tmp_path: Path) -> None:
+    tree, _dm, _bm = _make_tree(tmp_path)
+    rids = [RID(index // 3, index) for index in range(14)]
+
+    for rid in rids:
+        tree.insert(7, rid)
+
+    assert tree.remove(7) == len(rids)
+    assert tree.search(7) == []
+
+
+def test_split_structure_persists_after_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "index.db"
+
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=2)
+    tree = BPlusTree(dm, bm)
+
+    for key in range(18):
+        tree.insert(key, RID(0, key))
+
+    tree.close()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=2)
+    reopened = BPlusTree(dm2, bm2)
+
+    assert reopened.range_search(0, 17) == [RID(0, key) for key in range(18)]
+
+
 def test_persistence_after_close_and_reopen(tmp_path: Path) -> None:
     path = tmp_path / "index.db"
 
@@ -156,7 +222,7 @@ def test_operations_after_close_are_rejected(tmp_path: Path) -> None:
         tree.search(10)
 
 
-def test_leaf_overflow_is_rejected_until_split_support_exists(tmp_path: Path) -> None:
+def test_single_entry_too_large_for_leaf_is_rejected(tmp_path: Path) -> None:
     tree, _dm, _bm = _make_tree(tmp_path)
 
     with pytest.raises(ValueError):
