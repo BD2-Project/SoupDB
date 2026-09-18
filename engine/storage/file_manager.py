@@ -41,6 +41,7 @@ class FileManager:
         return disk_manager, buffer_manager
 
     def close(self) -> None:
-        """Close every open file. Safe to call more than once."""
-        for disk_manager, _buffer_manager in self._storages.values():
+        """Flush and close every open file. Safe to call more than once."""
+        for disk_manager, buffer_manager in self._storages.values():
+            buffer_manager.flush_all()
             disk_manager.close()
