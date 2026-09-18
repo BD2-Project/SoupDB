@@ -740,3 +740,363 @@ def test_overflow_compaction_persists_when_record_still_does_not_fit(tmp_path: P
     dm2.close()
 
     assert reclaimable == 0
+
+
+# --- reorganizacion automatica al superar 30% de desperdicio GLOBAL del archivo ---
+
+
+def test_global_waste_below_threshold_despite_one_dirty_page(tmp_path: Path) -> None:
+    sf, dm, bm = _make_sequential_file(tmp_path)
+    rids: list[RID] = []
+    key = 10
+    for _ in range(5):  # 5 paginas principales de 3 registros de 10 bytes (30 ocupado c/u)
+        for _ in range(3):
+            rids.append(sf.insert(_record(key, size=10)))
+            key += 10
+    assert dm.page_count == 5
+
+    sf.remove(rids[0])  # esa pagina: 10/30=33% local; archivo: 10/150=6.7% global
+
+    frame = bm.pin(0)
+    reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+    bm.unpin(0, dirty=False)
+    assert reclaimable == 10  # NO se reorganizo pese a superar 30% local
+
+
+def test_global_waste_at_exactly_30_percent_does_not_reorganize(tmp_path: Path) -> None:
+    sf, _dm, bm = _make_sequential_file(tmp_path)
+    r_small = sf.insert(_record(1, size=3))
+    sf.insert(_record(2, size=7))  # ocupado total = 10
+
+    sf.remove(r_small)  # reclaimable=3, global=3/10=0.30 exacto
+
+    frame = bm.pin(0)
+    reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+    bm.unpin(0, dirty=False)
+    assert reclaimable == 3  # regla es > 0.30, no >=
+
+
+def test_global_waste_above_30_percent_reorganizes(tmp_path: Path) -> None:
+    sf, _dm, bm = _make_sequential_file(tmp_path)
+    rids = [sf.insert(_record(k, size=10)) for k in (1, 2, 3)]  # 3x10=30 ocupado
+
+    sf.remove(rids[0])  # reclaimable=10, global=0.333 > 0.30
+
+    frame = bm.pin(0)
+    reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+    bm.unpin(0, dirty=False)
+    assert reclaimable == 0
+
+
+def test_rids_remain_stable_after_automatic_reorganization(tmp_path: Path) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    r1 = sf.insert(_record(1, size=10))
+    r2 = sf.insert(_record(2, size=10))
+    r3 = sf.insert(_record(3, size=10))
+
+    sf.remove(r1)  # dispara reorganizacion global (archivo de una sola pagina)
+
+    assert sf.fetch(r2) == _record(2, size=10)
+    assert sf.fetch(r3) == _record(3, size=10)
+    assert (r2.page_id, r3.page_id) == (0, 0)
+
+
+def test_global_reorganization_compacts_all_dirty_pages_including_low_local_ratio(
+    tmp_path: Path,
+) -> None:
+    sf, dm, bm = _make_sequential_file(tmp_path)
+    r1 = sf.insert(_record(1, size=20))
+    r2 = sf.insert(_record(2, size=20))  # llena main0 (occupied=40)
+    r3 = sf.insert(_record(100, size=10))  # excede main0: nueva main1
+    r4 = sf.insert(_record(101, size=30))  # llena main1 (occupied=40)
+    assert dm.page_count == 2
+
+    sf.remove(r1)  # main0 dead=20; global=20/80=25% -> aun no dispara
+    frame = bm.pin(0)
+    assert slotted.reclaimable_space(seqpage.body(frame)) == 20
+    bm.unpin(0, dirty=False)
+
+    sf.remove(r3)  # main1 dead=10 (ratio LOCAL de main1 = 10/40=25%, bajo 30%)
+    # global = (20+10)/80 = 37.5% -> DISPARA, barre ambas paginas aunque
+    # main1 nunca supero el 30% por si sola
+
+    for page_id in (0, 1):
+        frame = bm.pin(page_id)
+        reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+        bm.unpin(page_id, dirty=False)
+        assert reclaimable == 0
+
+    assert sf.fetch(r2) == _record(2, size=20)
+    assert sf.fetch(r4) == _record(101, size=30)
+    assert (r2.page_id, r4.page_id) == (0, 1)
+
+
+def test_main_and_overflow_tombstones_both_compacted_when_global_exceeds_threshold(
+    tmp_path: Path,
+) -> None:
+    sf, dm, bm = _make_sequential_file(tmp_path)
+    r10 = sf.insert(_record(10))
+    r20 = sf.insert(_record(20))
+    r30 = sf.insert(_record(30))  # main0, occupied=30
+    r15 = sf.insert(_record(15))  # crea overflow1 de main0
+    r16 = sf.insert(_record(16))  # overflow1, occupied=20
+    assert dm.page_count == 2
+
+    sf.remove(r30)  # main0 dead=10; global=10/50=20% -> aun no dispara
+    sf.remove(r15)  # overflow1 dead=10; global=(10+10)/50=40% -> DISPARA
+
+    for page_id in (0, 1):
+        frame = bm.pin(page_id)
+        reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+        bm.unpin(page_id, dirty=False)
+        assert reclaimable == 0
+
+    assert sf.fetch(r10) == _record(10)
+    assert sf.fetch(r20) == _record(20)
+    assert sf.fetch(r16) == _record(16)
+    keys = [_key_fn(record) for _, record in sf.scan()]
+    assert keys == sorted(keys)
+
+
+def test_multiple_main_and_overflow_pages_all_compacted_when_global_triggers(
+    tmp_path: Path,
+) -> None:
+    sf, dm, bm = _make_sequential_file(tmp_path)
+    r10 = sf.insert(_record(10))
+    r20 = sf.insert(_record(20))
+    r30 = sf.insert(_record(30))  # main0, occupied=30
+    r15 = sf.insert(_record(15))
+    r16 = sf.insert(_record(16))  # overflow_a de main0, occupied=20
+    r100 = sf.insert(_record(100))
+    r110 = sf.insert(_record(110))
+    r120 = sf.insert(_record(120))  # main1 (excede todo), occupied=30
+    r105 = sf.insert(_record(105))
+    r106 = sf.insert(_record(106))  # overflow_b de main1, occupied=20
+    assert dm.page_count == 4
+
+    sf.remove(r20)  # dead=10 / 100 = 10%
+    sf.remove(r15)  # dead=20 / 100 = 20%
+    sf.remove(r110)  # dead=30 / 100 = 30% exacto -> NO dispara todavia
+
+    for page_id in range(3):  # las 3 paginas ya tocadas siguen sucias
+        frame = bm.pin(page_id)
+        reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+        bm.unpin(page_id, dirty=False)
+        assert reclaimable > 0
+
+    sf.remove(r105)  # dead=40 / 100 = 40% -> DISPARA, barre las 4 paginas
+
+    for page_id in range(4):
+        frame = bm.pin(page_id)
+        reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+        bm.unpin(page_id, dirty=False)
+        assert reclaimable == 0
+
+    survivors = {
+        r10: _record(10),
+        r30: _record(30),
+        r16: _record(16),
+        r100: _record(100),
+        r120: _record(120),
+        r106: _record(106),
+    }
+    for rid, expected in survivors.items():
+        assert sf.fetch(rid) == expected
+    keys = [_key_fn(record) for _, record in sf.scan()]
+    assert keys == sorted(keys)
+
+
+def test_all_surviving_rids_stable_after_global_reorganization(tmp_path: Path) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    survivors: dict[RID, Record] = {}
+    to_remove = []
+    for i in range(6):
+        rid = sf.insert(_record(i * 10, size=10))
+        if i % 2 == 0:
+            to_remove.append(rid)
+        else:
+            survivors[rid] = _record(i * 10, size=10)
+
+    for rid in to_remove:
+        sf.remove(rid)  # dispara la reorganizacion global en algun punto
+
+    for rid, expected in survivors.items():
+        assert sf.fetch(rid) == expected
+
+
+def test_scan_correct_after_global_reorganization(tmp_path: Path) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    r1 = sf.insert(_record(1, size=20))
+    sf.insert(_record(2, size=20))
+    r3 = sf.insert(_record(100, size=10))
+    sf.insert(_record(101, size=30))
+
+    sf.remove(r1)
+    sf.remove(r3)  # dispara reorganizacion global
+
+    keys = [_key_fn(record) for _, record in sf.scan()]
+    assert keys == [2, 101]
+
+
+def test_global_reorganization_persists_after_flush_and_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=4)
+    sf = SequentialFile(dm, bm, _key_fn)
+
+    r10 = sf.insert(_record(10))
+    r20 = sf.insert(_record(20))
+    r30 = sf.insert(_record(30))  # main0, occupied=30
+    r15 = sf.insert(_record(15))  # crea overflow1 de main0
+    r16 = sf.insert(_record(16))  # overflow1, occupied=20
+
+    sf.remove(r30)  # main0 dead=10; global=10/50=20% -> aun no dispara
+    sf.remove(r15)  # overflow1 dead=10; global=(10+10)/50=40% -> DISPARA
+
+    bm.flush_all()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=4)
+
+    for page_id in (0, 1):
+        frame = bm2.pin(page_id)
+        reclaimable = slotted.reclaimable_space(seqpage.body(frame))
+        bm2.unpin(page_id, dirty=False)
+        assert reclaimable == 0
+
+    sf2 = SequentialFile(dm2, bm2, _key_fn)
+    assert sf2.fetch(r10) == _record(10)
+    assert sf2.fetch(r20) == _record(20)
+    assert sf2.fetch(r16) == _record(16)
+    keys = [_key_fn(record) for _, record in sf2.scan()]
+    assert keys == sorted(keys)
+
+
+def test_insert_after_reorganization_reuses_reclaimed_space(tmp_path: Path) -> None:
+    sf, dm, _bm = _make_sequential_file(tmp_path)
+    r1 = sf.insert(_record(1, size=10))
+    r2 = sf.insert(_record(2, size=10))
+    r3 = sf.insert(_record(3, size=10))  # llena main0
+    sf.remove(r1)  # dispara reorg: libera 10 bytes
+
+    rid_new = sf.insert(_record(4, size=10))  # cabe directo en main0 ya compactada
+
+    assert rid_new.page_id == 0
+    assert dm.page_count == 1
+    assert sf.fetch(r2) == _record(2, size=10)
+    assert sf.fetch(r3) == _record(3, size=10)
+
+
+def test_invalid_remove_does_not_compute_global_waste(tmp_path: Path) -> None:
+    sf, dm, bm = _make_sequential_file(tmp_path)
+    sf.insert(_record(1, size=10))
+
+    def _boom() -> tuple[int, int]:
+        raise AssertionError("no debia calcularse el desperdicio global")
+
+    sf._global_waste_stats = _boom
+
+    assert sf.remove(RID(page_id=99, slot=0)) is False
+    assert dm.page_count == 1
+    assert bm.is_pinned(0) is False
+
+
+def test_double_remove_does_not_recompute_global_waste(tmp_path: Path) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    rid = sf.insert(_record(1, size=10))
+    sf.remove(rid)  # remove real y valido
+
+    def _boom() -> tuple[int, int]:
+        raise AssertionError("no debia recalcularse en un doble remove")
+
+    sf._global_waste_stats = _boom
+
+    assert sf.remove(rid) is False
+
+
+def test_multiple_successive_global_reorganizations_keep_structure_intact(
+    tmp_path: Path,
+) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    survivors: dict[RID, Record] = {}
+
+    key = 0
+    for _ in range(4):
+        rids = []
+        for _ in range(3):
+            rid = sf.insert(_record(key, size=10))
+            rids.append(rid)
+            key += 1
+        sf.remove(rids[0])
+        survivors[rids[1]] = _record(key - 2, size=10)
+        survivors[rids[2]] = _record(key - 1, size=10)
+
+    for rid, expected in survivors.items():
+        assert sf.fetch(rid) == expected
+
+    keys_scanned = [_key_fn(record) for _, record in sf.scan()]
+    assert keys_scanned == sorted(keys_scanned)
+
+
+def test_remove_unpins_pages_when_global_waste_calculation_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sf, _dm, bm = _make_sequential_file(tmp_path)
+    rid = sf.insert(_record(10))
+
+    def _boom(body: memoryview) -> int:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(slotted, "reclaimable_space", _boom)
+
+    with pytest.raises(RuntimeError):
+        sf.remove(rid)
+
+    assert bm.is_pinned(0) is False
+
+
+def test_reorganization_unpins_pages_when_compact_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sf, _dm, bm = _make_sequential_file(tmp_path)
+    r1 = sf.insert(_record(1, size=10))
+    sf.insert(_record(2, size=10))
+    sf.insert(_record(3, size=10))  # llena main0, occupied=30
+
+    def _boom(body: memoryview) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(slotted, "compact", _boom)
+
+    with pytest.raises(RuntimeError):
+        sf.remove(r1)  # dispara reorg global -> compact() explota
+
+    assert bm.is_pinned(0) is False
+
+
+def test_stress_inserts_and_removes_with_global_reorganization_match_oracle(
+    tmp_path: Path,
+) -> None:
+    sf, _dm, _bm = _make_sequential_file(tmp_path)
+    oracle: dict[RID, Record] = {}
+
+    rng = random.Random(11)
+    keys = list(range(60))
+    rng.shuffle(keys)
+
+    for key in keys:
+        rid = sf.insert(_record(key))
+        oracle[rid] = _record(key)
+
+    to_remove = rng.sample(list(oracle.keys()), 20)
+    for rid in to_remove:
+        assert sf.remove(rid) is True
+        del oracle[rid]
+
+    scanned = [_key_fn(record) for _, record in sf.scan()]
+    expected_keys = sorted(_key_fn(record) for record in oracle.values())
+    assert scanned == expected_keys
+
+    for rid, expected in oracle.items():
+        assert sf.fetch(rid) == expected
