@@ -33,6 +33,7 @@ class FakeCatalog:
 
     def __init__(self) -> None:
         self._tables: dict[str, _Table] = {}
+        self._index_names: dict[str, tuple[str, str]] = {}
 
     def create_table(self, name: str, columns: Schema, engine: str = "HEAP") -> None:
         if name in self._tables:
@@ -63,7 +64,13 @@ class FakeCatalog:
             raise QueryExecutionError(f"unknown table {name!r}")
         return dict(table.indexes)
 
-    def add_index(self, name: str, column: str, index: FakeIndex | None = None) -> FakeIndex:
+    def add_index(
+        self,
+        name: str,
+        column: str,
+        index: FakeIndex | None = None,
+        index_name: str | None = None,
+    ) -> FakeIndex:
         table = self._tables[name]
         index = index or FakeIndex()
         table.indexes[column] = index
@@ -71,7 +78,26 @@ class FakeCatalog:
         for rid, record in table.file_org.scan():
             row = decode_row(record.data, table.schema)
             index.insert(row[position], rid)
+        self._index_names[index_name or f"{name}.{column}"] = (name, column)
         return index
+
+    def index_location(self, index_name: str) -> tuple[str, str] | None:
+        return self._index_names.get(index_name)
+
+    def drop_table(self, name: str) -> None:
+        table = self._tables.get(name)
+        if table is None:
+            raise QueryExecutionError(f"unknown table {name!r}")
+        for column, _index in table.indexes.items():
+            self._index_names.pop(f"{name}.{column}", None)
+        del self._tables[name]
+
+    def drop_index(self, index_name: str) -> None:
+        location = self._index_names.pop(index_name, None)
+        if location is None:
+            raise QueryExecutionError(f"unknown index {index_name!r}")
+        table_name, column = location
+        self._tables[table_name].indexes.pop(column, None)
 
     def insert(self, name: str, row: tuple[object, ...]) -> None:
         schema = self.schema(name)

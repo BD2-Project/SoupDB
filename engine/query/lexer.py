@@ -27,6 +27,7 @@ _KEYWORDS = {
     "VALUES",
     "DELETE",
     "CREATE",
+    "DROP",
     "TABLE",
     "INDEX",
     "ON",

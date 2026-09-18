@@ -116,3 +116,61 @@ def test_duplicate_index_raises(tmp_path: Path) -> None:
     execute_sql("CREATE INDEX idx_anio ON papers (anio)", catalog)
     with pytest.raises(QueryExecutionError):
         execute_sql("CREATE INDEX idx_anio ON papers (anio)", catalog)
+
+
+def test_drop_table_end_to_end(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    execute_sql("CREATE TABLE papers (id INT, titulo TEXT)", catalog)
+    execute_sql("INSERT INTO papers VALUES (1, 'RAG')", catalog)
+    execute_sql("DROP TABLE papers", catalog)
+    with pytest.raises(QueryExecutionError):
+        execute_sql("SELECT * FROM papers", catalog)
+    assert "papers" not in catalog.tables()
+
+
+def test_drop_table_persists_after_reopen(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    execute_sql("CREATE TABLE papers (id INT, titulo TEXT)", catalog)
+    execute_sql("DROP TABLE papers", catalog)
+    catalog.close()
+    reopened = make_catalog(tmp_path)
+    assert "papers" not in reopened.tables()
+    reopened.close()
+
+
+def test_drop_table_removes_from_sys_columns(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    execute_sql("CREATE TABLE papers (id INT, titulo TEXT)", catalog)
+    execute_sql("DROP TABLE papers", catalog)
+    result = execute_sql("SELECT column_name FROM SysColumns WHERE table_name = 'papers'", catalog)
+    assert result.rows == ()
+
+
+def test_drop_index_end_to_end(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    execute_sql("CREATE TABLE papers (id INT, anio INT)", catalog)
+    execute_sql("INSERT INTO papers VALUES (1, 2020)", catalog)
+    execute_sql("CREATE INDEX idx_anio ON papers (anio)", catalog)
+    execute_sql("DROP INDEX idx_anio", catalog)
+    assert catalog.indexes("papers") == {}
+    assert execute_sql("SELECT id FROM papers WHERE anio = 2020", catalog).rows == ((1,),)
+
+
+def test_drop_index_persists_after_reopen(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    execute_sql("CREATE TABLE papers (id INT, anio INT)", catalog)
+    execute_sql("CREATE INDEX idx_anio ON papers (anio)", catalog)
+    execute_sql("DROP INDEX idx_anio", catalog)
+    catalog.close()
+    reopened = make_catalog(tmp_path)
+    assert reopened.indexes("papers") == {}
+    reopened.close()
+
+
+def test_drop_table_then_recreate_and_use(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    execute_sql("CREATE TABLE papers (id INT, anio INT)", catalog)
+    execute_sql("DROP TABLE papers", catalog)
+    execute_sql("CREATE TABLE papers (id INT, anio INT)", catalog)
+    execute_sql("INSERT INTO papers VALUES (2, 2021)", catalog)
+    assert execute_sql("SELECT id FROM papers WHERE anio = 2021", catalog).rows == ((2,),)

@@ -18,6 +18,8 @@ from engine.query.ast import (
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
+    DropIndexStatement,
+    DropTableStatement,
     Expr,
     FunctionExpr,
     InExpr,
@@ -122,6 +124,10 @@ class _Parser:
             if self._match_keyword("INDEX"):
                 return self._parse_create_index()
             return self._parse_create_table()
+        if self._match_keyword("DROP"):
+            if self._match_keyword("INDEX"):
+                return self._parse_drop_index()
+            return self._parse_drop_table()
         raise QueryParseError(f"unsupported statement at position {self._peek().position}")
 
     def _parse_delete(self) -> DeleteStatement:
@@ -182,6 +188,17 @@ class _Parser:
             column=column,
             index_type=index_type,
         )
+
+    def _parse_drop_table(self) -> DropTableStatement:
+        self._expect_keyword("TABLE")
+        table = self._expect_kind(TokenKind.IDENTIFIER).value
+        self._error_if_not_eof()
+        return DropTableStatement(table=table)
+
+    def _parse_drop_index(self) -> DropIndexStatement:
+        index_name = self._expect_kind(TokenKind.IDENTIFIER).value
+        self._error_if_not_eof()
+        return DropIndexStatement(index_name=index_name)
 
     def _parse_column_def(self) -> ColumnDef:
         name = self._expect_kind(TokenKind.IDENTIFIER).value

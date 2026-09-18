@@ -40,6 +40,15 @@ class FileManager:
         self._storages[file_id] = (disk_manager, buffer_manager)
         return disk_manager, buffer_manager
 
+    def drop(self, file_id: str) -> None:
+        """Close and delete a logical file, forgetting the cached managers."""
+        storage = self._storages.pop(file_id, None)
+        if storage is None:
+            return
+        disk_manager, buffer_manager = storage
+        buffer_manager.flush_all()
+        disk_manager.delete()
+
     def close(self) -> None:
         """Flush and close every open file. Safe to call more than once."""
         for disk_manager, buffer_manager in self._storages.values():

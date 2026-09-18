@@ -55,3 +55,26 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
     fm.storage("a")
     fm.close()
     fm.close()
+
+
+def test_drop_removes_file(tmp_path: Path) -> None:
+    fm = FileManager(tmp_path, page_size=64)
+    fm.storage("a")
+    fm.drop("a")
+    assert not _file_exists(tmp_path, "a")
+
+
+def test_drop_unknown_name_is_noop(tmp_path: Path) -> None:
+    fm = FileManager(tmp_path, page_size=64)
+    fm.drop("ghost")
+    fm.close()
+
+
+def test_storage_recreates_file_after_drop(tmp_path: Path) -> None:
+    fm = FileManager(tmp_path, page_size=64)
+    dm, _bm = fm.storage("a")
+    dm.allocate_page()
+    fm.drop("a")
+    dm2, _bm2 = fm.storage("a")
+    assert dm2.page_count == 0
+    fm.close()

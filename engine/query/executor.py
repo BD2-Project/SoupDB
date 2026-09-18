@@ -14,6 +14,8 @@ from engine.query.ast import (
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
+    DropIndexStatement,
+    DropTableStatement,
     InsertStatement,
     SelectStatement,
 )
@@ -41,6 +43,12 @@ def execute(plan: Plan, catalog: Any) -> ResultSet:
             statement.column,
             statement.index_type,
         )
+        return ResultSet(columns=())
+    if isinstance(statement, DropTableStatement):
+        catalog.drop_table(statement.table)
+        return ResultSet(columns=())
+    if isinstance(statement, DropIndexStatement):
+        catalog.drop_index(statement.index_name)
         return ResultSet(columns=())
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
 

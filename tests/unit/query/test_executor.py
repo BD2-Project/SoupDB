@@ -187,3 +187,28 @@ def test_create_table_duplicate_raises() -> None:
     catalog = FakeCatalog()
     with pytest.raises(QueryExecutionError):
         run("CREATE TABLE t (a INT, a INT)", catalog)
+
+
+def test_drop_table_removes_table() -> None:
+    catalog = make_catalog()
+    result = run("DROP TABLE papers", catalog)
+    assert result.affected == 0
+    with pytest.raises(QueryExecutionError):
+        run("SELECT * FROM papers", catalog)
+
+
+def test_drop_table_unknown_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        run("DROP TABLE nope", make_catalog())
+
+
+def test_drop_index_removes_index() -> None:
+    catalog = make_catalog()
+    catalog.add_index("papers", "anio", index_name="idx_anio")
+    run("DROP INDEX idx_anio", catalog)
+    assert run("SELECT * FROM papers WHERE anio = 2020", catalog).rows != ()
+
+
+def test_drop_index_unknown_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        run("DROP INDEX nope", make_catalog())

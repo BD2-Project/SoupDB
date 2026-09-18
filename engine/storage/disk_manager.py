@@ -32,6 +32,11 @@ class DiskManager:
         return self._page_size
 
     @property
+    def path(self) -> Path:
+        """The managed file's path on disk."""
+        return self._path
+
+    @property
     def page_count(self) -> int:
         return self._next_page_id
 
@@ -78,3 +83,11 @@ class DiskManager:
     def close(self) -> None:
         """Close the managed file. Safe to call more than once."""
         self._file.close()
+
+    def delete(self) -> None:
+        """Close the file and remove it from disk. Safe to call more than once."""
+        self._file.close()
+        try:
+            self._path.unlink()
+        except FileNotFoundError:
+            pass

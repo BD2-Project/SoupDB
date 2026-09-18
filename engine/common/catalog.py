@@ -14,6 +14,7 @@ a regular heap file managed through :class:`engine.storage.file_manager.FileMana
   structure type (BTREE or HASH).
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -200,6 +201,47 @@ class Catalog:
             (index_name, table_name, column, index_type),
         )
 
+    def index_location(self, index_name: str) -> tuple[str, str] | None:
+        """Owning ``(table, column)`` of an index by name, or None if missing."""
+        for table in self._tables.values():
+            for entry in table.indexes.values():
+                if entry.index_name == index_name:
+                    return (table.name, entry.column)
+        return None
+
+    def drop_table(self, name: str) -> None:
+        """Remove a table, its sys rows, its indexes and its backing file."""
+        if name.startswith(_RESERVED_PREFIX):
+            raise QueryExecutionError(
+                f"table name {name!r} is reserved for system tables ({_RESERVED_PREFIX}*)"
+            )
+        table = self._table(name)
+        for entry in list(table.indexes.values()):
+            self._files.drop(f"ix_{entry.index_name}")
+            self._delete_sys_rows(
+                "SysIndexes",
+                SYS_INDEXES_SCHEMA,
+                lambda row, index_name=entry.index_name: row[0] == index_name,
+            )
+        self._delete_sys_rows("SysTables", SYS_TABLES_SCHEMA, lambda row: row[0] == name)
+        self._delete_sys_rows("SysColumns", SYS_COLUMNS_SCHEMA, lambda row: row[0] == name)
+        del self._tables[name]
+        self._files.drop(f"t_{name}")
+
+    def drop_index(self, index_name: str) -> None:
+        """Remove an index, its sys row and its backing file."""
+        for table in self._tables.values():
+            for column, entry in list(table.indexes.items()):
+                if entry.index_name != index_name:
+                    continue
+                del table.indexes[column]
+                self._delete_sys_rows(
+                    "SysIndexes", SYS_INDEXES_SCHEMA, lambda row: row[0] == index_name
+                )
+                self._files.drop(f"ix_{index_name}")
+                return
+        raise QueryExecutionError(f"unknown index {index_name!r}")
+
     # --- Internal bootstrap and reload -----------------------------------
 
     def _table(self, name: str) -> _Table:
@@ -301,6 +343,20 @@ class Catalog:
         disk_manager, buffer_manager = self._files.storage(name)
         file = HeapFile(disk_manager, buffer_manager)
         return [decode_row(record.data, schema) for _rid, record in file.scan()]
+
+    def _delete_sys_rows(
+        self,
+        name: str,
+        schema: tuple[ColumnDef, ...],
+        predicate: Callable[[tuple[object, ...]], bool],
+    ) -> None:
+        disk_manager, buffer_manager = self._files.storage(name)
+        file = HeapFile(disk_manager, buffer_manager)
+        awaiting = [
+            rid for rid, record in file.scan() if predicate(decode_row(record.data, schema))
+        ]
+        for rid in awaiting:
+            file.remove(rid)
 
 
 def _check_columns(columns: tuple[ColumnDef, ...]) -> None:

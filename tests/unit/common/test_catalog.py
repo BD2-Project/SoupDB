@@ -156,3 +156,97 @@ def test_create_index_unknown_type_raises(tmp_path: Path) -> None:
     catalog.create_table("papers", PAPERS)
     with pytest.raises(QueryExecutionError):
         catalog.create_index("idx", "papers", "anio", index_type="BM25")
+
+
+def test_drop_table_removes_table(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    catalog.drop_table("papers")
+    assert "papers" not in catalog.tables()
+    with pytest.raises(QueryExecutionError):
+        catalog.schema("papers")
+
+
+def test_drop_table_persists_across_reopen(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    catalog.drop_table("papers")
+    catalog.close()
+    reopened = make_catalog(tmp_path)
+    assert "papers" not in reopened.tables()
+    assert reopened.tables() == ["SysTables", "SysColumns", "SysIndexes"]
+
+
+def test_drop_table_removes_backing_file(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    assert (tmp_path / "t_papers.db").exists()
+    catalog.drop_table("papers")
+    assert not (tmp_path / "t_papers.db").exists()
+
+
+def test_drop_table_drops_its_indexes(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    catalog.create_index("idx_anio", "papers", "anio")
+    index_file = tmp_path / "ix_idx_anio.db"
+    assert index_file.exists()
+    catalog.drop_table("papers")
+    assert catalog.index_location("idx_anio") is None
+    assert not index_file.exists()
+    catalog.close()
+    reopened = make_catalog(tmp_path)
+    assert reopened.index_location("idx_anio") is None
+    assert "papers" not in reopened.tables()
+
+
+def test_drop_table_unknown_raises(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    with pytest.raises(QueryExecutionError):
+        catalog.drop_table("nope")
+
+
+def test_drop_table_reserved_raises(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    with pytest.raises(QueryExecutionError):
+        catalog.drop_table("SysTables")
+
+
+def test_drop_index_removes_index(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    catalog.create_index("idx_anio", "papers", "anio")
+    catalog.drop_index("idx_anio")
+    assert catalog.indexes("papers") == {}
+    assert catalog.index_location("idx_anio") is None
+    assert not (tmp_path / "ix_idx_anio.db").exists()
+
+
+def test_drop_index_persists_across_reopen(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    catalog.create_index("idx_anio", "papers", "anio")
+    catalog.drop_index("idx_anio")
+    catalog.close()
+    reopened = make_catalog(tmp_path)
+    assert reopened.indexes("papers") == {}
+    assert reopened.index_location("idx_anio") is None
+
+
+def test_drop_index_unknown_raises(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    with pytest.raises(QueryExecutionError):
+        catalog.drop_index("nope")
+
+
+def test_drop_table_then_recreate_same_name(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    catalog.drop_table("papers")
+    catalog.create_table("papers", PAPERS)
+    catalog.file_org("papers").insert(Record(data=encode_row((1, "a", 2020), PAPERS)))
+    catalog.close()
+    reopened = make_catalog(tmp_path)
+    (rid, record) = next(reopened.file_org("papers").scan())
+    assert record.data == encode_row((1, "a", 2020), PAPERS)

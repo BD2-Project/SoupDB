@@ -24,6 +24,8 @@ from engine.query.ast import (
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
+    DropIndexStatement,
+    DropTableStatement,
     Expr,
     FunctionExpr,
     InExpr,
@@ -78,6 +80,10 @@ def plan(statement: Statement, catalog: Any) -> Plan:
         return _plan_create(statement, catalog)
     if isinstance(statement, CreateIndexStatement):
         return _plan_create_index(statement, catalog)
+    if isinstance(statement, DropTableStatement):
+        return _plan_drop_table(statement, catalog)
+    if isinstance(statement, DropIndexStatement):
+        return _plan_drop_index(statement, catalog)
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
 
 
@@ -156,6 +162,21 @@ def _plan_create_index(statement: CreateIndexStatement, catalog: Any) -> Plan:
         raise QueryExecutionError(
             f"unknown column {statement.column!r} in table {statement.table!r}"
         )
+    return Plan(statement=statement)
+
+
+def _plan_drop_table(statement: DropTableStatement, catalog: Any) -> Plan:
+    if statement.table.startswith("Sys"):
+        raise QueryExecutionError(
+            f"table name {statement.table!r} is reserved for system tables (Sys*)"
+        )
+    catalog.schema(statement.table)
+    return Plan(statement=statement)
+
+
+def _plan_drop_index(statement: DropIndexStatement, catalog: Any) -> Plan:
+    if catalog.index_location(statement.index_name) is None:
+        raise QueryExecutionError(f"unknown index {statement.index_name!r}")
     return Plan(statement=statement)
 
 

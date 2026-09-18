@@ -210,6 +210,33 @@ def test_plan_create_index_unknown_type_raises() -> None:
         plan(parse("CREATE INDEX idx ON papers (anio) TYPE BM25"), make_catalog())
 
 
+def test_plan_drop_table_builds() -> None:
+    result = plan(parse("DROP TABLE papers"), make_catalog())
+    assert result.statement is not None
+
+
+def test_plan_drop_table_unknown_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("DROP TABLE nope"), make_catalog())
+
+
+def test_plan_drop_table_sys_table_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("DROP TABLE SysTables"), make_catalog())
+
+
+def test_plan_drop_index_builds() -> None:
+    catalog = make_catalog()
+    catalog.add_index("papers", "anio", index_name="idx_anio")
+    result = plan(parse("DROP INDEX idx_anio"), catalog)
+    assert result.statement is not None
+
+
+def test_plan_drop_index_unknown_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("DROP INDEX nope"), make_catalog())
+
+
 def test_plan_delete_unknown_table_raises() -> None:
     with pytest.raises(QueryExecutionError):
         plan(parse("DELETE FROM nope WHERE id = 1"), make_catalog())

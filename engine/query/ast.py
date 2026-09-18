@@ -162,3 +162,17 @@ class CreateIndexStatement(Statement):
     table: str
     column: str
     index_type: str = "BTREE"
+
+
+@dataclass(frozen=True)
+class DropTableStatement(Statement):
+    """``DROP TABLE name`` removes a table and its indexes."""
+
+    table: str
+
+
+@dataclass(frozen=True)
+class DropIndexStatement(Statement):
+    """``DROP INDEX name`` removes an index."""
+
+    index_name: str
