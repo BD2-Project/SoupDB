@@ -23,9 +23,12 @@ from engine.query.ast import (
     ExplainStatement,
     Expr,
     FunctionExpr,
+    HavingClause,
     InExpr,
     InsertStatement,
+    JoinClause,
     LikeExpr,
+    LimitClause,
     Literal,
     LogicalExpr,
     NotExpr,
@@ -281,6 +284,7 @@ class _Parser:
         columns = self._parse_projection()
         self._expect_keyword("FROM")
         table = self._expect_kind(TokenKind.IDENTIFIER).value
+        joins = self._parse_joins()
         where = None
         if self._match_keyword("WHERE"):
             where = self._parse_boolean_expression()
@@ -288,19 +292,64 @@ class _Parser:
         if self._match_keyword("GROUP"):
             self._expect_keyword("BY")
             group_by = self._parse_group_by()
+        having = None
+        if self._match_keyword("HAVING"):
+            having = HavingClause(self._parse_boolean_expression())
         order_by: tuple[OrderByItem, ...] = ()
         if self._match_keyword("ORDER"):
             self._expect_keyword("BY")
             order_by = self._parse_order_by()
+        limit = self._parse_limit()
         self._error_if_not_eof()
         return SelectStatement(
             columns=columns,
             table=table,
             where=where,
             group_by=group_by,
+            having=having,
             order_by=order_by,
+            limit=limit,
             distinct=distinct,
+            joins=joins,
         )
+
+    def _parse_joins(self) -> tuple[JoinClause, ...]:
+        joins: list[JoinClause] = []
+        while True:
+            if self._match_keyword("JOIN"):
+                pass
+            elif self._match_keyword("INNER"):
+                self._expect_keyword("JOIN")
+            else:
+                break
+            table = self._expect_kind(TokenKind.IDENTIFIER).value
+            self._expect_keyword("ON")
+            on = self._parse_boolean_expression()
+            joins.append(JoinClause(table=table, on=on))
+        return tuple(joins)
+
+    def _parse_limit(self) -> LimitClause | None:
+        if not self._match_keyword("LIMIT"):
+            return None
+        limit = self._expect_positive_number("LIMIT")
+        offset = None
+        if self._match_keyword("OFFSET"):
+            offset = self._expect_positive_number("OFFSET")
+        return LimitClause(limit=limit, offset=offset)
+
+    def _expect_positive_number(self, clause: str) -> Literal:
+        token = self._peek()
+        if token.kind is not TokenKind.NUMBER:
+            raise QueryParseError(
+                f"expected a positive integer for {clause} at position {token.position}, "
+                f"got {token.value!r}"
+            )
+        if "." in token.value or token.value.startswith("-"):
+            raise QueryParseError(
+                f"{clause} must be a positive integer at position {token.position}"
+            )
+        self._advance()
+        return Literal(int(token.value))
 
     def _parse_projection(self) -> tuple[SelectColumn, ...]:
         if self._match_kind(TokenKind.STAR):
