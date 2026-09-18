@@ -8,8 +8,22 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
-from engine.common.record import Record, decode_row
-from engine.query.ast import Expr
+from engine.common.errors import QueryExecutionError
+from engine.common.record import Record, decode_row, encode_row
+from engine.common.schema import ColumnDef, ColumnType
+from engine.query.ast import (
+    BetweenExpr,
+    ColumnRef,
+    CompareExpr,
+    Expr,
+    FunctionExpr,
+    InExpr,
+    LikeExpr,
+    Literal,
+    LogicalExpr,
+    NotExpr,
+    SelectColumn,
+)
 from engine.query.evaluator import Schema, evaluate
 from engine.storage.base import FileOrganization
 from engine.storage.disk_manager import DiskManager
@@ -176,3 +190,106 @@ class Filter(_VolcanoBase):
 
     def explain(self) -> PlanNode:
         return self._plan("Filter", {"predicate": str(self._predicate)})
+
+
+_BOOL_EXPRS = (BetweenExpr, CompareExpr, InExpr, LikeExpr, LogicalExpr, NotExpr)
+
+
+def _literal_type(value: object) -> ColumnType:
+    if type(value) is bool:
+        return ColumnType.BOOL
+    if type(value) is int:
+        return ColumnType.INT
+    if type(value) is float:
+        return ColumnType.FLOAT
+    return ColumnType.TEXT
+
+
+def _infer_type(expr: Expr, schema: Schema) -> ColumnDef:
+    """Best-effort column type for a projected expression."""
+    if isinstance(expr, ColumnRef):
+        for column in schema:
+            if column.name == expr.name:
+                return column
+        raise QueryExecutionError(f"unknown column {expr.name!r}")
+    if isinstance(expr, Literal):
+        return ColumnDef("", _literal_type(expr.value))
+    if isinstance(expr, _BOOL_EXPRS):
+        return ColumnDef("", ColumnType.BOOL)
+    if isinstance(expr, FunctionExpr):
+        return ColumnDef("", ColumnType.FLOAT)
+    return ColumnDef("", ColumnType.TEXT)
+
+
+def _infer_schema(projections: tuple[SelectColumn, ...], input_schema: Schema) -> Schema:
+    """Output schema for a projection list: alias or ``column_<n>`` names."""
+    columns = []
+    for index, selection in enumerate(projections, start=1):
+        name = selection.alias or f"column_{index}"
+        column = _infer_type(selection.expr, input_schema)
+        columns.append(ColumnDef(name, column.type_name, column.length))
+    return tuple(columns)
+
+
+class Project(_VolcanoBase):
+    """Emits one value per projected expression, re-encoded as a record."""
+
+    def __init__(
+        self,
+        child: Operator,
+        projections: tuple[SelectColumn, ...],
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((child,), disk_manager)
+        self._child = child
+        self._projections = projections
+        self.schema = _infer_schema(projections, child.schema)
+
+    def next(self) -> Record | None:
+        record = self._child.next()
+        if record is None:
+            return None
+        row = decode_row(record.data, self._child.schema)
+        values = tuple(
+            evaluate(selection.expr, row, self._child.schema) for selection in self._projections
+        )
+        self._rows += 1
+        return Record(data=encode_row(values, self.schema))
+
+    def explain(self) -> PlanNode:
+        columns = [column.name for column in self.schema]
+        return self._plan("Project", {"columns": columns})
+
+
+class Distinct(_VolcanoBase):
+    """Removes fully duplicated rows, tracking the seen rows in memory."""
+
+    def __init__(
+        self,
+        child: Operator,
+        schema: Schema | None = None,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((child,), disk_manager)
+        self._child = child
+        self.schema = schema if schema is not None else child.schema
+
+    def open(self) -> None:
+        super().open()
+        self._seen: set[tuple[object, ...]] = set()
+
+    def next(self) -> Record | None:
+        while True:
+            record = self._child.next()
+            if record is None:
+                return None
+            row = decode_row(record.data, self.schema)
+            if row in self._seen:
+                continue
+            self._seen.add(row)
+            self._rows += 1
+            return record
+
+    def explain(self) -> PlanNode:
+        columns = [column.name for column in self.schema]
+        return self._plan("Distinct", {"columns": columns})
