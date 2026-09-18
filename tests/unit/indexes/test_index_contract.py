@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from engine.common.errors import UnsupportedOperation
 from engine.common.rid import RID
 from engine.indexes.bplus_tree import BPlusTree
+from engine.indexes.extendible_hash import ExtendibleHash
 from engine.storage.buffer_manager import BufferManager
 from engine.storage.disk_manager import DiskManager
 from tests.fakes.fake_index import FakeIndex
@@ -16,7 +17,7 @@ from tests.fakes.fake_index import FakeIndex
 PAGE_SIZE = 256
 
 
-@pytest.fixture(params=["fake", "bplus"])
+@pytest.fixture(params=["fake", "bplus", "hash"])
 def index(request, tmp_path):
     disk_manager = None
 
@@ -31,10 +32,17 @@ def index(request, tmp_path):
             disk_manager,
             capacity=2,
         )
-        idx = BPlusTree(
-            disk_manager,
-            buffer_manager,
-        )
+
+        if request.param == "bplus":
+            idx = BPlusTree(
+                disk_manager,
+                buffer_manager,
+            )
+        else:
+            idx = ExtendibleHash(
+                disk_manager,
+                buffer_manager,
+            )
 
     try:
         yield idx
