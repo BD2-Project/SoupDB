@@ -547,6 +547,7 @@ class _RunningAggregate:
 
     count: int = 0
     total: int | float = 0
+    reference: object | None = None
     minimum: object | None = None
     maximum: object | None = None
 
@@ -616,13 +617,23 @@ class Aggregate(_VolcanoBase):
                 continue
             accumulator.count += 1
             if name in ("SUM", "AVG"):
+                if type(value) is not int and type(value) is not float:
+                    raise QueryExecutionError(f"{name} requires numeric values")
                 accumulator.total += value
-            if name == "MIN":
-                if accumulator.minimum is None or value < accumulator.minimum:
-                    accumulator.minimum = value
-            if name == "MAX":
-                if accumulator.maximum is None or value > accumulator.maximum:
-                    accumulator.maximum = value
+            elif name in ("MIN", "MAX"):
+                if accumulator.reference is None:
+                    accumulator.reference = value
+                elif type(accumulator.reference) is not type(value):
+                    raise QueryExecutionError(
+                        f"cannot mix {type(accumulator.reference).__name__} "
+                        f"and {type(value).__name__} values"
+                    )
+                if name == "MIN":
+                    if accumulator.minimum is None or value < accumulator.minimum:
+                        accumulator.minimum = value
+                else:
+                    if accumulator.maximum is None or value > accumulator.maximum:
+                        accumulator.maximum = value
         return state
 
     def _finish_group(self, state: list[_RunningAggregate]) -> tuple[object, ...]:
@@ -633,8 +644,6 @@ class Aggregate(_VolcanoBase):
             if name == "COUNT":
                 values.append(accumulator.count)
             elif name == "SUM":
-                if accumulator.count == 0:
-                    raise QueryExecutionError("SUM of an empty group is undefined")
                 values.append(accumulator.total)
             elif name == "AVG":
                 if accumulator.count == 0:

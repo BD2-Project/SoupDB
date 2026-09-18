@@ -141,6 +141,64 @@ def test_agg_spill_avg_empty_raises() -> None:
         )
 
 
+def test_agg_spill_sum_over_text_raises() -> None:
+    with pytest.raises(QueryExecutionError, match="SUM requires numeric values"):
+        agg_spill(
+            (ColumnRef("anio"),),
+            (FunctionExpr("SUM", ColumnRef("venue")),),
+            memory=128,
+        )
+
+
+def test_agg_spill_sum_over_bool_raises_like_memory() -> None:
+    schema = (
+        ColumnDef("activo", ColumnType.BOOL),
+        ColumnDef("venue", ColumnType.TEXT),
+    )
+    rows = ((True, "VLDB"), (False, "VLDB"))
+
+    def run_agg(memory: int | None) -> None:
+        fake = FakeFileOrganization()
+        for row in rows:
+            fake.insert(Record(data=encode_row(row, schema)))
+        aggregate = Aggregate(
+            TableScan(fake, schema),
+            (ColumnRef("venue"),),
+            (FunctionExpr("SUM", ColumnRef("activo")),),
+            memory_limit_bytes=memory,
+        )
+        aggregate.open()
+        try:
+            while aggregate.next() is not None:
+                pass
+        finally:
+            aggregate.close()
+
+    with pytest.raises(QueryExecutionError, match="SUM requires numeric values"):
+        run_agg(memory=128)
+    with pytest.raises(QueryExecutionError, match="SUM requires numeric values"):
+        run_agg(memory=None)
+
+
+def test_agg_spill_avg_over_text_raises() -> None:
+    with pytest.raises(QueryExecutionError, match="AVG requires numeric values"):
+        agg_spill(
+            (ColumnRef("anio"),),
+            (FunctionExpr("AVG", ColumnRef("venue")),),
+            memory=128,
+        )
+
+
+def test_agg_spill_min_over_text_matches_memory() -> None:
+    assert sorted(
+        agg_spill(
+            (ColumnRef("anio"),),
+            (FunctionExpr("MIN", ColumnRef("venue")),),
+            memory=128,
+        )
+    ) == sorted([(2019, "VLDB"), (2020, "SIGMOD"), (2021, "SIGMOD")])
+
+
 def test_agg_spill_explain_reports_rows() -> None:
     out = agg_spill(
         (ColumnRef("venue"),),
