@@ -37,8 +37,14 @@ class ConcurrencyStrategy(ABC):
     """Base interface for concurrency control strategies."""
 
     @abstractmethod
-    def acquire(self, tx_id: int, resource: Resource, mode: LockMode) -> None:
-        """Acquire a lock, blocking until granted or raising on failure."""
+    def acquire(
+        self,
+        tx_id: int,
+        resource: Resource,
+        mode: LockMode,
+        timeout_ms: int | None = None,
+    ) -> None:
+        """Acquire a lock, blocking until granted or raising LockNotGranted on timeout."""
 
     @abstractmethod
     def release(self, tx_id: int, resource: Resource) -> None:

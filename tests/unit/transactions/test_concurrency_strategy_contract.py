@@ -7,10 +7,11 @@ strategy joins the params when it exists.
 import pytest
 
 from engine.transactions.base import ConcurrencyStrategy, LockMode, TransactionState
+from engine.transactions.strategies.strict_2pl import StrictTwoPhaseLocking
 from tests.fakes.fake_concurrency import FakeConcurrencyStrategy
 
 
-@pytest.fixture(params=[FakeConcurrencyStrategy])
+@pytest.fixture(params=[FakeConcurrencyStrategy, StrictTwoPhaseLocking])
 def strategy(request):
     impl = request.param()
     yield impl

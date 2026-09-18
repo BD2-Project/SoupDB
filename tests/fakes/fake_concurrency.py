@@ -9,7 +9,13 @@ class FakeConcurrencyStrategy(ConcurrencyStrategy):
     def __init__(self) -> None:
         self._locks: dict[int, set[Resource]] = {}
 
-    def acquire(self, tx_id: int, resource: Resource, mode: LockMode) -> None:
+    def acquire(
+        self,
+        tx_id: int,
+        resource: Resource,
+        mode: LockMode,
+        timeout_ms: int | None = None,
+    ) -> None:
         self._locks.setdefault(tx_id, set()).add(resource)
 
     def release(self, tx_id: int, resource: Resource) -> None:
