@@ -73,10 +73,6 @@ def _execute_select(plan: Plan) -> ResultSet:
 def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
-    try:
-        indexes: dict[str, Index] = catalog.indexes(statement.table)
-    except (AttributeError, NotImplementedError):
-        indexes = {}
     columns = statement.columns or tuple(column.name for column in schema)
     positions = [_column_index(schema, name) for name in columns]
     affected = 0
@@ -86,8 +82,7 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
             values[position] = evaluate(expr, (), ())
         rid = file_org.insert(Record(data=encode_row(tuple(values), schema)))
         for position, column in enumerate(schema):
-            index = indexes.get(column.name)
-            if index is not None:
+            for index in _indexes_for_column(catalog, statement.table, column.name).values():
                 index.insert(values[position], rid)
         affected += 1
     return ResultSet(columns=(), affected=affected)
@@ -96,10 +91,6 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
 def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
-    try:
-        indexes: dict[str, Index] = catalog.indexes(statement.table)
-    except (AttributeError, NotImplementedError):
-        indexes = {}
     rows_to_remove = []
     for rid, record in file_org.scan():
         row = decode_row(record.data, schema)
@@ -110,11 +101,18 @@ def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
         if not file_org.remove(rid):
             continue
         for position, column in enumerate(schema):
-            index = indexes.get(column.name)
-            if index is not None:
+            for index in _indexes_for_column(catalog, statement.table, column.name).values():
                 index.remove(row[position], rid)
         affected += 1
     return ResultSet(columns=(), affected=affected)
+
+
+def _indexes_for_column(catalog: Any, table: str, column: str) -> dict[str, Index]:
+    """Indexes covering a column, tolerating catalogs without the method."""
+    try:
+        return catalog.indexes_for(table, column)
+    except (AttributeError, NotImplementedError):
+        return {}
 
 
 def _column_index(schema: Schema, name: str) -> int:

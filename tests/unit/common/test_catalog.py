@@ -110,7 +110,7 @@ def test_create_index_btree_and_search(tmp_path: Path) -> None:
     catalog.create_table("papers", PAPERS)
     catalog.file_org("papers").insert(Record(data=encode_row((1, "titulo", 2020), PAPERS)))
     catalog.create_index("idx_anio", "papers", "anio", index_type="BTREE")
-    assert catalog.indexes("papers")["anio"].search(2020)
+    assert catalog.indexes("papers")["idx_anio"].search(2020)
 
 
 def test_create_index_backfills_existing_rows(tmp_path: Path) -> None:
@@ -118,7 +118,7 @@ def test_create_index_backfills_existing_rows(tmp_path: Path) -> None:
     catalog.create_table("papers", PAPERS)
     catalog.file_org("papers").insert(Record(data=encode_row((1, "a", 2020), PAPERS)))
     catalog.create_index("idx_anio", "papers", "anio", index_type="BTREE")
-    assert catalog.indexes("papers")["anio"].search(2020)
+    assert catalog.indexes("papers")["idx_anio"].search(2020)
 
 
 def test_create_index_persists_across_reopen(tmp_path: Path) -> None:
@@ -127,7 +127,7 @@ def test_create_index_persists_across_reopen(tmp_path: Path) -> None:
     catalog.create_index("idx_anio", "papers", "anio", index_type="BTREE")
     catalog.close()
     reopened = make_catalog(tmp_path)
-    assert "anio" in reopened.indexes("papers")
+    assert "idx_anio" in reopened.indexes("papers")
 
 
 def test_create_index_unknown_table_raises(tmp_path: Path) -> None:
@@ -220,6 +220,39 @@ def test_drop_index_removes_index(tmp_path: Path) -> None:
     assert catalog.indexes("papers") == {}
     assert catalog.index_location("idx_anio") is None
     assert not (tmp_path / "ix_idx_anio.db").exists()
+
+
+def test_two_indexes_on_same_column(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    catalog.create_index("idx_bt", "papers", "anio", index_type="BTREE")
+    catalog.create_index("idx_hash", "papers", "anio", index_type="HASH")
+    assert set(catalog.indexes("papers")) == {"idx_bt", "idx_hash"}
+    assert set(catalog.indexes_for("papers", "anio")) == {"idx_bt", "idx_hash"}
+    assert catalog.indexes_for("papers", "id") == {}
+    assert catalog.indexes("papers")["idx_bt"].search(2020) == []
+    assert catalog.indexes("papers")["idx_hash"].search(2020) == []
+
+
+def test_two_indexes_on_same_column_persist(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    catalog.create_index("idx_bt", "papers", "anio", index_type="BTREE")
+    catalog.create_index("idx_hash", "papers", "anio", index_type="HASH")
+    catalog.close()
+    reopened = make_catalog(tmp_path)
+    assert set(reopened.indexes("papers")) == {"idx_bt", "idx_hash"}
+
+
+def test_drop_one_of_two_indexes(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    catalog.create_table("papers", PAPERS)
+    catalog.create_index("idx_bt", "papers", "anio", index_type="BTREE")
+    catalog.create_index("idx_hash", "papers", "anio", index_type="HASH")
+    catalog.drop_index("idx_hash")
+    assert set(catalog.indexes("papers")) == {"idx_bt"}
+    assert not (tmp_path / "ix_idx_hash.db").exists()
+    assert (tmp_path / "ix_idx_bt.db").exists()
 
 
 def test_drop_index_persists_across_reopen(tmp_path: Path) -> None:

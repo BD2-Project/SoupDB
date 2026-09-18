@@ -123,8 +123,18 @@ class Catalog:
         return self._table(name).strategy
 
     def indexes(self, name: str) -> dict[str, Index]:
+        """Physical indexes on a table keyed by index name."""
         table = self._table(name)
-        return {column: entry.index for column, entry in table.indexes.items()}
+        return {index_name: entry.index for index_name, entry in table.indexes.items()}
+
+    def indexes_for(self, name: str, column: str) -> dict[str, Index]:
+        """Physical indexes on a table that cover ``column``, keyed by name."""
+        table = self._table(name)
+        return {
+            index_name: entry.index
+            for index_name, entry in table.indexes.items()
+            if entry.column == column
+        }
 
     def tables(self) -> list[str]:
         return list(self._tables)
@@ -175,9 +185,8 @@ class Catalog:
         column: str,
         index_type: str = "BTREE",
     ) -> None:
-        for table in self._tables.values():
-            if any(entry.index_name == index_name for entry in table.indexes.values()):
-                raise QueryExecutionError(f"index {index_name!r} already exists")
+        if index_name in self._index_names():
+            raise QueryExecutionError(f"index {index_name!r} already exists")
         table = self._table(table_name)
         if column not in {c.name for c in table.schema}:
             raise QueryExecutionError(f"unknown column {column!r} in table {table_name!r}")
@@ -189,7 +198,7 @@ class Catalog:
         for _rid, record in table.file.scan():
             row = decode_row(record.data, table.schema)
             index.insert(row[position], _rid)
-        table.indexes[column] = _IndexEntry(
+        table.indexes[index_name] = _IndexEntry(
             index_name=index_name,
             column=column,
             index_type=index_type,
@@ -204,9 +213,9 @@ class Catalog:
     def index_location(self, index_name: str) -> tuple[str, str] | None:
         """Owning ``(table, column)`` of an index by name, or None if missing."""
         for table in self._tables.values():
-            for entry in table.indexes.values():
-                if entry.index_name == index_name:
-                    return (table.name, entry.column)
+            entry = table.indexes.get(index_name)
+            if entry is not None:
+                return (table.name, entry.column)
         return None
 
     def drop_table(self, name: str) -> None:
@@ -231,15 +240,15 @@ class Catalog:
     def drop_index(self, index_name: str) -> None:
         """Remove an index, its sys row and its backing file."""
         for table in self._tables.values():
-            for column, entry in list(table.indexes.items()):
-                if entry.index_name != index_name:
-                    continue
-                del table.indexes[column]
-                self._delete_sys_rows(
-                    "SysIndexes", SYS_INDEXES_SCHEMA, lambda row: row[0] == index_name
-                )
-                self._files.drop(f"ix_{index_name}")
-                return
+            entry = table.indexes.get(index_name)
+            if entry is None:
+                continue
+            del table.indexes[index_name]
+            self._delete_sys_rows(
+                "SysIndexes", SYS_INDEXES_SCHEMA, lambda row: row[0] == index_name
+            )
+            self._files.drop(f"ix_{index_name}")
+            return
         raise QueryExecutionError(f"unknown index {index_name!r}")
 
     # --- Internal bootstrap and reload -----------------------------------
@@ -304,12 +313,15 @@ class Catalog:
             table = self._tables.get(table_name)
             if table is None:
                 continue
-            table.indexes[column] = _IndexEntry(
+            table.indexes[index_name] = _IndexEntry(
                 index_name=index_name,
                 column=column,
                 index_type=index_type,
                 index=self._open_index(index_name, index_type),
             )
+
+    def _index_names(self) -> set[str]:
+        return {name for table in self._tables.values() for name in table.indexes}
 
     def _open_file(
         self,

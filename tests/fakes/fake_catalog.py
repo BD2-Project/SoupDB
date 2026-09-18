@@ -1,7 +1,8 @@
 """In-memory catalog oracle for planner and executor tests.
 
 Mimics the duck-typed interface the planner docs: ``schema``, ``file_org``,
-``indexes`` and ``create_table`` plus extra test helpers (``insert``,
+``indexes``, ``indexes_for``, ``create_table``, ``index_location``,
+``drop_table`` and ``drop_index`` plus extra test helpers (``insert``,
 ``add_index``).
 """
 
@@ -59,10 +60,22 @@ class FakeCatalog:
         return table.file_org
 
     def indexes(self, name: str) -> dict[str, Index]:
+        """Physical indexes on a table keyed by index name."""
         table = self._tables.get(name)
         if table is None:
             raise QueryExecutionError(f"unknown table {name!r}")
         return dict(table.indexes)
+
+    def indexes_for(self, name: str, column: str) -> dict[str, Index]:
+        """Physical indexes on a table that cover ``column``, keyed by name."""
+        table = self._tables.get(name)
+        if table is None:
+            raise QueryExecutionError(f"unknown table {name!r}")
+        return {
+            index_name: index
+            for index_name, index in table.indexes.items()
+            if self._index_names[index_name][1] == column
+        }
 
     def add_index(
         self,
@@ -72,13 +85,16 @@ class FakeCatalog:
         index_name: str | None = None,
     ) -> FakeIndex:
         table = self._tables[name]
+        index_name = index_name or f"idx_{column}"
+        if index_name in self._index_names:
+            raise QueryExecutionError(f"index {index_name!r} already exists")
         index = index or FakeIndex()
-        table.indexes[column] = index
+        table.indexes[index_name] = index
         position = _column_index(table.schema, column)
         for rid, record in table.file_org.scan():
             row = decode_row(record.data, table.schema)
             index.insert(row[position], rid)
-        self._index_names[index_name or f"{name}.{column}"] = (name, column)
+        self._index_names[index_name] = (name, column)
         return index
 
     def index_location(self, index_name: str) -> tuple[str, str] | None:
@@ -88,22 +104,21 @@ class FakeCatalog:
         table = self._tables.get(name)
         if table is None:
             raise QueryExecutionError(f"unknown table {name!r}")
-        for column, _index in table.indexes.items():
-            self._index_names.pop(f"{name}.{column}", None)
+        for index_name in list(table.indexes):
+            self._index_names.pop(index_name, None)
         del self._tables[name]
 
     def drop_index(self, index_name: str) -> None:
         location = self._index_names.pop(index_name, None)
         if location is None:
             raise QueryExecutionError(f"unknown index {index_name!r}")
-        table_name, column = location
-        self._tables[table_name].indexes.pop(column, None)
+        table_name, _column = location
+        self._tables[table_name].indexes.pop(index_name, None)
 
     def insert(self, name: str, row: tuple[object, ...]) -> None:
         schema = self.schema(name)
         table = self._tables[name]
         rid = table.file_org.insert(Record(data=encode_row(row, schema)))
         for position, column in enumerate(schema):
-            index = table.indexes.get(column.name)
-            if index is not None:
+            for index in self.indexes_for(name, column.name).values():
                 index.insert(row[position], rid)

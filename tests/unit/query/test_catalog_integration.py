@@ -47,7 +47,7 @@ def test_create_index_then_query_uses_it(tmp_path: Path) -> None:
     execute_sql("CREATE TABLE papers (id INT, titulo TEXT, anio INT)", catalog)
     execute_sql("INSERT INTO papers VALUES (1, 'RAG', 2020)", catalog)
     execute_sql("CREATE INDEX idx_anio ON papers (anio) TYPE BTREE", catalog)
-    assert "anio" in catalog.indexes("papers")
+    assert "idx_anio" in catalog.indexes("papers")
     result = execute_sql("SELECT titulo FROM papers WHERE anio = 2020", catalog)
     assert result.rows == (("RAG",),)
 
@@ -60,7 +60,7 @@ def test_index_persists_across_reopen(tmp_path: Path) -> None:
     catalog.close()
 
     reopened = make_catalog(tmp_path)
-    assert "anio" in reopened.indexes("papers")
+    assert "idx_anio" in reopened.indexes("papers")
     result = execute_sql("SELECT id FROM papers WHERE anio = 2020", reopened)
     assert result.rows == ((1,),)
     reopened.close()
@@ -174,3 +174,40 @@ def test_drop_table_then_recreate_and_use(tmp_path: Path) -> None:
     execute_sql("CREATE TABLE papers (id INT, anio INT)", catalog)
     execute_sql("INSERT INTO papers VALUES (2, 2021)", catalog)
     assert execute_sql("SELECT id FROM papers WHERE anio = 2021", catalog).rows == ((2,),)
+
+
+def test_two_indexes_on_same_column_end_to_end(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    execute_sql("CREATE TABLE papers (id INT, anio INT)", catalog)
+    execute_sql("INSERT INTO papers VALUES (1, 2020)", catalog)
+    execute_sql("CREATE INDEX idx_bt ON papers (anio) TYPE BTREE", catalog)
+    execute_sql("CREATE INDEX idx_hash ON papers (anio) TYPE HASH", catalog)
+    assert set(catalog.indexes("papers")) == {"idx_bt", "idx_hash"}
+    assert execute_sql("SELECT id FROM papers WHERE anio = 2020", catalog).rows == ((1,),)
+    assert execute_sql("SELECT id FROM papers WHERE anio BETWEEN 2020 AND 2021", catalog).rows == (
+        (1,),
+    )
+
+
+def test_two_indexes_on_same_column_persist(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    execute_sql("CREATE TABLE papers (id INT, anio INT)", catalog)
+    execute_sql("CREATE INDEX idx_bt ON papers (anio) TYPE BTREE", catalog)
+    execute_sql("CREATE INDEX idx_hash ON papers (anio) TYPE HASH", catalog)
+    catalog.close()
+    reopened = make_catalog(tmp_path)
+    assert set(reopened.indexes("papers")) == {"idx_bt", "idx_hash"}
+    assert execute_sql("SELECT id FROM papers WHERE anio = 2020", reopened).rows == ()
+    reopened.close()
+
+
+def test_drop_one_index_keeps_the_other(tmp_path: Path) -> None:
+    catalog = make_catalog(tmp_path)
+    execute_sql("CREATE TABLE papers (id INT, anio INT)", catalog)
+    execute_sql("INSERT INTO papers VALUES (1, 2020)", catalog)
+    execute_sql("CREATE INDEX idx_bt ON papers (anio) TYPE BTREE", catalog)
+    execute_sql("CREATE INDEX idx_hash ON papers (anio) TYPE HASH", catalog)
+    execute_sql("DROP INDEX idx_hash", catalog)
+    assert set(catalog.indexes("papers")) == {"idx_bt"}
+    assert execute_sql("SELECT id FROM papers WHERE anio = 2020", catalog).rows == ((1,),)
+    assert not (tmp_path / "ix_idx_hash.db").exists()

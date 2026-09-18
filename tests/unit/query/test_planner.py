@@ -62,6 +62,31 @@ def test_plan_select_rejects_range_on_flat_index() -> None:
     assert tree.children[0].op == "TableScan"
 
 
+def test_plan_select_point_prefers_hash_over_btree() -> None:
+    catalog = make_catalog()
+    btree = FakeIndex()
+    hash_idx = FakeIndex(supports_range=False)
+    catalog.add_index("papers", "anio", btree, index_name="idx_bt")
+    catalog.add_index("papers", "anio", hash_idx, index_name="idx_hash")
+    result = plan_select("SELECT * FROM papers WHERE anio = 2020", catalog)
+    tree = result.root.explain()
+    assert tree.op == "Filter"
+    assert tree.children[0].op == "IndexLookup"
+    assert result.root._child._index is hash_idx
+
+
+def test_plan_select_range_prefers_btree_over_hash() -> None:
+    catalog = make_catalog()
+    btree = FakeIndex()
+    hash_idx = FakeIndex(supports_range=False)
+    catalog.add_index("papers", "anio", btree, index_name="idx_bt")
+    catalog.add_index("papers", "anio", hash_idx, index_name="idx_hash")
+    result = plan_select("SELECT * FROM papers WHERE anio BETWEEN 2019 AND 2021", catalog)
+    tree = result.root.explain()
+    assert tree.children[0].op == "IndexRangeScan"
+    assert result.root._child._index is btree
+
+
 def test_plan_select_without_index_uses_scan() -> None:
     result = plan_select("SELECT * FROM papers WHERE anio = 2020", make_catalog())
     tree = result.root.explain()

@@ -7,16 +7,24 @@ interface. It expects the injected object to provide:
 - ``schema(name)`` returning the table schema and raising
   ``QueryExecutionError`` for unknown tables.
 - ``file_org(name)`` returning the table file organization.
-- ``indexes(name)`` returning a mapping ``column name -> Index`` (possibly
-  empty) used for physical access-path selection.
+- ``indexes(name)`` returning a mapping ``index name -> Index`` (possibly
+  empty) with every physical index on the table.
+- ``indexes_for(name, column)`` returning the indexes that cover a specific
+  column (``column name -> Index`` is NOT the contract: a table may carry
+  several differently-structured indexes on the same column).
 - ``create_table(name, columns, engine)`` used by the executor for DDL.
 - ``create_index(index_name, table, column, index_type)`` for index DDL.
+- ``index_location(index_name)`` returning ``(table, column)`` or None.
+
+Access-path selection picks the index best suited to the predicate: a HASH
+index is preferred for point lookups and a BTREE index for inclusive ranges.
 """
 
 from dataclasses import dataclass
 from typing import Any
 
 from engine.common.errors import QueryExecutionError
+from engine.indexes.base import Index
 from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
@@ -188,12 +196,6 @@ def _scan_or_index(
     disk_manager: DiskManager | None,
 ) -> Operator:
     """Pick the access path: index leaf when the WHERE allows it, else scan."""
-    try:
-        index_map = catalog.indexes(statement.table)
-    except (AttributeError, NotImplementedError):
-        return TableScan(file_org, schema, disk_manager)
-    if not index_map:
-        return TableScan(file_org, schema, disk_manager)
     where = statement.where
     if where is None:
         return TableScan(file_org, schema, disk_manager)
@@ -203,7 +205,7 @@ def _scan_or_index(
         and isinstance(where.left, ColumnRef)
         and isinstance(where.right, Literal)
     ):
-        index = index_map.get(where.left.name)
+        index = _index_for_column(catalog, statement.table, where.left.name, point=True)
         if index is not None:
             return IndexLookup(index, file_org.fetch, where.right.value, schema, disk_manager)
     if (
@@ -212,12 +214,37 @@ def _scan_or_index(
         and isinstance(where.lo, Literal)
         and isinstance(where.hi, Literal)
     ):
-        index = index_map.get(where.value.name)
-        if index is not None and index.supports_range:
+        index = _index_for_column(catalog, statement.table, where.value.name, point=False)
+        if index is not None:
             return IndexRangeScan(
                 index, file_org.fetch, where.lo.value, where.hi.value, schema, disk_manager
             )
     return TableScan(file_org, schema, disk_manager)
+
+
+def _index_for_column(
+    catalog: Any,
+    table: str,
+    column: str,
+    *,
+    point: bool,
+) -> Index | None:
+    """Pick the index covering ``column`` best suited to the access pattern."""
+    try:
+        candidates = catalog.indexes_for(table, column)
+    except (AttributeError, NotImplementedError):
+        return None
+    if not candidates:
+        return None
+    if point:
+        for candidate in candidates.values():
+            if not candidate.supports_range:
+                return candidate
+        return next(iter(candidates.values()))
+    for candidate in candidates.values():
+        if candidate.supports_range:
+            return candidate
+    return None
 
 
 def _collect_aggregates(statement: SelectStatement) -> tuple[FunctionExpr, ...]:
