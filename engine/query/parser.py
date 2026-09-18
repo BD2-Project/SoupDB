@@ -512,6 +512,9 @@ class _Parser:
         if self._match_keyword("FALSE"):
             return Literal(False)
 
+        if self._match_kind(TokenKind.NULL):
+            return Literal(None)
+
         if self._check_keyword_in(_AGGREGATES) and self._checks_lparen_next():
             return self._parse_function_call()
 
