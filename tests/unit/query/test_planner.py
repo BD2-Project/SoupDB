@@ -72,9 +72,11 @@ def test_plan_select_group_by_builds_aggregate() -> None:
         make_catalog(),
     )
     tree = result.root.explain()
-    assert tree.op == "Aggregate"
-    assert tree.detail["group_by"] == ["venue"]
-    assert tree.detail["aggregates"] == ["COUNT"]
+    assert tree.op == "Project"
+    assert tree.children[0].op == "Aggregate"
+    aggregate = tree.children[0]
+    assert aggregate.detail["group_by"] == ["ColumnRef(name='venue')"]
+    assert aggregate.detail["aggregates"] == ["COUNT"]
 
 
 def test_plan_select_projection_and_sort() -> None:
