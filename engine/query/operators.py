@@ -26,7 +26,7 @@ from engine.query.ast import (
     OrderByItem,
     SelectColumn,
 )
-from engine.query.evaluator import Schema, evaluate
+from engine.query.evaluator import Schema, evaluate, evaluate_aggregate
 from engine.storage.base import FileOrganization
 from engine.storage.disk_manager import DiskManager
 
@@ -355,3 +355,105 @@ class Sort(_VolcanoBase):
     def explain(self) -> PlanNode:
         keys = [str(item.expr) for item in self._order_by]
         return self._plan("Sort", {"keys": keys})
+
+
+def _find_column(name: str, schema: Schema) -> ColumnDef:
+    for column in schema:
+        if column.name == name:
+            return column
+    raise QueryExecutionError(f"unknown column {name!r}")
+
+
+def _aggregate_output_type(expr: FunctionExpr, schema: Schema) -> ColumnType:
+    """Output column type for an aggregate function."""
+    name = expr.name.upper()
+    if name == "COUNT":
+        return ColumnType.INT
+    if name == "AVG":
+        return ColumnType.FLOAT
+    if expr.arg is not None:
+        column = _infer_type(expr.arg, schema)
+        if name in ("MIN", "MAX"):
+            return column.type_name
+        if name == "SUM":
+            return ColumnType.FLOAT if column.type_name is ColumnType.FLOAT else ColumnType.INT
+    return ColumnType.INT
+
+
+def _aggregate_schema(
+    group_by: tuple[Expr, ...],
+    aggregates: tuple[FunctionExpr, ...],
+    schema: Schema,
+) -> Schema:
+    """Output schema: GROUP BY keys followed by the aggregate results."""
+    columns = []
+    for index, expr in enumerate(group_by, start=1):
+        if isinstance(expr, ColumnRef):
+            columns.append(_find_column(expr.name, schema))
+            continue
+        inferred = _infer_type(expr, schema)
+        columns.append(ColumnDef(f"group_{index}", inferred.type_name, inferred.length))
+    for index, expr in enumerate(aggregates, start=1):
+        columns.append(
+            ColumnDef(f"{expr.name.lower()}_{index}", _aggregate_output_type(expr, schema))
+        )
+    return tuple(columns)
+
+
+class Aggregate(_VolcanoBase):
+    """In-memory group-by aggregation over the full input stream."""
+
+    def __init__(
+        self,
+        child: Operator,
+        group_by: tuple[Expr, ...],
+        aggregates: tuple[FunctionExpr, ...],
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((child,), disk_manager)
+        self._child = child
+        self._group_by = group_by
+        self._aggregates = aggregates
+        self._input_schema = child.schema
+        self.schema = _aggregate_schema(group_by, aggregates, self._input_schema)
+
+    def open(self) -> None:
+        super().open()
+        groups: dict[tuple[object, ...], list[tuple[object, ...]]]
+        if self._group_by:
+            groups = {}
+        else:
+            groups = {(): []}
+        while True:
+            record = self._child.next()
+            if record is None:
+                break
+            row = decode_row(record.data, self._input_schema)
+            key = tuple(evaluate(expr, row, self._input_schema) for expr in self._group_by)
+            groups.setdefault(key, []).append(row)
+        buffered = []
+        for key, group in groups.items():
+            values = tuple(
+                evaluate_aggregate(expr, group, self._input_schema) for expr in self._aggregates
+            )
+            buffered.append(key + values)
+        self._buffer = iter(buffered)
+
+    def next(self) -> Record | None:
+        try:
+            row = next(self._buffer)
+        except StopIteration:
+            return None
+        self._rows += 1
+        return Record(data=encode_row(row, self.schema))
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        detail = {
+            "group_by": [str(expr) for expr in self._group_by],
+            "aggregates": [expr.name for expr in self._aggregates],
+        }
+        return self._plan("Aggregate", detail)
