@@ -1,5 +1,7 @@
 """Tests for the binary row codec."""
 
+import struct
+
 import pytest
 
 from engine.common.errors import QueryExecutionError
@@ -128,9 +130,15 @@ def test_encode_wrong_row_length_raises() -> None:
 
 
 def test_decode_with_invalid_bool_byte_raises() -> None:
-    schema = (ColumnDef("ok", ColumnType.BOOL),)
+    schema = (ColumnDef("activo", ColumnType.BOOL),)
     with pytest.raises(QueryExecutionError):
         decode_row(b"\x02", schema)
+
+
+def test_decode_invalid_utf8_text_raises() -> None:
+    raw = struct.pack("<I", 2) + b"\xff\xfe"
+    with pytest.raises(QueryExecutionError, match="UTF-8"):
+        decode_row(raw, (ColumnDef("txt", ColumnType.TEXT),))
 
 
 def test_record_holds_encoded_bytes() -> None:

@@ -120,7 +120,10 @@ def decode_text(data: bytes, offset: int) -> tuple[object, int]:
     raw_length, offset = _take_bytes(data, offset, _LEN_SIZE)
     (length,) = struct.unpack(_LEN_FORMAT, raw_length)
     raw, offset = _take_bytes(data, offset, length)
-    return raw.decode("utf-8"), offset
+    try:
+        return raw.decode("utf-8"), offset
+    except UnicodeDecodeError as exc:
+        raise QueryExecutionError("invalid UTF-8 in text column") from exc
 
 
 def _take_bytes(data: bytes, offset: int, size: int) -> tuple[bytes, int]:
