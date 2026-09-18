@@ -112,7 +112,8 @@ class TransactionalSession:
         try:
             yield tx
         except BaseException:
-            self.rollback()
+            if self.current_transaction() is not None:
+                self.rollback()
             raise
         else:
             self.commit()
