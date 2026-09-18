@@ -35,6 +35,47 @@ def test_keywords_are_normalized_uppercase() -> None:
     assert toks[8] == (TokenKind.KEYWORD, "DESC")
 
 
+def test_update_and_set_keywords() -> None:
+    toks = token_values("UPDATE papers SET titulo = 'nuevo'")
+    assert toks[0] == (TokenKind.KEYWORD, "UPDATE")
+    assert toks[2] == (TokenKind.KEYWORD, "SET")
+
+
+def test_join_inner_on_keywords() -> None:
+    toks = token_values("SELECT * FROM a JOIN b INNER ON a = b")
+    assert (TokenKind.KEYWORD, "JOIN") in toks
+    assert (TokenKind.KEYWORD, "INNER") in toks
+    assert (TokenKind.KEYWORD, "ON") in toks
+
+
+def test_having_limit_offset_explain_keywords() -> None:
+    toks = token_values("EXPLAIN SELECT id FROM t HAVING count > 1 LIMIT 10 OFFSET 5")
+    assert toks[0] == (TokenKind.KEYWORD, "EXPLAIN")
+    assert (TokenKind.KEYWORD, "HAVING") in toks
+    assert (TokenKind.KEYWORD, "LIMIT") in toks
+    assert (TokenKind.KEYWORD, "OFFSET") in toks
+
+
+def test_is_and_null_keywords() -> None:
+    toks = token_values("SELECT * FROM t WHERE autor IS NULL")
+    assert (TokenKind.KEYWORD, "IS") in toks
+    assert (TokenKind.NULL, "NULL") in toks
+
+
+def test_join_keywords_normalized_uppercase() -> None:
+    toks = token_values("explain select * from a inner join b on a = b where x is null")
+    assert (TokenKind.KEYWORD, "EXPLAIN") in toks
+    assert (TokenKind.KEYWORD, "INNER") in toks
+    assert (TokenKind.KEYWORD, "JOIN") in toks
+    assert (TokenKind.KEYWORD, "IS") in toks
+    assert (TokenKind.NULL, "NULL") in toks
+
+
+def test_new_keywords_are_not_identifiers() -> None:
+    toks = token_values("update set join inner having limit offset is null explain")
+    assert all(kind is not TokenKind.IDENTIFIER for kind, _ in toks)
+
+
 def test_comparison_operators() -> None:
     toks = token_values("a <> b AND a <= 1 OR a >= 2 AND a != 3")
     ops = [v for k, v in toks if k is TokenKind.OPERATOR]

@@ -42,6 +42,16 @@ _KEYWORDS = {
     "AVG",
     "MIN",
     "MAX",
+    "UPDATE",
+    "SET",
+    "JOIN",
+    "INNER",
+    "HAVING",
+    "LIMIT",
+    "OFFSET",
+    "IS",
+    "NULL",
+    "EXPLAIN",
 }
 
 _OPERATORS = {">=", "<=", "<>", "!=", ">", "<", "="}
@@ -156,6 +166,9 @@ def tokenize(sql: str) -> list[Token]:
             start = i
             word, i = _scan_identifier(sql, i)
             upper = word.upper()
+            if upper == "NULL":
+                tokens.append(Token(TokenKind.NULL, upper, start))
+                continue
             kind = TokenKind.KEYWORD if upper in _KEYWORDS else TokenKind.IDENTIFIER
             tokens.append(Token(kind, upper if kind is TokenKind.KEYWORD else word, start))
             continue

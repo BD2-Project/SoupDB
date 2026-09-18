@@ -13,6 +13,7 @@ class TokenKind(Enum):
     STRING = "string"
     OPERATOR = "operator"
     STAR = "star"
+    NULL = "null"
     LPAREN = "lparen"
     RPAREN = "rparen"
     COMMA = "comma"
