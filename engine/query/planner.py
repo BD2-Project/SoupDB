@@ -1,17 +1,16 @@
 """Query planner: resolves SQL statements into volcano execution plans.
 
-The planner consumes a catalog by *duck typing* because the formal contract
-of ``engine/common/catalog.py`` is still being negotiated with the team. It
-expects the injected object to provide:
+The planner consumes a catalog by *duck typing*: both the persistent
+:class:`engine.common.catalog.Catalog` and the tests fake satisfy the same
+interface. It expects the injected object to provide:
 
 - ``schema(name)`` returning the table schema and raising
   ``QueryExecutionError`` for unknown tables.
 - ``file_org(name)`` returning the table file organization.
 - ``indexes(name)`` returning a mapping ``column name -> Index`` (possibly
   empty) used for physical access-path selection.
-- ``create_table(name, columns)`` used by the executor for DDL.
-
-The real catalog replaces this duck-typed one once its contract exists.
+- ``create_table(name, columns, engine)`` used by the executor for DDL.
+- ``create_index(index_name, table, column, index_type)`` for index DDL.
 """
 
 from dataclasses import dataclass
