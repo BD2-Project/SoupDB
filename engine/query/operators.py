@@ -4,6 +4,7 @@ Frozen contract between query processing and the rest of the engine.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import cmp_to_key
 from time import perf_counter
@@ -11,7 +12,9 @@ from typing import Any
 
 from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
+from engine.common.rid import RID
 from engine.common.schema import ColumnDef, ColumnType
+from engine.indexes.base import Index
 from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
@@ -163,6 +166,103 @@ class TableScan(_VolcanoBase):
     def explain(self) -> PlanNode:
         columns = [column.name for column in self.schema]
         return self._plan("TableScan", {"columns": columns})
+
+
+class IndexLookup(_VolcanoBase):
+    """Equality lookup through an index (leaf operator).
+
+    Fetches the candidate RIDs from ``index.search(key)`` and fetches each
+    record from the provided callable, skipping stale RIDs whose record no
+    longer exists. The caller is responsible for keeping a ``Filter`` on top
+    to preserve the semantics of the original predicate.
+    """
+
+    def __init__(
+        self,
+        index: Index,
+        fetch: Callable[[RID], Record | None],
+        key: object,
+        schema: Schema,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((), disk_manager)
+        self._index = index
+        self._fetch = fetch
+        self._key = key
+        self.schema = schema
+
+    def open(self) -> None:
+        super().open()
+        candidates = self._index.search(self._key)
+        self._buffer = iter((rid, self._fetch(rid)) for rid in candidates)
+
+    def next(self) -> Record | None:
+        while True:
+            try:
+                _, record = next(self._buffer)
+            except StopIteration:
+                return None
+            if record is None:
+                continue
+            self._rows += 1
+            return record
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        return self._plan("IndexLookup", {"key": str(self._key)})
+
+
+class IndexRangeScan(_VolcanoBase):
+    """Inclusive range equality through an index (leaf operator).
+
+    Requires ``index.supports_range``; the ``Filter`` on top keeps the exact
+    boundaries of a non-indexed predicate (e.g. exclusive comparisons).
+    """
+
+    def __init__(
+        self,
+        index: Index,
+        fetch: Callable[[RID], Record | None],
+        lo: object,
+        hi: object,
+        schema: Schema,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((), disk_manager)
+        self._index = index
+        self._fetch = fetch
+        self._lo = lo
+        self._hi = hi
+        self.schema = schema
+
+    def open(self) -> None:
+        super().open()
+        if not self._index.supports_range:
+            raise QueryExecutionError("range search requested but the index does not support it")
+        candidates = self._index.range_search(self._lo, self._hi)
+        self._buffer = iter((rid, self._fetch(rid)) for rid in candidates)
+
+    def next(self) -> Record | None:
+        while True:
+            try:
+                _, record = next(self._buffer)
+            except StopIteration:
+                return None
+            if record is None:
+                continue
+            self._rows += 1
+            return record
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        detail = {"lo": str(self._lo), "hi": str(self._hi)}
+        return self._plan("IndexRangeScan", detail)
 
 
 class Filter(_VolcanoBase):
