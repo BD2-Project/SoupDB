@@ -6,11 +6,14 @@ The parser consumes the token stream from :mod:`engine.query.lexer` and builds
 Expression precedence (low to high):
 
 ``OR`` < ``AND`` < ``NOT`` < comparison (``= <> != < <= > >=``,
-``BETWEEN``, ``IN``, ``LIKE``) < primary.
+``BETWEEN``, ``IN``, ``LIKE``) < additive (``+ -``) < multiplicative
+(``* / %``) < primary. ``IS [NOT] NULL`` is a predicate suffix that binds at
+the comparison level.
 """
 
 from engine.query.ast import (
     BetweenExpr,
+    BinaryExpr,
     ColumnDef,
     ColumnRef,
     ColumnType,
@@ -26,6 +29,7 @@ from engine.query.ast import (
     HavingClause,
     InExpr,
     InsertStatement,
+    IsNullExpr,
     JoinClause,
     LikeExpr,
     LimitClause,
@@ -412,7 +416,7 @@ class _Parser:
 
     @staticmethod
     def _is_boolean_expression(expr: Expr) -> bool:
-        if isinstance(expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr)):
+        if isinstance(expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr)):
             return True
         if isinstance(expr, Literal) and isinstance(expr.value, bool):
             return True
@@ -444,33 +448,61 @@ class _Parser:
         return self._parse_predicate()
 
     def _parse_predicate(self) -> Expr:
-        value = self._parse_primary()
+        value = self._parse_arithmetic()
         token = self._peek()
+
+        if self._match_keyword("IS"):
+            negated = self._match_keyword("NOT")
+            self._expect_kind(TokenKind.NULL)
+            return IsNullExpr(value, negated=negated)
 
         if token.kind is TokenKind.OPERATOR and token.value in _COMPARISON_OPS:
             self._advance()
-            right = self._parse_primary()
+            right = self._parse_arithmetic()
             return CompareExpr(value, token.value, right)
 
         if self._match_keyword("BETWEEN"):
-            lo = self._parse_primary()
+            lo = self._parse_arithmetic()
             self._expect_keyword("AND")
-            hi = self._parse_primary()
+            hi = self._parse_arithmetic()
             return BetweenExpr(value, lo, hi)
 
         if self._match_keyword("IN"):
             self._expect_kind(TokenKind.LPAREN)
-            items = [self._parse_primary()]
+            items = [self._parse_arithmetic()]
             while self._match_comma():
-                items.append(self._parse_primary())
+                items.append(self._parse_arithmetic())
             self._expect_kind(TokenKind.RPAREN)
             return InExpr(value, tuple(items))
 
         if self._match_keyword("LIKE"):
-            pattern = self._parse_primary()
+            pattern = self._parse_arithmetic()
             return LikeExpr(value, pattern)
 
         return value
+
+    def _check_arithmetic_operator(self, ops: tuple[str, ...], star: bool = False) -> bool:
+        token = self._peek()
+        if token.kind is TokenKind.OPERATOR and token.value in ops:
+            return True
+        return star and token.kind is TokenKind.STAR
+
+    def _parse_arithmetic(self) -> Expr:
+        left = self._parse_term()
+        while self._check_arithmetic_operator(("+", "-")):
+            op = self._advance().value
+            right = self._parse_term()
+            left = BinaryExpr(left, op, right)
+        return left
+
+    def _parse_term(self) -> Expr:
+        left = self._parse_primary()
+        while self._check_arithmetic_operator(("*", "/", "%"), star=True):
+            token = self._advance()
+            op = "*" if token.kind is TokenKind.STAR else token.value
+            right = self._parse_primary()
+            left = BinaryExpr(left, op, right)
+        return left
 
     def _check_keyword_in(self, keywords: set[str]) -> bool:
         token = self._peek()
