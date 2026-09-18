@@ -49,5 +49,6 @@ nav:
       - storage: api/storage.md
       - indexes: api/indexes.md
       - query: api/query.md
+  - Indexación: indexacion_algoritmos_externos.md
   - Decisiones: decisiones.md
   - Estrategia de release: estrategia-release.md

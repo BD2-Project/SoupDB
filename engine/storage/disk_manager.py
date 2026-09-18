@@ -27,6 +27,19 @@ class DiskManager:
 
         self._next_page_id = size // page_size
 
+    @property
+    def page_size(self) -> int:
+        return self._page_size
+
+    @property
+    def path(self) -> Path:
+        """The managed file's path on disk."""
+        return self._path
+
+    @property
+    def page_count(self) -> int:
+        return self._next_page_id
+
     def _validate_page_id(self, page_id: int) -> None:
         if page_id < 0 or page_id >= self._next_page_id:
             raise ValueError(f"page_id {page_id} does not reference an allocated page")
@@ -70,3 +83,11 @@ class DiskManager:
     def close(self) -> None:
         """Close the managed file. Safe to call more than once."""
         self._file.close()
+
+    def delete(self) -> None:
+        """Close the file and remove it from disk. Safe to call more than once."""
+        self._file.close()
+        try:
+            self._path.unlink()
+        except FileNotFoundError:
+            pass
