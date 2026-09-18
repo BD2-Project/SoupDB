@@ -121,6 +121,12 @@ def tokenize(sql: str) -> list[Token]:
             tokens.append(Token(TokenKind.NUMBER, number, start))
             continue
 
+        if char == "-" and i + 1 < len(sql) and sql[i + 1] in _DIGITS:
+            start = i
+            number, i = _scan_number(sql, i + 1)
+            tokens.append(Token(TokenKind.NUMBER, "-" + number, start))
+            continue
+
         two = sql[i : i + 2]
         if two in _OPERATORS:
             tokens.append(Token(TokenKind.OPERATOR, two, i))

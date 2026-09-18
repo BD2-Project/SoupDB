@@ -46,6 +46,17 @@ def test_decimal_number_token() -> None:
     assert (TokenKind.NUMBER, "1.25") in toks
 
 
+def test_negative_number_tokens() -> None:
+    toks = token_values("SELECT * FROM papers WHERE anio = -1 AND score >= -1.5")
+    assert (TokenKind.NUMBER, "-1") in toks
+    assert (TokenKind.NUMBER, "-1.5") in toks
+
+
+def test_bare_minus_still_raises() -> None:
+    with pytest.raises(QueryParseError):
+        tokenize("a = 5 -")
+
+
 def test_string_literal_single_quotes() -> None:
     toks = token_values("titulo = 'RAG sobre papers'")
     assert toks[-1] == (TokenKind.STRING, "RAG sobre papers")

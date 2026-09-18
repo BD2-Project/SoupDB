@@ -34,6 +34,13 @@ def test_where_comparison_number_and_string() -> None:
     assert expr == CompareExpr(ColumnRef("titulo"), "=", Literal("RAG"))
 
 
+def test_where_negative_number_literal() -> None:
+    expr = parse_where("id = -1")
+    assert expr == CompareExpr(ColumnRef("id"), "=", Literal(-1))
+    expr = parse_where("score >= -1.5")
+    assert expr == CompareExpr(ColumnRef("score"), ">=", Literal(-1.5))
+
+
 def test_where_all_comparison_operators() -> None:
     ops = ["=", "<>", "!=", "<", "<=", ">", ">="]
     for op in ops:
