@@ -4,12 +4,13 @@ Frozen contract between query processing and the rest of the engine.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from functools import cmp_to_key
 from time import perf_counter
 from typing import Any
 
+from engine.algorithms.external_sort import external_sort
 from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
 from engine.common.rid import RID
@@ -398,7 +399,11 @@ class Distinct(_VolcanoBase):
 
 
 class Sort(_VolcanoBase):
-    """In-memory sort of the full input stream over one or more keys."""
+    """Sort of the full input stream over one or more keys.
+
+    In-memory by default. When ``memory_limit_bytes`` is given the records are
+    sorted externally with ``external_sort`` (bounded memory, temporary runs).
+    """
 
     def __init__(
         self,
@@ -406,14 +411,16 @@ class Sort(_VolcanoBase):
         order_by: tuple[OrderByItem, ...],
         schema: Schema | None = None,
         disk_manager: DiskManager | None = None,
+        memory_limit_bytes: int | None = None,
     ) -> None:
         super().__init__((child,), disk_manager)
         self._child = child
         self._order_by = order_by
         self.schema = schema if schema is not None else child.schema
+        self._memory_limit = memory_limit_bytes
 
-    def _compare(self, left: object, right: object) -> int:
-        for item, left_key, right_key in zip(self._order_by, left[1], right[1], strict=True):
+    def _compare_keys(self, left_keys: tuple[object, ...], right_keys: tuple[object, ...]) -> int:
+        for item, left_key, right_key in zip(self._order_by, left_keys, right_keys, strict=True):
             if left_key == right_key:
                 continue
             try:
@@ -427,20 +434,52 @@ class Sort(_VolcanoBase):
             return 1
         return 0
 
-    def open(self) -> None:
-        super().open()
-        buffered: list[tuple[tuple[object, ...], tuple[object, ...]]] = []
+    def _compare(self, left: object, right: object) -> int:
+        return self._compare_keys(left[1], right[1])
+
+    def _compare_records(self, left: Record, right: Record) -> int:
+        left_row = decode_row(left.data, self.schema)
+        right_row = decode_row(right.data, self.schema)
+        left_keys = tuple(evaluate(item.expr, left_row, self.schema) for item in self._order_by)
+        right_keys = tuple(evaluate(item.expr, right_row, self.schema) for item in self._order_by)
+        return self._compare_keys(left_keys, right_keys)
+
+    def _record_stream(self) -> Iterator[Record]:
         while True:
             record = self._child.next()
             if record is None:
-                break
-            row = decode_row(record.data, self.schema)
-            keys = tuple(evaluate(item.expr, row, self.schema) for item in self._order_by)
-            buffered.append((row, keys))
-        buffered.sort(key=cmp_to_key(self._compare))
-        self._buffer = iter(buffered)
+                return
+            yield record
+
+    def open(self) -> None:
+        super().open()
+        if self._memory_limit is not None:
+            self._external = external_sort(
+                self._record_stream(),
+                self._compare_records,
+                memory_limit_bytes=self._memory_limit,
+            )
+            self._buffer = None
+        else:
+            buffered: list[tuple[tuple[object, ...], tuple[object, ...]]] = []
+            while True:
+                record = self._child.next()
+                if record is None:
+                    break
+                row = decode_row(record.data, self.schema)
+                keys = tuple(evaluate(item.expr, row, self.schema) for item in self._order_by)
+                buffered.append((row, keys))
+            buffered.sort(key=cmp_to_key(self._compare))
+            self._buffer = iter(buffered)
 
     def next(self) -> Record | None:
+        if self._memory_limit is not None:
+            try:
+                record = next(self._external)
+            except StopIteration:
+                return None
+            self._rows += 1
+            return record
         try:
             row, _ = next(self._buffer)
         except StopIteration:
@@ -450,6 +489,7 @@ class Sort(_VolcanoBase):
 
     def close(self) -> None:
         self._buffer = None
+        self._external = None
         super().close()
 
     def explain(self) -> PlanNode:
