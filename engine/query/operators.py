@@ -5,6 +5,7 @@ Frozen contract between query processing and the rest of the engine.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from functools import cmp_to_key
 from time import perf_counter
 from typing import Any
 
@@ -22,6 +23,7 @@ from engine.query.ast import (
     Literal,
     LogicalExpr,
     NotExpr,
+    OrderByItem,
     SelectColumn,
 )
 from engine.query.evaluator import Schema, evaluate
@@ -293,3 +295,63 @@ class Distinct(_VolcanoBase):
     def explain(self) -> PlanNode:
         columns = [column.name for column in self.schema]
         return self._plan("Distinct", {"columns": columns})
+
+
+class Sort(_VolcanoBase):
+    """In-memory sort of the full input stream over one or more keys."""
+
+    def __init__(
+        self,
+        child: Operator,
+        order_by: tuple[OrderByItem, ...],
+        schema: Schema | None = None,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((child,), disk_manager)
+        self._child = child
+        self._order_by = order_by
+        self.schema = schema if schema is not None else child.schema
+
+    def _compare(self, left: object, right: object) -> int:
+        for item, left_key, right_key in zip(self._order_by, left[1], right[1], strict=True):
+            if left_key == right_key:
+                continue
+            try:
+                ascending = left_key < right_key
+            except TypeError as exc:
+                raise QueryExecutionError(
+                    f"cannot order by {item.expr}: incompatible types"
+                ) from exc
+            if ascending is item.ascending:
+                return -1
+            return 1
+        return 0
+
+    def open(self) -> None:
+        super().open()
+        buffered: list[tuple[tuple[object, ...], tuple[object, ...]]] = []
+        while True:
+            record = self._child.next()
+            if record is None:
+                break
+            row = decode_row(record.data, self.schema)
+            keys = tuple(evaluate(item.expr, row, self.schema) for item in self._order_by)
+            buffered.append((row, keys))
+        buffered.sort(key=cmp_to_key(self._compare))
+        self._buffer = iter(buffered)
+
+    def next(self) -> Record | None:
+        try:
+            row, _ = next(self._buffer)
+        except StopIteration:
+            return None
+        self._rows += 1
+        return Record(data=encode_row(row, self.schema))
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        keys = [str(item.expr) for item in self._order_by]
+        return self._plan("Sort", {"keys": keys})

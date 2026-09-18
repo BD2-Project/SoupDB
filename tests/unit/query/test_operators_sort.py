@@ -60,8 +60,8 @@ def test_sort_multi_key_mixed_direction() -> None:
         OrderByItem(ColumnRef("titulo")),
     )
     assert sort_rows(order) == [
-        (3, "B", 2021),
         (1, "A", 2021),
+        (3, "B", 2021),
         (2, "C", 2020),
         (4, "D", 2020),
     ]
@@ -79,9 +79,7 @@ def test_sort_explain() -> None:
     fake = FakeFileOrganization()
     for row in ROWS:
         fake.insert(Record(data=encode_row(row, PAPERS_SCHEMA)))
-    sort = Sort(
-        TableScan(fake, PAPERS_SCHEMA), (OrderByItem(ColumnRef("anio"), ascending=False),)
-    )
+    sort = Sort(TableScan(fake, PAPERS_SCHEMA), (OrderByItem(ColumnRef("anio"), ascending=False),))
     sort.open()
     while sort.next() is not None:
         pass
