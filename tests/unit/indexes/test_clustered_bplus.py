@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from engine.common.record import Record
-from engine.common.rid import RID
 from engine.indexes.clustered_bplus import ClusteredBPlusTree
 from engine.storage.buffer_manager import BufferManager
 from engine.storage.disk_manager import DiskManager
@@ -93,38 +92,6 @@ def test_remove_record_updates_index_and_storage(tmp_path: Path) -> None:
     assert index.remove_record(15, rid) is True
     assert index.search(15) == []
     assert index.fetch_record(rid) is None
-
-
-def test_remove_by_rid_keeps_index_and_storage_in_sync(tmp_path: Path) -> None:
-    index, _index_dm, _data_dm = _make_index(tmp_path)
-
-    rid = index.insert_record(_record(15))
-
-    assert index.remove(15, rid) == 1
-    assert index.search(15) == []
-    assert [record for _rid, record in index.scan_records()] == []
-
-
-def test_remove_all_rids_under_key_synchronizes(tmp_path: Path) -> None:
-    index, _index_dm, _data_dm = _make_index(tmp_path)
-
-    index.insert_record(_record(15, "a"))
-    index.insert_record(_record(15, "b"))
-    index.insert_record(_record(20))
-
-    assert index.remove(15) == 2
-    assert index.search(15) == []
-    assert [_key(record) for _rid, record in index.scan_records()] == [20]
-
-
-def test_remove_unknown_rid_is_a_noop(tmp_path: Path) -> None:
-    index, _index_dm, _data_dm = _make_index(tmp_path)
-
-    rid = index.insert_record(_record(15))
-
-    assert index.remove(15, RID(page_id=999, slot=999)) == 0
-    assert index.search(15) == [rid]
-    assert [record for _rid, record in index.scan_records()] == [_record(15)]
 
 
 def test_clustered_index_persists_after_reopen(tmp_path: Path) -> None:

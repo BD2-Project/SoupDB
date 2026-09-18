@@ -80,21 +80,6 @@ class ClusteredBPlusTree(BPlusTree):
         super().insert(key, rid)
         return False
 
-    def remove(self, key: Key, rid: RID | None = None) -> int:
-        """Remove RIDs keeping the B+ tree and clustered storage in sync.
-
-        Unlike ``BPlusTree.remove``, this also removes the records from the
-        key-ordered data file so ``search_records`` and ``scan_records`` never
-        disagree.
-        """
-        if rid is not None:
-            return 1 if self.remove_record(key, rid) else 0
-        count = 0
-        for candidate in super().search(key):
-            if self.remove_record(key, candidate):
-                count += 1
-        return count
-
     def close(self) -> None:
         self._data_buffer_manager.flush_all()
         super().close()
