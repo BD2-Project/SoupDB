@@ -41,6 +41,23 @@ class CompareExpr(Expr):
 
 
 @dataclass(frozen=True)
+class BinaryExpr(Expr):
+    """Arithmetic operation ``left OP right`` with OP in ``+ - * / %``."""
+
+    left: Expr
+    op: str
+    right: Expr
+
+
+@dataclass(frozen=True)
+class IsNullExpr(Expr):
+    """Null check ``value IS [NOT] NULL``."""
+
+    value: Expr
+    negated: bool = False
+
+
+@dataclass(frozen=True)
 class LogicalExpr(Expr):
     """Boolean combination ``left AND right`` or ``left OR right``."""
 
@@ -83,10 +100,7 @@ class LikeExpr(Expr):
 
 @dataclass(frozen=True)
 class FunctionExpr(Expr):
-    """Aggregate or function call such as ``COUNT(*)`` or ``SUM(anio)``.
-
-    ``arg`` is None when the function takes no argument (e.g. ``COUNT(*)``).
-    """
+    """``arg`` is None when the function takes no argument (e.g. ``COUNT(*)``)."""
 
     name: str
     arg: Expr | None

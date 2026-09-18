@@ -2,6 +2,7 @@
 
 from engine.query.ast import (
     BetweenExpr,
+    BinaryExpr,
     ColumnDef,
     ColumnRef,
     ColumnType,
@@ -11,6 +12,7 @@ from engine.query.ast import (
     FunctionExpr,
     InExpr,
     InsertStatement,
+    IsNullExpr,
     LikeExpr,
     Literal,
     LogicalExpr,
@@ -105,3 +107,22 @@ def test_create_table_statement_shape() -> None:
     )
     assert stmt.columns[0].type_name == ColumnType.INT
     assert stmt.columns[2].length == 60
+
+
+def test_binary_expression_structure() -> None:
+    expr = BinaryExpr(ColumnRef("a"), "+", Literal(1))
+    assert expr.left == ColumnRef("a")
+    assert expr.op == "+"
+    assert expr.right == Literal(1)
+    assert expr == BinaryExpr(ColumnRef("a"), "+", Literal(1))
+    assert expr != BinaryExpr(ColumnRef("a"), "-", Literal(1))
+
+
+def test_is_null_expression() -> None:
+    null = IsNullExpr(ColumnRef("titulo"))
+    not_null = IsNullExpr(ColumnRef("titulo"), negated=True)
+    assert null.value == ColumnRef("titulo")
+    assert null.negated is False
+    assert not_null.negated is True
+    assert null == IsNullExpr(ColumnRef("titulo"))
+    assert null != not_null
