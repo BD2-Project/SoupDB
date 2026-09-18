@@ -9,6 +9,7 @@ from typing import Any
 
 from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
+from engine.indexes.base import Index
 from engine.query.ast import (
     CreateTableStatement,
     DeleteStatement,
@@ -70,18 +71,24 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
 def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
-    rids_to_remove = []
+    try:
+        indexes: dict[str, Index] = catalog.indexes(statement.table)
+    except (AttributeError, NotImplementedError):
+        indexes = {}
+    rows_to_remove = []
     for rid, record in file_org.scan():
-        if statement.where is None:
-            rids_to_remove.append(rid)
-            continue
         row = decode_row(record.data, schema)
-        if evaluate(statement.where, row, schema):
-            rids_to_remove.append(rid)
+        if statement.where is None or evaluate(statement.where, row, schema):
+            rows_to_remove.append((rid, row))
     affected = 0
-    for rid in rids_to_remove:
-        if file_org.remove(rid):
-            affected += 1
+    for rid, row in rows_to_remove:
+        if not file_org.remove(rid):
+            continue
+        for position, column in enumerate(schema):
+            index = indexes.get(column.name)
+            if index is not None:
+                index.remove(row[position], rid)
+        affected += 1
     return ResultSet(columns=(), affected=affected)
 
 

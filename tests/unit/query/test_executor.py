@@ -110,6 +110,28 @@ def test_delete_all() -> None:
     assert run("SELECT * FROM papers", catalog).rows == ()
 
 
+def test_delete_maintains_index() -> None:
+    catalog = make_catalog()
+    catalog.add_index("papers", "anio")
+    result = run("DELETE FROM papers WHERE anio = 2020", catalog)
+    assert result.affected == 2
+    assert run("SELECT * FROM papers WHERE anio = 2020", catalog).rows == ()
+    assert run("SELECT * FROM papers WHERE anio = 2019", catalog).rows == ((1, 2019, "VLDB"),)
+    anio_index = catalog.indexes("papers")["anio"]
+    assert anio_index.search(2020) == []
+    assert len(anio_index.search(2019)) == 1
+
+
+def test_delete_all_maintains_index() -> None:
+    catalog = make_catalog()
+    catalog.add_index("papers", "anio")
+    result = run("DELETE FROM papers", catalog)
+    assert result.affected == 4
+    anio_index = catalog.indexes("papers")["anio"]
+    assert anio_index.search(2020) == []
+    assert anio_index.search(2019) == []
+
+
 def test_create_table_persists_schema() -> None:
     catalog = FakeCatalog()
     result = run("CREATE TABLE fresh (a INT, b TEXT)", catalog)
