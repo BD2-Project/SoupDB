@@ -119,6 +119,12 @@ def test_plan_insert_partial_columns_raises() -> None:
         plan(parse("INSERT INTO papers (id) VALUES (1)"), make_catalog())
 
 
+def test_plan_insert_duplicate_columns_raises() -> None:
+    sql = "INSERT INTO papers (id, id, anio, venue) VALUES (1, 2, 2020, 'VLDB')"
+    with pytest.raises(QueryExecutionError):
+        plan(parse(sql), make_catalog())
+
+
 def test_plan_insert_value_count_mismatch_raises() -> None:
     with pytest.raises(QueryExecutionError):
         plan(parse("INSERT INTO papers VALUES (1, 2020)"), make_catalog())

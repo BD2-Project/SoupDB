@@ -105,7 +105,7 @@ def _plan_insert(statement: InsertStatement, catalog: Any) -> Plan:
     schema = catalog.schema(statement.table)
     if statement.columns:
         expected = {column.name for column in schema}
-        if set(statement.columns) != expected:
+        if len(statement.columns) != len(schema) or set(statement.columns) != expected:
             raise QueryExecutionError("insert must provide exactly the table columns")
     width = len(statement.columns) if statement.columns else len(schema)
     for row in statement.values:
