@@ -155,3 +155,49 @@ def test_join_clause_shape() -> None:
     assert join.table == "authors"
     assert isinstance(join.on, CompareExpr)
     assert join == JoinClause("authors", on_expr)
+
+
+def test_select_statement_with_having_limit_joins() -> None:
+    stmt = SelectStatement(
+        columns=(SelectColumn(ColumnRef("venue")),),
+        table="papers",
+        group_by=(ColumnRef("venue"),),
+        having=HavingClause(
+            CompareExpr(FunctionExpr("COUNT", ColumnRef("id")), ">", Literal(10)),
+        ),
+        limit=LimitClause(limit=Literal(5)),
+        joins=(
+            JoinClause(
+                "venues",
+                CompareExpr(ColumnRef("p.venue_id"), "=", ColumnRef("v.id")),
+            ),
+        ),
+    )
+    assert stmt.having is not None
+    assert stmt.having.expr.op == ">"
+    assert stmt.limit is not None
+    assert stmt.limit.limit == Literal(5)
+    assert stmt.limit.offset is None
+    assert stmt.joins[0].table == "venues"
+    assert stmt == SelectStatement(
+        columns=(SelectColumn(ColumnRef("venue")),),
+        table="papers",
+        group_by=(ColumnRef("venue"),),
+        having=HavingClause(
+            CompareExpr(FunctionExpr("COUNT", ColumnRef("id")), ">", Literal(10)),
+        ),
+        limit=LimitClause(limit=Literal(5)),
+        joins=(
+            JoinClause(
+                "venues",
+                CompareExpr(ColumnRef("p.venue_id"), "=", ColumnRef("v.id")),
+            ),
+        ),
+    )
+
+
+def test_select_statement_new_fields_default() -> None:
+    stmt = SelectStatement(columns=(), table="papers")
+    assert stmt.having is None
+    assert stmt.limit is None
+    assert stmt.joins == ()

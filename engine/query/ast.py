@@ -148,7 +148,8 @@ class JoinClause:
 
 @dataclass(frozen=True)
 class SelectStatement(Statement):
-    """A SELECT query with optional WHERE, GROUP BY and ORDER BY clauses."""
+    """A SELECT query with optional WHERE, GROUP BY, HAVING, ORDER BY,
+    LIMIT and JOIN clauses."""
 
     columns: tuple[SelectColumn, ...]
     table: str
@@ -156,6 +157,9 @@ class SelectStatement(Statement):
     group_by: tuple[Expr, ...] = ()
     order_by: tuple[OrderByItem, ...] = ()
     distinct: bool = False
+    having: HavingClause | None = None
+    limit: LimitClause | None = None
+    joins: tuple[JoinClause, ...] = ()
 
 
 @dataclass(frozen=True)
