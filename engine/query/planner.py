@@ -22,6 +22,7 @@ from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
     CompareExpr,
+    CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
     Expr,
@@ -76,6 +77,8 @@ def plan(statement: Statement, catalog: Any) -> Plan:
         return _plan_delete(statement, catalog)
     if isinstance(statement, CreateTableStatement):
         return _plan_create(statement, catalog)
+    if isinstance(statement, CreateIndexStatement):
+        return _plan_create_index(statement, catalog)
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
 
 
@@ -132,11 +135,28 @@ def _plan_delete(statement: DeleteStatement, catalog: Any) -> Plan:
 
 
 def _plan_create(statement: CreateTableStatement, catalog: Any) -> Plan:
+    if statement.engine not in ("HEAP", "SEQUENTIAL"):
+        raise QueryExecutionError(
+            f"unsupported engine {statement.engine!r}; use HEAP or SEQUENTIAL"
+        )
     seen: set[str] = set()
     for column in statement.columns:
         if column.name in seen:
             raise QueryExecutionError(f"duplicate column {column.name!r}")
         seen.add(column.name)
+    return Plan(statement=statement)
+
+
+def _plan_create_index(statement: CreateIndexStatement, catalog: Any) -> Plan:
+    if statement.index_type not in ("BTREE", "HASH"):
+        raise QueryExecutionError(
+            f"unsupported index type {statement.index_type!r}; use BTREE or HASH"
+        )
+    schema = catalog.schema(statement.table)
+    if statement.column not in {column.name for column in schema}:
+        raise QueryExecutionError(
+            f"unknown column {statement.column!r} in table {statement.table!r}"
+        )
     return Plan(statement=statement)
 
 

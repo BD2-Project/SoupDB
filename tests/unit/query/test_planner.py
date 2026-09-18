@@ -180,6 +180,36 @@ def test_plan_create_duplicate_column_raises() -> None:
         plan(parse("CREATE TABLE t (a INT, a INT)"), make_catalog())
 
 
+def test_plan_create_table_unknown_engine_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("CREATE TABLE t (a INT) ENGINE MEMORY"), make_catalog())
+
+
+def test_plan_create_table_valid_engine_builds() -> None:
+    result = plan(parse("CREATE TABLE t (a INT) ENGINE HEAP"), make_catalog())
+    assert result.statement is not None
+
+
+def test_plan_create_index_builds() -> None:
+    result = plan(parse("CREATE INDEX idx_anio ON papers (anio) TYPE BTREE"), make_catalog())
+    assert result.statement is not None
+
+
+def test_plan_create_index_unknown_table_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("CREATE INDEX idx ON nope (a)"), make_catalog())
+
+
+def test_plan_create_index_unknown_column_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("CREATE INDEX idx ON papers (missing)"), make_catalog())
+
+
+def test_plan_create_index_unknown_type_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("CREATE INDEX idx ON papers (anio) TYPE BM25"), make_catalog())
+
+
 def test_plan_delete_unknown_table_raises() -> None:
     with pytest.raises(QueryExecutionError):
         plan(parse("DELETE FROM nope WHERE id = 1"), make_catalog())

@@ -11,6 +11,7 @@ from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
 from engine.indexes.base import Index
 from engine.query.ast import (
+    CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
     InsertStatement,
@@ -31,7 +32,15 @@ def execute(plan: Plan, catalog: Any) -> ResultSet:
     if isinstance(statement, DeleteStatement):
         return _execute_delete(statement, catalog)
     if isinstance(statement, CreateTableStatement):
-        catalog.create_table(statement.table, statement.columns)
+        catalog.create_table(statement.table, statement.columns, statement.engine)
+        return ResultSet(columns=())
+    if isinstance(statement, CreateIndexStatement):
+        catalog.create_index(
+            statement.index_name,
+            statement.table,
+            statement.column,
+            statement.index_type,
+        )
         return ResultSet(columns=())
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
 

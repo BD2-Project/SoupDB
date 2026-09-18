@@ -21,8 +21,9 @@ def _column_index(schema: Schema, name: str) -> int:
 
 
 class _Table:
-    def __init__(self, schema: Schema) -> None:
+    def __init__(self, schema: Schema, engine: str = "HEAP") -> None:
         self.schema = schema
+        self.engine = engine
         self.file_org = FakeFileOrganization()
         self.indexes: dict[str, Index] = {}
 
@@ -33,10 +34,16 @@ class FakeCatalog:
     def __init__(self) -> None:
         self._tables: dict[str, _Table] = {}
 
-    def create_table(self, name: str, columns: Schema) -> None:
+    def create_table(self, name: str, columns: Schema, engine: str = "HEAP") -> None:
         if name in self._tables:
             raise QueryExecutionError(f"table {name} already exists")
-        self._tables[name] = _Table(columns)
+        self._tables[name] = _Table(columns, engine)
+
+    def strategy(self, name: str) -> str:
+        table = self._tables.get(name)
+        if table is None:
+            raise QueryExecutionError(f"unknown table {name!r}")
+        return table.engine
 
     def schema(self, name: str) -> Schema:
         table = self._tables.get(name)
