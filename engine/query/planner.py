@@ -32,6 +32,7 @@ from engine.query.ast import (
     Literal,
     LogicalExpr,
     NotExpr,
+    SelectColumn,
     SelectStatement,
     Statement,
 )
@@ -93,7 +94,8 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
     if statement.order_by:
         root = Sort(root, statement.order_by)
     if statement.columns:
-        root = Project(root, statement.columns)
+        selections = _resolve_aggregate_projections(statement.columns, aggregates)
+        root = Project(root, selections)
     if statement.distinct:
         root = Distinct(root)
     return Plan(statement=statement, root=root, output_schema=root.schema)
@@ -171,6 +173,30 @@ def _collect_aggregates(statement: SelectStatement) -> tuple[FunctionExpr, ...]:
     for item in statement.order_by:
         _walk(item.expr, found)
     return tuple(dict.fromkeys(found))
+
+
+def _resolve_aggregate_projections(
+    projections: tuple[SelectColumn, ...],
+    aggregates: tuple[FunctionExpr, ...],
+) -> tuple[SelectColumn, ...]:
+    resolved: list[SelectColumn] = []
+    for selection in projections:
+        expr = selection.expr
+        if isinstance(expr, FunctionExpr):
+            for position, agg in enumerate(aggregates, start=1):
+                if expr == agg:
+                    resolved.append(
+                        SelectColumn(
+                            ColumnRef(f"{agg.name.lower()}_{position}"),
+                            selection.alias,
+                        )
+                    )
+                    break
+            else:
+                resolved.append(selection)
+        else:
+            resolved.append(selection)
+    return tuple(resolved)
 
 
 def _walk(expr: Expr, found: list[FunctionExpr]) -> None:
