@@ -233,7 +233,34 @@ class BPlusTree(Index):
             self._split_root_leaf(leaf_page_id, leaf, entries)
             return
 
-        self._split_child_leaf(leaf_page_id, leaf, entries)
+        right_page_id = self._disk_manager.page_count
+
+        left, right = self._choose_leaf_split(
+            entries,
+            parent_page_id=leaf.parent_page_id,
+            right_page_id=right_page_id,
+            old_next_leaf_page_id=leaf.next_leaf_page_id,
+        )
+
+        separator = right.entries[0][0]
+
+        right_page_id = self._disk_manager.allocate_page()
+
+        self._write_page(
+            leaf_page_id,
+            codec.encode_leaf(self._page_size, left),
+        )
+        self._write_page(
+            right_page_id,
+            codec.encode_leaf(self._page_size, right),
+        )
+
+        self._insert_into_parent(
+            parent_page_id=leaf.parent_page_id,
+            left_page_id=leaf_page_id,
+            separator=separator,
+            right_page_id=right_page_id,
+        )
 
     def _split_root_leaf(
         self,
@@ -252,15 +279,12 @@ class BPlusTree(Index):
         )
 
         separator = right.entries[0][0]
+
         new_root = codec.InternalNode(
             parent_page_id=None,
             keys=(separator,),
             children=(leaf_page_id, right_page_id),
         )
-
-        left_page = codec.encode_leaf(self._page_size, left)
-        right_page = codec.encode_leaf(self._page_size, right)
-        root_page = codec.encode_internal(self._page_size, new_root)
 
         allocated_right = self._disk_manager.allocate_page()
         allocated_root = self._disk_manager.allocate_page()
@@ -268,66 +292,142 @@ class BPlusTree(Index):
         if allocated_right != right_page_id or allocated_root != new_root_page_id:
             raise RuntimeError("unexpected B+ page allocation order")
 
-        self._write_page(leaf_page_id, left_page)
-        self._write_page(right_page_id, right_page)
-        self._write_page(new_root_page_id, root_page)
+        self._write_page(
+            leaf_page_id,
+            codec.encode_leaf(self._page_size, left),
+        )
+        self._write_page(
+            right_page_id,
+            codec.encode_leaf(self._page_size, right),
+        )
+        self._write_page(
+            new_root_page_id,
+            codec.encode_internal(self._page_size, new_root),
+        )
 
         self._root_page_id = new_root_page_id
         self._write_metadata()
 
-    def _split_child_leaf(
+    def _insert_into_parent(
         self,
-        leaf_page_id: int,
-        leaf: codec.LeafNode,
-        entries: list[tuple[Key, RID]],
+        *,
+        parent_page_id: int,
+        left_page_id: int,
+        separator: Key,
+        right_page_id: int,
     ) -> None:
-        parent_page_id = leaf.parent_page_id
-        if parent_page_id is None:
-            raise RuntimeError("child leaf unexpectedly has no parent")
-
         parent = self._read_internal(parent_page_id)
-        right_page_id = self._disk_manager.page_count
-
-        left, right = self._choose_leaf_split(
-            entries,
-            parent_page_id=parent_page_id,
-            right_page_id=right_page_id,
-            old_next_leaf_page_id=leaf.next_leaf_page_id,
-        )
 
         try:
-            child_position = parent.children.index(leaf_page_id)
+            child_position = parent.children.index(left_page_id)
         except ValueError as exc:
-            raise ValueError("leaf is not referenced by its parent") from exc
-
-        separator = right.entries[0][0]
+            raise ValueError("child is not referenced by its parent") from exc
 
         keys = list(parent.keys)
         children = list(parent.children)
+
         keys.insert(child_position, separator)
         children.insert(child_position + 1, right_page_id)
 
-        updated_parent = codec.InternalNode(
+        updated = codec.InternalNode(
             parent_page_id=parent.parent_page_id,
             keys=tuple(keys),
             children=tuple(children),
         )
 
         try:
-            parent_page = codec.encode_internal(self._page_size, updated_parent)
-        except ValueError as exc:
-            raise ValueError("B+ internal node split required") from exc
+            encoded = codec.encode_internal(self._page_size, updated)
+        except ValueError:
+            self._split_internal(parent_page_id, updated)
+            return
 
-        left_page = codec.encode_leaf(self._page_size, left)
-        right_page = codec.encode_leaf(self._page_size, right)
+        self._write_page(parent_page_id, encoded)
+
+    def _split_internal(
+        self,
+        page_id: int,
+        node: codec.InternalNode,
+    ) -> None:
+        if node.parent_page_id is None:
+            self._split_root_internal(page_id, node)
+            return
+
+        right_page_id = self._disk_manager.page_count
+
+        left, promoted, right = self._choose_internal_split(
+            node,
+            left_parent_page_id=node.parent_page_id,
+            right_parent_page_id=node.parent_page_id,
+        )
 
         allocated_right = self._disk_manager.allocate_page()
         if allocated_right != right_page_id:
             raise RuntimeError("unexpected B+ page allocation order")
 
-        self._write_page(leaf_page_id, left_page)
-        self._write_page(right_page_id, right_page)
-        self._write_page(parent_page_id, parent_page)
+        self._write_page(
+            page_id,
+            codec.encode_internal(self._page_size, left),
+        )
+        self._write_page(
+            right_page_id,
+            codec.encode_internal(self._page_size, right),
+        )
+
+        self._update_children_parent(left.children, page_id)
+        self._update_children_parent(right.children, right_page_id)
+
+        self._insert_into_parent(
+            parent_page_id=node.parent_page_id,
+            left_page_id=page_id,
+            separator=promoted,
+            right_page_id=right_page_id,
+        )
+
+    def _split_root_internal(
+        self,
+        page_id: int,
+        node: codec.InternalNode,
+    ) -> None:
+        right_page_id = self._disk_manager.page_count
+        new_root_page_id = right_page_id + 1
+
+        left, promoted, right = self._choose_internal_split(
+            node,
+            left_parent_page_id=new_root_page_id,
+            right_parent_page_id=new_root_page_id,
+        )
+
+        new_root = codec.InternalNode(
+            parent_page_id=None,
+            keys=(promoted,),
+            children=(page_id, right_page_id),
+        )
+
+        allocated_right = self._disk_manager.allocate_page()
+        allocated_root = self._disk_manager.allocate_page()
+
+        if allocated_right != right_page_id or allocated_root != new_root_page_id:
+            raise RuntimeError("unexpected B+ page allocation order")
+
+        self._write_page(
+            page_id,
+            codec.encode_internal(self._page_size, left),
+        )
+        self._write_page(
+            right_page_id,
+            codec.encode_internal(self._page_size, right),
+        )
+
+        self._update_children_parent(left.children, page_id)
+        self._update_children_parent(right.children, right_page_id)
+
+        self._write_page(
+            new_root_page_id,
+            codec.encode_internal(self._page_size, new_root),
+        )
+
+        self._root_page_id = new_root_page_id
+        self._write_metadata()
 
     def _choose_leaf_split(
         self,
@@ -363,6 +463,84 @@ class BPlusTree(Index):
             return left, right
 
         raise ValueError("B+ leaf entries cannot be split into valid pages")
+
+    def _choose_internal_split(
+        self,
+        node: codec.InternalNode,
+        *,
+        left_parent_page_id: int,
+        right_parent_page_id: int,
+    ) -> tuple[codec.InternalNode, Key, codec.InternalNode]:
+        candidates = sorted(
+            range(len(node.keys)),
+            key=lambda position: abs(len(node.keys) - 1 - 2 * position),
+        )
+
+        for position in candidates:
+            promoted = node.keys[position]
+
+            left = codec.InternalNode(
+                parent_page_id=left_parent_page_id,
+                keys=node.keys[:position],
+                children=node.children[: position + 1],
+            )
+            right = codec.InternalNode(
+                parent_page_id=right_parent_page_id,
+                keys=node.keys[position + 1 :],
+                children=node.children[position + 1 :],
+            )
+
+            if not left.keys or not right.keys:
+                continue
+
+            try:
+                codec.encode_internal(self._page_size, left)
+                codec.encode_internal(self._page_size, right)
+            except ValueError:
+                continue
+
+            return left, promoted, right
+
+        raise ValueError("B+ internal node cannot be split into valid pages")
+
+    def _update_children_parent(
+        self,
+        children: tuple[int, ...],
+        parent_page_id: int,
+    ) -> None:
+        for child_page_id in children:
+            self._set_parent_page_id(child_page_id, parent_page_id)
+
+    def _set_parent_page_id(
+        self,
+        page_id: int,
+        parent_page_id: int,
+    ) -> None:
+        page = self._read_page(page_id)
+        node_type = codec.page_type(page)
+
+        if node_type == codec.PAGE_TYPE_LEAF:
+            leaf = codec.decode_leaf(page)
+            updated = codec.LeafNode(
+                parent_page_id=parent_page_id,
+                next_leaf_page_id=leaf.next_leaf_page_id,
+                entries=leaf.entries,
+            )
+            encoded = codec.encode_leaf(self._page_size, updated)
+
+        elif node_type == codec.PAGE_TYPE_INTERNAL:
+            internal = codec.decode_internal(page)
+            updated = codec.InternalNode(
+                parent_page_id=parent_page_id,
+                keys=internal.keys,
+                children=internal.children,
+            )
+            encoded = codec.encode_internal(self._page_size, updated)
+
+        else:
+            raise ValueError("metadata page cannot be an internal child")
+
+        self._write_page(page_id, encoded)
 
     def _read_leaf(self, page_id: int) -> codec.LeafNode:
         page = self._read_page(page_id)

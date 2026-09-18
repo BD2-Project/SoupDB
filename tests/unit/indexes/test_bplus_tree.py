@@ -227,3 +227,65 @@ def test_single_entry_too_large_for_leaf_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         tree.insert("x" * PAGE_SIZE, RID(0, 0))
+
+
+def test_internal_split_preserves_all_entries(tmp_path: Path) -> None:
+    tree, dm, _bm = _make_tree(tmp_path)
+
+    for key in range(80):
+        tree.insert(key, RID(key // 10, key))
+
+    assert dm.page_count > 10
+
+    for key in range(80):
+        assert tree.search(key) == [RID(key // 10, key)]
+
+
+def test_range_search_crosses_internal_node_boundaries(tmp_path: Path) -> None:
+    tree, _dm, _bm = _make_tree(tmp_path)
+
+    for key in range(80):
+        tree.insert(key, RID(0, key))
+
+    assert tree.range_search(17, 63) == [RID(0, key) for key in range(17, 64)]
+
+
+def test_multilevel_tree_persists_after_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "index.db"
+
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=2)
+    tree = BPlusTree(dm, bm)
+
+    for key in range(80):
+        tree.insert(key, RID(key // 10, key))
+
+    tree.close()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=2)
+    reopened = BPlusTree(dm2, bm2)
+
+    for key in range(80):
+        assert reopened.search(key) == [RID(key // 10, key)]
+
+
+def test_multilevel_tree_works_with_single_buffer_frame(tmp_path: Path) -> None:
+    tree, _dm, _bm = _make_tree(tmp_path, buffer_capacity=1)
+
+    for key in range(60):
+        tree.insert(key, RID(0, key))
+
+    assert tree.range_search(0, 59) == [RID(0, key) for key in range(60)]
+
+
+def test_duplicates_survive_internal_splits(tmp_path: Path) -> None:
+    tree, _dm, _bm = _make_tree(tmp_path)
+
+    expected = [RID(index // 10, index) for index in range(60)]
+
+    for rid in expected:
+        tree.insert(7, rid)
+
+    assert tree.search(7) == expected
