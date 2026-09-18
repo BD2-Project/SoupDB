@@ -2,7 +2,7 @@
 
 import pytest
 
-from engine.common.errors import LockNotGranted, QueryParseError, TransactionError
+from engine.common.errors import QueryParseError, TransactionError
 from engine.common.schema import ColumnDef, ColumnType
 from engine.transactions.base import LockMode
 from engine.transactions.session import TransactionalSession
@@ -73,9 +73,10 @@ def test_exclusive_write_blocks_concurrent_reader() -> None:
     s2 = TransactionalSession(catalog, transaction_manager=manager, lock_timeout_ms=30)
     t1 = s1.begin()
     s1.execute("INSERT INTO accounts VALUES (9, 999)")
-    s2.begin()
-    with pytest.raises(LockNotGranted):
+    t2 = s2.begin()
+    with pytest.raises(TransactionError):
         s2.execute("SELECT * FROM accounts")
+    assert t2.state.value == "aborted"
     t1.rollback()
     s1.close()
     s2.close()

@@ -6,12 +6,17 @@ run inside ``BEGIN/COMMIT`` explicitly or are auto-committed as a single
 statement transaction when no transaction is active.
 """
 
+import os
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from engine.common.errors import TransactionError
+from engine.common.errors import (
+    DeadlockDetected,
+    LockNotGranted,
+    TransactionError,
+)
 from engine.common.record import Record
 from engine.common.rid import RID
 from engine.query import ResultSet
@@ -21,6 +26,8 @@ from engine.query.planner import plan as build_plan
 from engine.storage.base import FileOrganization
 from engine.transactions.base import LockMode
 from engine.transactions.transaction_manager import Transaction, TransactionManager
+
+_DEFAULT_LOCK_TIMEOUT_MS = int(os.getenv("LOCK_TIMEOUT_MS", "3000"))
 
 
 @dataclass
@@ -47,13 +54,14 @@ class TransactionalSession:
         self,
         catalog: Any,
         transaction_manager: TransactionManager | None = None,
-        lock_timeout_ms: int = 3000,
+        lock_timeout_ms: int | None = None,
     ) -> None:
         self._catalog = catalog
         self._tm = transaction_manager or TransactionManager()
-        self._lock_timeout_ms = lock_timeout_ms
+        self._lock_timeout_ms = (
+            lock_timeout_ms if lock_timeout_ms is not None else _DEFAULT_LOCK_TIMEOUT_MS
+        )
         self._local = threading.local()
-        self._journal: dict[int, list[object]] = {}
 
     @property
     def catalog(self) -> Any:
@@ -67,21 +75,18 @@ class TransactionalSession:
         if getattr(self._local, "tx", None) is not None:
             raise TransactionError("a transaction is already active on this thread")
         tx = self._tm.begin()
+        tx.undo_callback = self._apply_undo
         self._local.tx = tx
-        self._journal.setdefault(tx.tx_id, [])
         return tx
 
     def commit(self) -> None:
         tx = self._current()
         self._tm.commit(tx)
-        self._journal.pop(tx.tx_id, None)
         self._local.tx = None
 
     def rollback(self) -> None:
         tx = self._current()
-        self._apply_undo(tx.tx_id)
-        self._tm.rollback(tx)
-        self._journal.pop(tx.tx_id, None)
+        tx.rollback()
         self._local.tx = None
 
     def current_transaction(self) -> Transaction | None:
@@ -96,7 +101,8 @@ class TransactionalSession:
             try:
                 return self._run(statement)
             except BaseException:
-                self.rollback()
+                if self.current_transaction() is not None:
+                    self.rollback()
                 raise
         return self._run(statement)
 
@@ -113,7 +119,15 @@ class TransactionalSession:
 
     def _run(self, statement: Any) -> ResultSet:
         locking_catalog = _LockingCatalog(self._catalog, self)
-        return execute_plan(build_plan(statement, locking_catalog), locking_catalog)
+        try:
+            return execute_plan(build_plan(statement, locking_catalog), locking_catalog)
+        except (LockNotGranted, DeadlockDetected) as exc:
+            tx = self.current_transaction()
+            if tx is not None:
+                self.rollback()
+            raise TransactionError(
+                f"deadlock or lock timeout in transaction {tx.tx_id if tx else '?'}: {exc}"
+            ) from exc
 
     # --- Locking helpers used by the catalog proxies ---------------------
 
@@ -122,8 +136,7 @@ class TransactionalSession:
         self._tm.lock_manager.acquire(tx.tx_id, resource, mode, timeout_ms=self._lock_timeout_ms)
 
     def _journal_append(self, entry: object) -> None:
-        tx = self._current()
-        self._journal[tx.tx_id].append(entry)
+        self._current().journal.append(entry)
 
     def _current(self) -> Transaction:
         tx = getattr(self._local, "tx", None)
@@ -131,15 +144,14 @@ class TransactionalSession:
             raise TransactionError("no active transaction on this thread")
         return tx
 
-    def _apply_undo(self, tx_id: int) -> None:
-        for entry in reversed(self._journal.get(tx_id, ())):
+    def _apply_undo(self, journal: list[object]) -> None:
+        for entry in reversed(journal):
             if isinstance(entry, _UndoInsert):
                 self._catalog.file_org(entry.table).remove(entry.rid)
             elif isinstance(entry, _UndoRemove):
                 self._catalog.file_org(entry.table).insert(entry.record)
 
     def close(self) -> None:
-        self._journal.clear()
         self._tm.close()
 
 

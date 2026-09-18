@@ -1,5 +1,6 @@
 """Transaction lifecycle management (ACID states)."""
 
+from collections.abc import Callable
 from threading import Lock
 
 from engine.common.errors import TransactionError
@@ -14,11 +15,15 @@ class Transaction:
         self.tx_id = tx_id
         self._manager = manager
         self.state = TransactionState.ACTIVE
+        self.journal: list[object] = []
+        self.undo_callback: Callable[[list[object]], None] | None = None
 
     def commit(self) -> None:
         self._manager.commit(self)
 
     def rollback(self) -> None:
+        if self.undo_callback is not None:
+            self.undo_callback(self.journal)
         self._manager.rollback(self)
 
 

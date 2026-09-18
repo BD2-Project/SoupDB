@@ -7,8 +7,9 @@ and serializable schedules. Deadlock is handled by lock timeout.
 
 import threading
 import time
+from collections import defaultdict
 
-from engine.common.errors import LockNotGranted
+from engine.common.errors import DeadlockDetected, LockNotGranted
 from engine.transactions.base import ConcurrencyStrategy, LockMode, Resource
 
 _LOCK_PRIORITY = {
@@ -53,7 +54,33 @@ class StrictTwoPhaseLocking(ConcurrencyStrategy):
     def __init__(self) -> None:
         # resource -> {tx_id: (mode, count)}
         self._grants: dict[Resource, dict[int, tuple[LockMode, int]]] = {}
+        # tx_id -> resource a transaction is currently blocked on
+        self._waiting: dict[int, Resource] = {}
         self._mutex = threading.RLock()
+
+    def _deadlock_detected(self, tx_id: int) -> bool:
+        """Whether ``tx_id`` is part of a wait-for cycle."""
+        waiting = self._waiting
+        if tx_id not in waiting:
+            return False
+        edges: dict[int, set[int]] = defaultdict(set)
+        for waiting_tx, resource in waiting.items():
+            grants = self._grants.get(resource)
+            if not grants:
+                continue
+            for holder in grants:
+                if holder != waiting_tx:
+                    edges[waiting_tx].add(holder)
+
+        def in_cycle(node: int, path: frozenset[int]) -> bool:
+            if node in path:
+                return True
+            for nxt in edges.get(node, ()):
+                if in_cycle(nxt, path | {node}):
+                    return True
+            return False
+
+        return in_cycle(tx_id, frozenset())
 
     def _try_grant(self, tx_id: int, resource: Resource, mode: LockMode) -> bool:
         grants = self._grants.get(resource)
@@ -78,6 +105,7 @@ class StrictTwoPhaseLocking(ConcurrencyStrategy):
         while True:
             with self._mutex:
                 if self._try_grant(tx_id, resource, mode):
+                    self._waiting.pop(tx_id, None)
                     grants = self._grants.setdefault(resource, {})
                     if tx_id in grants:
                         held, count = grants[tx_id]
@@ -85,7 +113,14 @@ class StrictTwoPhaseLocking(ConcurrencyStrategy):
                     else:
                         grants[tx_id] = (mode, 1)
                     return
+                self._waiting[tx_id] = resource
+            if self._deadlock_detected(tx_id):
+                with self._mutex:
+                    self._waiting.pop(tx_id, None)
+                raise DeadlockDetected(f"deadlock detected involving transaction {tx_id}")
             if deadline is not None and time.monotonic() >= deadline:
+                with self._mutex:
+                    self._waiting.pop(tx_id, None)
                 raise LockNotGranted(
                     f"lock not granted on {resource} for tx {tx_id} within timeout"
                 )
@@ -106,6 +141,7 @@ class StrictTwoPhaseLocking(ConcurrencyStrategy):
 
     def release_all(self, tx_id: int) -> None:
         with self._mutex:
+            self._waiting.pop(tx_id, None)
             for resource in list(self._grants):
                 grants = self._grants[resource]
                 if tx_id in grants:
@@ -126,3 +162,4 @@ class StrictTwoPhaseLocking(ConcurrencyStrategy):
     def close(self) -> None:
         with self._mutex:
             self._grants.clear()
+            self._waiting.clear()
