@@ -1,7 +1,5 @@
 """Tests for the TableScan and Filter volcano operators."""
 
-import pytest
-
 from engine.common.record import Record, decode_row, encode_row
 from engine.common.schema import ColumnDef, ColumnType
 from engine.query.ast import ColumnRef, CompareExpr, Literal

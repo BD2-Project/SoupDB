@@ -5,9 +5,14 @@ Frozen contract between query processing and the rest of the engine.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
-from engine.common.record import Record
+from engine.common.record import Record, decode_row
+from engine.query.ast import Expr
+from engine.query.evaluator import Schema, evaluate
+from engine.storage.base import FileOrganization
+from engine.storage.disk_manager import DiskManager
 
 
 @dataclass
@@ -57,3 +62,117 @@ class Operator(ABC):
     @abstractmethod
     def explain(self) -> PlanNode:
         """Return the execution plan node for this operator."""
+
+
+class _VolcanoBase(Operator):
+    """Shared lifecycle and metrics for concrete operators.
+
+    Concrete operators emit records (``next``) and produce the plan info
+    (``explain``); the base tracks rows emitted, elapsed wall-clock time and
+    the delta of disk reads/writes of the injected ``DiskManager``.
+    """
+
+    def __init__(self, children: tuple["Operator", ...], disk_manager: DiskManager | None) -> None:
+        self._children = children
+        self._disk = disk_manager
+        self._rows = 0
+        self._started = False
+        self._start = 0.0
+        self._reads0 = 0
+        self._writes0 = 0
+        self.schema: Schema = ()
+        """Schema of the records this operator emits."""
+
+    def open(self) -> None:
+        self._rows = 0
+        self._started = True
+        self._start = perf_counter()
+        self._reads0 = self._disk.reads if self._disk is not None else 0
+        self._writes0 = self._disk.writes if self._disk is not None else 0
+        for child in self._children:
+            child.open()
+
+    def close(self) -> None:
+        self._started = False
+        for child in self._children:
+            child.close()
+
+    def _plan(self, op: str, detail: dict[str, Any]) -> PlanNode:
+        elapsed = (perf_counter() - self._start) * 1000 if self._started else 0.0
+        delta_reads = 0
+        delta_writes = 0
+        if self._disk is not None:
+            delta_reads = self._disk.reads - self._reads0
+            delta_writes = self._disk.writes - self._writes0
+        return PlanNode(
+            op=op,
+            detail=detail,
+            rows=self._rows,
+            elapsed_ms=round(elapsed, 3),
+            disk_reads=delta_reads,
+            disk_writes=delta_writes,
+            children=[child.explain() for child in self._children],
+        )
+
+
+class TableScan(_VolcanoBase):
+    """Sequential scan of a file organization (leaf operator)."""
+
+    def __init__(
+        self,
+        file_org: FileOrganization,
+        schema: Schema,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((), disk_manager)
+        self._file_org = file_org
+        self.schema = schema
+
+    def open(self) -> None:
+        super().open()
+        self._iterator = self._file_org.scan()
+
+    def next(self) -> Record | None:
+        try:
+            _, record = next(self._iterator)
+        except StopIteration:
+            return None
+        self._rows += 1
+        return record
+
+    def close(self) -> None:
+        self._iterator = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        columns = [column.name for column in self.schema]
+        return self._plan("TableScan", {"columns": columns})
+
+
+class Filter(_VolcanoBase):
+    """Passes through the records that satisfy a predicate."""
+
+    def __init__(
+        self,
+        child: Operator,
+        predicate: Expr,
+        schema: Schema,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((child,), disk_manager)
+        self._child = child
+        self._predicate = predicate
+        self.schema = schema
+
+    def next(self) -> Record | None:
+        while True:
+            record = self._child.next()
+            if record is None:
+                return None
+            row = decode_row(record.data, self.schema)
+            if evaluate(self._predicate, row, self.schema):
+                self._rows += 1
+                return record
+
+    def explain(self) -> PlanNode:
+        return self._plan("Filter", {"predicate": str(self._predicate)})
