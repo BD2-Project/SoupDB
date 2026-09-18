@@ -150,15 +150,6 @@ def test_operations_after_close_are_rejected(tmp_path: Path) -> None:
         index.search(10)
 
 
-def test_bucket_overflow_is_rejected_until_split_support_exists(
-    tmp_path: Path,
-) -> None:
-    index, _dm, _bm = _make_index(tmp_path)
-
-    with pytest.raises(ValueError, match="bucket split required"):
-        index.insert("x" * PAGE_SIZE, RID(0, 0))
-
-
 def test_works_with_single_buffer_frame(tmp_path: Path) -> None:
     index, _dm, _bm = _make_index(
         tmp_path,
@@ -170,3 +161,122 @@ def test_works_with_single_buffer_frame(tmp_path: Path) -> None:
 
     assert index.search(10) == [RID(0, 1)]
     assert index.search(20) == [RID(0, 2)]
+
+
+def test_bucket_split_preserves_all_entries(tmp_path: Path) -> None:
+    index, dm, _bm = _make_index(tmp_path)
+
+    expected = {}
+
+    for key in range(40):
+        rid = RID(key // 10, key)
+        expected[key] = rid
+        index.insert(key, rid)
+
+    assert dm.page_count > 3
+
+    for key, rid in expected.items():
+        assert index.search(key) == [rid]
+
+
+def test_multiple_bucket_splits_preserve_entries(tmp_path: Path) -> None:
+    index, _dm, _bm = _make_index(tmp_path)
+
+    for key in range(100):
+        index.insert(key, RID(0, key))
+
+    for key in range(100):
+        assert index.search(key) == [RID(0, key)]
+
+
+def test_split_structure_persists_after_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "hash.db"
+
+    dm = DiskManager(path, page_size=PAGE_SIZE)
+    bm = BufferManager(dm, capacity=2)
+    index = ExtendibleHash(dm, bm)
+
+    for key in range(80):
+        index.insert(key, RID(key // 10, key))
+
+    index.close()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=PAGE_SIZE)
+    bm2 = BufferManager(dm2, capacity=2)
+    reopened = ExtendibleHash(dm2, bm2)
+
+    for key in range(80):
+        assert reopened.search(key) == [RID(key // 10, key)]
+
+
+def test_duplicate_keys_use_overflow_at_maximum_depth(tmp_path: Path) -> None:
+    path = tmp_path / "hash.db"
+
+    dm = DiskManager(path, page_size=128)
+    bm = BufferManager(dm, capacity=2)
+    index = ExtendibleHash(
+        dm,
+        bm,
+        max_global_depth=2,
+    )
+
+    expected = [RID(position // 10, position) for position in range(30)]
+
+    for rid in expected:
+        index.insert(7, rid)
+
+    assert index.search(7) == expected
+
+
+def test_overflow_chain_persists_after_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "hash.db"
+
+    dm = DiskManager(path, page_size=128)
+    bm = BufferManager(dm, capacity=2)
+    index = ExtendibleHash(
+        dm,
+        bm,
+        max_global_depth=2,
+    )
+
+    expected = [RID(0, position) for position in range(30)]
+
+    for rid in expected:
+        index.insert(7, rid)
+
+    index.close()
+    dm.close()
+
+    dm2 = DiskManager(path, page_size=128)
+    bm2 = BufferManager(dm2, capacity=2)
+    reopened = ExtendibleHash(dm2, bm2)
+
+    assert reopened.search(7) == expected
+
+
+def test_remove_all_duplicates_from_overflow_chain(tmp_path: Path) -> None:
+    path = tmp_path / "hash.db"
+
+    dm = DiskManager(path, page_size=128)
+    bm = BufferManager(dm, capacity=2)
+    index = ExtendibleHash(
+        dm,
+        bm,
+        max_global_depth=2,
+    )
+
+    expected = [RID(0, position) for position in range(30)]
+
+    for rid in expected:
+        index.insert(7, rid)
+
+    assert index.remove(7) == len(expected)
+    assert index.search(7) == []
+
+
+def test_large_entry_is_rejected_without_repeated_splits(tmp_path: Path) -> None:
+    index, _dm, _bm = _make_index(tmp_path)
+
+    with pytest.raises(ValueError, match="does not fit"):
+        index.insert("x" * PAGE_SIZE, RID(0, 0))
