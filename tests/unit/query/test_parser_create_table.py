@@ -52,3 +52,32 @@ def test_create_table_unknown_type_raises() -> None:
 def test_create_table_varchar_without_length_raises() -> None:
     with pytest.raises(QueryParseError):
         parse("CREATE TABLE papers (titulo VARCHAR)")
+
+
+def test_create_table_default_engine_is_heap() -> None:
+    stmt = parse("CREATE TABLE papers (id INT)")
+    assert isinstance(stmt, CreateTableStatement)
+    assert stmt.engine == "HEAP"
+
+
+def test_create_table_with_engine_clause() -> None:
+    stmt = parse("CREATE TABLE papers (id INT) ENGINE HEAP")
+    assert isinstance(stmt, CreateTableStatement)
+    assert stmt.engine == "HEAP"
+
+
+def test_create_table_with_sequential_engine() -> None:
+    stmt = parse("CREATE TABLE papers (id INT) ENGINE SEQUENTIAL")
+    assert isinstance(stmt, CreateTableStatement)
+    assert stmt.engine == "SEQUENTIAL"
+
+
+def test_create_table_engine_case_insensitive() -> None:
+    stmt = parse("create table papers (id int) engine sequential")
+    assert isinstance(stmt, CreateTableStatement)
+    assert stmt.engine == "SEQUENTIAL"
+
+
+def test_create_table_engine_raises_when_duplicate() -> None:
+    with pytest.raises(QueryParseError):
+        parse("CREATE TABLE papers (id INT) ENGINE HEAP ENGINE SEQUENTIAL")
