@@ -8,6 +8,7 @@ from engine.query.executor import execute
 from engine.query.parser import parse
 from engine.query.planner import plan
 from tests.fakes.fake_catalog import FakeCatalog
+from tests.fakes.fake_index import FakeIndex
 
 PAPERS = (
     ColumnDef("id", ColumnType.INT),
@@ -117,7 +118,7 @@ def test_insert_maintains_indexes() -> None:
     result = run("INSERT INTO papers VALUES (5, 2022, 'VLDB')", catalog)
     assert result.affected == 1
     assert run("SELECT * FROM papers WHERE anio = 2022", catalog).rows == ((5, 2022, "VLDB"),)
-    anio_index = catalog.indexes("papers")["anio"]
+    anio_index = catalog.indexes("papers")["idx_anio"]
     assert len(anio_index.search(2022)) == 1
 
 
@@ -154,7 +155,7 @@ def test_delete_maintains_index() -> None:
     assert result.affected == 2
     assert run("SELECT * FROM papers WHERE anio = 2020", catalog).rows == ()
     assert run("SELECT * FROM papers WHERE anio = 2019", catalog).rows == ((1, 2019, "VLDB"),)
-    anio_index = catalog.indexes("papers")["anio"]
+    anio_index = catalog.indexes("papers")["idx_anio"]
     assert anio_index.search(2020) == []
     assert len(anio_index.search(2019)) == 1
 
@@ -164,9 +165,31 @@ def test_delete_all_maintains_index() -> None:
     catalog.add_index("papers", "anio")
     result = run("DELETE FROM papers", catalog)
     assert result.affected == 4
-    anio_index = catalog.indexes("papers")["anio"]
+    anio_index = catalog.indexes("papers")["idx_anio"]
     assert anio_index.search(2020) == []
-    assert anio_index.search(2019) == []
+
+
+def test_insert_maintains_two_indexes_on_same_column() -> None:
+    catalog = make_catalog(rows=())
+    btree = FakeIndex()
+    hash_idx = FakeIndex(supports_range=False)
+    catalog.add_index("papers", "anio", btree, index_name="idx_bt")
+    catalog.add_index("papers", "anio", hash_idx, index_name="idx_hash")
+    run("INSERT INTO papers VALUES (5, 2022, 'VLDB')", catalog)
+    assert btree.search(2022) != []
+    assert hash_idx.search(2022) != []
+    assert run("SELECT * FROM papers WHERE anio = 2022", catalog).rows == ((5, 2022, "VLDB"),)
+
+
+def test_delete_maintains_two_indexes_on_same_column() -> None:
+    catalog = make_catalog()
+    btree = FakeIndex()
+    hash_idx = FakeIndex(supports_range=False)
+    catalog.add_index("papers", "anio", btree, index_name="idx_bt")
+    catalog.add_index("papers", "anio", hash_idx, index_name="idx_hash")
+    run("DELETE FROM papers WHERE anio = 2020", catalog)
+    assert btree.search(2020) == []
+    assert hash_idx.search(2020) == []
 
 
 def test_create_table_persists_schema() -> None:
@@ -187,3 +210,28 @@ def test_create_table_duplicate_raises() -> None:
     catalog = FakeCatalog()
     with pytest.raises(QueryExecutionError):
         run("CREATE TABLE t (a INT, a INT)", catalog)
+
+
+def test_drop_table_removes_table() -> None:
+    catalog = make_catalog()
+    result = run("DROP TABLE papers", catalog)
+    assert result.affected == 0
+    with pytest.raises(QueryExecutionError):
+        run("SELECT * FROM papers", catalog)
+
+
+def test_drop_table_unknown_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        run("DROP TABLE nope", make_catalog())
+
+
+def test_drop_index_removes_index() -> None:
+    catalog = make_catalog()
+    catalog.add_index("papers", "anio", index_name="idx_anio")
+    run("DROP INDEX idx_anio", catalog)
+    assert run("SELECT * FROM papers WHERE anio = 2020", catalog).rows != ()
+
+
+def test_drop_index_unknown_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        run("DROP INDEX nope", make_catalog())

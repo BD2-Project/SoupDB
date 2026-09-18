@@ -233,3 +233,25 @@ def test_page_count_reflects_existing_file_after_reopen(tmp_path: Path) -> None:
 
     reopened = DiskManager(path, page_size=4096)
     assert reopened.page_count == 2
+
+
+def test_path_property(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=4096)
+    assert dm.path == path
+
+
+def test_delete_removes_file(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=4096)
+    dm.allocate_page()
+    dm.delete()
+    assert not path.exists()
+
+
+def test_delete_is_idempotent(tmp_path: Path) -> None:
+    path = tmp_path / "data.db"
+    dm = DiskManager(path, page_size=4096)
+    dm.delete()
+    dm.delete()
+    assert not path.exists()

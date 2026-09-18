@@ -140,7 +140,39 @@ class DeleteStatement(Statement):
 
 @dataclass(frozen=True)
 class CreateTableStatement(Statement):
-    """``CREATE TABLE name (col type, ...)``."""
+    """``CREATE TABLE name (col type, ...) [ENGINE strategy]``.
+
+    ``engine`` selects the storage strategy: "HEAP" or "SEQUENTIAL", defaulting
+    to "HEAP". The planner validates the value before execution.
+    """
 
     table: str
     columns: tuple[ColumnDef, ...]
+    engine: str = "HEAP"
+
+
+@dataclass(frozen=True)
+class CreateIndexStatement(Statement):
+    """``CREATE INDEX name ON table (column) [TYPE BTREE|HASH]``.
+
+    ``index_type`` defaults to "BTREE".
+    """
+
+    index_name: str
+    table: str
+    column: str
+    index_type: str = "BTREE"
+
+
+@dataclass(frozen=True)
+class DropTableStatement(Statement):
+    """``DROP TABLE name`` removes a table and its indexes."""
+
+    table: str
+
+
+@dataclass(frozen=True)
+class DropIndexStatement(Statement):
+    """``DROP INDEX name`` removes an index."""
+
+    index_name: str

@@ -62,6 +62,31 @@ def test_plan_select_rejects_range_on_flat_index() -> None:
     assert tree.children[0].op == "TableScan"
 
 
+def test_plan_select_point_prefers_hash_over_btree() -> None:
+    catalog = make_catalog()
+    btree = FakeIndex()
+    hash_idx = FakeIndex(supports_range=False)
+    catalog.add_index("papers", "anio", btree, index_name="idx_bt")
+    catalog.add_index("papers", "anio", hash_idx, index_name="idx_hash")
+    result = plan_select("SELECT * FROM papers WHERE anio = 2020", catalog)
+    tree = result.root.explain()
+    assert tree.op == "Filter"
+    assert tree.children[0].op == "IndexLookup"
+    assert result.root._child._index is hash_idx
+
+
+def test_plan_select_range_prefers_btree_over_hash() -> None:
+    catalog = make_catalog()
+    btree = FakeIndex()
+    hash_idx = FakeIndex(supports_range=False)
+    catalog.add_index("papers", "anio", btree, index_name="idx_bt")
+    catalog.add_index("papers", "anio", hash_idx, index_name="idx_hash")
+    result = plan_select("SELECT * FROM papers WHERE anio BETWEEN 2019 AND 2021", catalog)
+    tree = result.root.explain()
+    assert tree.children[0].op == "IndexRangeScan"
+    assert result.root._child._index is btree
+
+
 def test_plan_select_without_index_uses_scan() -> None:
     result = plan_select("SELECT * FROM papers WHERE anio = 2020", make_catalog())
     tree = result.root.explain()
@@ -178,6 +203,63 @@ def test_plan_insert_value_count_mismatch_raises() -> None:
 def test_plan_create_duplicate_column_raises() -> None:
     with pytest.raises(QueryExecutionError):
         plan(parse("CREATE TABLE t (a INT, a INT)"), make_catalog())
+
+
+def test_plan_create_table_unknown_engine_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("CREATE TABLE t (a INT) ENGINE MEMORY"), make_catalog())
+
+
+def test_plan_create_table_valid_engine_builds() -> None:
+    result = plan(parse("CREATE TABLE t (a INT) ENGINE HEAP"), make_catalog())
+    assert result.statement is not None
+
+
+def test_plan_create_index_builds() -> None:
+    result = plan(parse("CREATE INDEX idx_anio ON papers (anio) TYPE BTREE"), make_catalog())
+    assert result.statement is not None
+
+
+def test_plan_create_index_unknown_table_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("CREATE INDEX idx ON nope (a)"), make_catalog())
+
+
+def test_plan_create_index_unknown_column_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("CREATE INDEX idx ON papers (missing)"), make_catalog())
+
+
+def test_plan_create_index_unknown_type_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("CREATE INDEX idx ON papers (anio) TYPE BM25"), make_catalog())
+
+
+def test_plan_drop_table_builds() -> None:
+    result = plan(parse("DROP TABLE papers"), make_catalog())
+    assert result.statement is not None
+
+
+def test_plan_drop_table_unknown_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("DROP TABLE nope"), make_catalog())
+
+
+def test_plan_drop_table_sys_table_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("DROP TABLE SysTables"), make_catalog())
+
+
+def test_plan_drop_index_builds() -> None:
+    catalog = make_catalog()
+    catalog.add_index("papers", "anio", index_name="idx_anio")
+    result = plan(parse("DROP INDEX idx_anio"), catalog)
+    assert result.statement is not None
+
+
+def test_plan_drop_index_unknown_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("DROP INDEX nope"), make_catalog())
 
 
 def test_plan_delete_unknown_table_raises() -> None:

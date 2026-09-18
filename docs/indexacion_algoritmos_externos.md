@@ -152,10 +152,13 @@ Evalúa el efecto del límite de memoria sobre:
 
 Los algoritmos están implementados de forma independiente de la capa SQL.
 
-En la rama actual el stack de consultas (lexer, parser, planner, executor y
-operadores volcano) ya consume estas estructuras: el planner selecciona entre
-sequential scan, index lookup/range scan y el modo spill de Sort/Aggregate
-activándose cuando el plan incluye un `memory_limit_bytes`.
+El stack de consultas (lexer, parser, planner, executor y operadores volcano)
+consume estas estructuras a través del catálogo real (`engine/common/catalog.py`):
+el planner selecciona entre sequential scan e index lookup/range scan y el modo
+spill de Sort/Aggregate se activa cuando el plan incluye un `memory_limit_bytes`.
 
-La integración está lista para pruebas locales con catálogos fakes. El
-contrato real del catálogo se cerrará con el equipo antes de la integración.
+El catálogo es persistente: registra cada índice en `SysIndexes`, hace
+*backfill* de las filas existentes al crearlos y el executor los mantiene en
+`INSERT`/`DELETE` vía `indexes_for`. Los planes de `explain()` reportan el
+delta de lecturas/escrituras de los `DiskManager`s que el catálogo expone por
+*duck typing*.

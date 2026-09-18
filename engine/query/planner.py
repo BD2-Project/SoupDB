@@ -1,29 +1,39 @@
 """Query planner: resolves SQL statements into volcano execution plans.
 
-The planner consumes a catalog by *duck typing* because the formal contract
-of ``engine/common/catalog.py`` is still being negotiated with the team. It
-expects the injected object to provide:
+The planner consumes a catalog by *duck typing*: both the persistent
+:class:`engine.common.catalog.Catalog` and the tests fake satisfy the same
+interface. It expects the injected object to provide:
 
 - ``schema(name)`` returning the table schema and raising
   ``QueryExecutionError`` for unknown tables.
 - ``file_org(name)`` returning the table file organization.
-- ``indexes(name)`` returning a mapping ``column name -> Index`` (possibly
-  empty) used for physical access-path selection.
-- ``create_table(name, columns)`` used by the executor for DDL.
+- ``indexes(name)`` returning a mapping ``index name -> Index`` (possibly
+  empty) with every physical index on the table.
+- ``indexes_for(name, column)`` returning the indexes that cover a specific
+  column (``column name -> Index`` is NOT the contract: a table may carry
+  several differently-structured indexes on the same column).
+- ``create_table(name, columns, engine)`` used by the executor for DDL.
+- ``create_index(index_name, table, column, index_type)`` for index DDL.
+- ``index_location(index_name)`` returning ``(table, column)`` or None.
 
-The real catalog replaces this duck-typed one once its contract exists.
+Access-path selection picks the index best suited to the predicate: a HASH
+index is preferred for point lookups and a BTREE index for inclusive ranges.
 """
 
 from dataclasses import dataclass
 from typing import Any
 
 from engine.common.errors import QueryExecutionError
+from engine.indexes.base import Index
 from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
     CompareExpr,
+    CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
+    DropIndexStatement,
+    DropTableStatement,
     Expr,
     FunctionExpr,
     InExpr,
@@ -76,6 +86,12 @@ def plan(statement: Statement, catalog: Any) -> Plan:
         return _plan_delete(statement, catalog)
     if isinstance(statement, CreateTableStatement):
         return _plan_create(statement, catalog)
+    if isinstance(statement, CreateIndexStatement):
+        return _plan_create_index(statement, catalog)
+    if isinstance(statement, DropTableStatement):
+        return _plan_drop_table(statement, catalog)
+    if isinstance(statement, DropIndexStatement):
+        return _plan_drop_index(statement, catalog)
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
 
 
@@ -132,11 +148,43 @@ def _plan_delete(statement: DeleteStatement, catalog: Any) -> Plan:
 
 
 def _plan_create(statement: CreateTableStatement, catalog: Any) -> Plan:
+    if statement.engine not in ("HEAP", "SEQUENTIAL"):
+        raise QueryExecutionError(
+            f"unsupported engine {statement.engine!r}; use HEAP or SEQUENTIAL"
+        )
     seen: set[str] = set()
     for column in statement.columns:
         if column.name in seen:
             raise QueryExecutionError(f"duplicate column {column.name!r}")
         seen.add(column.name)
+    return Plan(statement=statement)
+
+
+def _plan_create_index(statement: CreateIndexStatement, catalog: Any) -> Plan:
+    if statement.index_type not in ("BTREE", "HASH"):
+        raise QueryExecutionError(
+            f"unsupported index type {statement.index_type!r}; use BTREE or HASH"
+        )
+    schema = catalog.schema(statement.table)
+    if statement.column not in {column.name for column in schema}:
+        raise QueryExecutionError(
+            f"unknown column {statement.column!r} in table {statement.table!r}"
+        )
+    return Plan(statement=statement)
+
+
+def _plan_drop_table(statement: DropTableStatement, catalog: Any) -> Plan:
+    if statement.table.startswith("Sys"):
+        raise QueryExecutionError(
+            f"table name {statement.table!r} is reserved for system tables (Sys*)"
+        )
+    catalog.schema(statement.table)
+    return Plan(statement=statement)
+
+
+def _plan_drop_index(statement: DropIndexStatement, catalog: Any) -> Plan:
+    if catalog.index_location(statement.index_name) is None:
+        raise QueryExecutionError(f"unknown index {statement.index_name!r}")
     return Plan(statement=statement)
 
 
@@ -148,12 +196,6 @@ def _scan_or_index(
     disk_manager: DiskManager | None,
 ) -> Operator:
     """Pick the access path: index leaf when the WHERE allows it, else scan."""
-    try:
-        index_map = catalog.indexes(statement.table)
-    except (AttributeError, NotImplementedError):
-        return TableScan(file_org, schema, disk_manager)
-    if not index_map:
-        return TableScan(file_org, schema, disk_manager)
     where = statement.where
     if where is None:
         return TableScan(file_org, schema, disk_manager)
@@ -163,7 +205,7 @@ def _scan_or_index(
         and isinstance(where.left, ColumnRef)
         and isinstance(where.right, Literal)
     ):
-        index = index_map.get(where.left.name)
+        index = _index_for_column(catalog, statement.table, where.left.name, point=True)
         if index is not None:
             return IndexLookup(index, file_org.fetch, where.right.value, schema, disk_manager)
     if (
@@ -172,12 +214,37 @@ def _scan_or_index(
         and isinstance(where.lo, Literal)
         and isinstance(where.hi, Literal)
     ):
-        index = index_map.get(where.value.name)
-        if index is not None and index.supports_range:
+        index = _index_for_column(catalog, statement.table, where.value.name, point=False)
+        if index is not None:
             return IndexRangeScan(
                 index, file_org.fetch, where.lo.value, where.hi.value, schema, disk_manager
             )
     return TableScan(file_org, schema, disk_manager)
+
+
+def _index_for_column(
+    catalog: Any,
+    table: str,
+    column: str,
+    *,
+    point: bool,
+) -> Index | None:
+    """Pick the index covering ``column`` best suited to the access pattern."""
+    try:
+        candidates = catalog.indexes_for(table, column)
+    except (AttributeError, NotImplementedError):
+        return None
+    if not candidates:
+        return None
+    if point:
+        for candidate in candidates.values():
+            if not candidate.supports_range:
+                return candidate
+        return next(iter(candidates.values()))
+    for candidate in candidates.values():
+        if candidate.supports_range:
+            return candidate
+    return None
 
 
 def _collect_aggregates(statement: SelectStatement) -> tuple[FunctionExpr, ...]:

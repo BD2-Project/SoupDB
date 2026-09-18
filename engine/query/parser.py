@@ -15,8 +15,11 @@ from engine.query.ast import (
     ColumnRef,
     ColumnType,
     CompareExpr,
+    CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
+    DropIndexStatement,
+    DropTableStatement,
     Expr,
     FunctionExpr,
     InExpr,
@@ -97,6 +100,13 @@ class _Parser:
             )
         return self._advance()
 
+    def _expect_ident_or_keyword(self) -> str:
+        """Consume a bare word that can arrive as identifier or keyword."""
+        token = self._peek()
+        if token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD):
+            return self._advance().value.upper()
+        raise QueryParseError(f"expected a name at position {token.position}, got {token.value!r}")
+
     def _error_if_not_eof(self) -> None:
         self._match_kind(TokenKind.SEMICOLON)
         token = self._peek()
@@ -111,7 +121,13 @@ class _Parser:
         if self._match_keyword("INSERT"):
             return self._parse_insert()
         if self._match_keyword("CREATE"):
+            if self._match_keyword("INDEX"):
+                return self._parse_create_index()
             return self._parse_create_table()
+        if self._match_keyword("DROP"):
+            if self._match_keyword("INDEX"):
+                return self._parse_drop_index()
+            return self._parse_drop_table()
         raise QueryParseError(f"unsupported statement at position {self._peek().position}")
 
     def _parse_delete(self) -> DeleteStatement:
@@ -149,8 +165,40 @@ class _Parser:
         while self._match_comma():
             columns.append(self._parse_column_def())
         self._expect_kind(TokenKind.RPAREN)
+        engine = "HEAP"
+        if self._match_keyword("ENGINE"):
+            engine = self._expect_ident_or_keyword()
         self._error_if_not_eof()
-        return CreateTableStatement(table=table, columns=tuple(columns))
+        return CreateTableStatement(table=table, columns=tuple(columns), engine=engine)
+
+    def _parse_create_index(self) -> CreateIndexStatement:
+        index_name = self._expect_kind(TokenKind.IDENTIFIER).value
+        self._expect_keyword("ON")
+        table = self._expect_kind(TokenKind.IDENTIFIER).value
+        self._expect_kind(TokenKind.LPAREN)
+        column = self._expect_kind(TokenKind.IDENTIFIER).value
+        self._expect_kind(TokenKind.RPAREN)
+        index_type = "BTREE"
+        if self._match_keyword("TYPE"):
+            index_type = self._expect_ident_or_keyword()
+        self._error_if_not_eof()
+        return CreateIndexStatement(
+            index_name=index_name,
+            table=table,
+            column=column,
+            index_type=index_type,
+        )
+
+    def _parse_drop_table(self) -> DropTableStatement:
+        self._expect_keyword("TABLE")
+        table = self._expect_kind(TokenKind.IDENTIFIER).value
+        self._error_if_not_eof()
+        return DropTableStatement(table=table)
+
+    def _parse_drop_index(self) -> DropIndexStatement:
+        index_name = self._expect_kind(TokenKind.IDENTIFIER).value
+        self._error_if_not_eof()
+        return DropIndexStatement(index_name=index_name)
 
     def _parse_column_def(self) -> ColumnDef:
         name = self._expect_kind(TokenKind.IDENTIFIER).value
