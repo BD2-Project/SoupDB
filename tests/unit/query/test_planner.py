@@ -108,6 +108,29 @@ def test_plan_select_unknown_table_raises() -> None:
         plan_select("SELECT * FROM nope", make_catalog())
 
 
+def test_plan_select_unknown_column_in_where_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan_select("SELECT * FROM papers WHERE missing = 1", make_catalog())
+
+
+def test_plan_select_unknown_column_in_order_by_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan_select("SELECT * FROM papers ORDER BY missing", make_catalog())
+
+
+def test_plan_select_order_by_aggregate_resolved() -> None:
+    result = plan_select(
+        "SELECT venue, COUNT(*) FROM papers GROUP BY venue ORDER BY COUNT(*)",
+        make_catalog(),
+    )
+    tree = result.root.explain()
+    assert tree.op == "Project"
+    sort = tree.children[0]
+    assert sort.op == "Sort"
+    assert sort.children[0].op == "Aggregate"
+    assert any("count_1" in key for key in sort.detail["keys"])
+
+
 def test_plan_insert_keeps_statement() -> None:
     result = plan(parse("INSERT INTO papers VALUES (1, 2020, 'VLDB')"), make_catalog())
     assert result.statement.table == "papers"

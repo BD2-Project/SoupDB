@@ -32,6 +32,7 @@ from engine.query.ast import (
     Literal,
     LogicalExpr,
     NotExpr,
+    OrderByItem,
     SelectColumn,
     SelectStatement,
     Statement,
@@ -88,11 +89,15 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
         )
     root: Operator = _scan_or_index(catalog, statement, file_org, schema)
     if statement.where is not None:
+        _validate_columns(statement.where, schema)
         root = Filter(root, statement.where, schema)
     if grouped:
         root = Aggregate(root, statement.group_by, aggregates)
     if statement.order_by:
-        root = Sort(root, statement.order_by)
+        order_by = _resolve_aggregate_order_by(statement.order_by, aggregates)
+        for item in order_by:
+            _validate_columns(item.expr, root.schema)
+        root = Sort(root, order_by)
     if statement.columns:
         selections = _resolve_aggregate_projections(statement.columns, aggregates)
         root = Project(root, selections)
@@ -197,6 +202,34 @@ def _resolve_aggregate_projections(
         else:
             resolved.append(selection)
     return tuple(resolved)
+
+
+def _resolve_aggregate_order_by(
+    order_by: tuple[OrderByItem, ...],
+    aggregates: tuple[FunctionExpr, ...],
+) -> tuple[OrderByItem, ...]:
+    """Replace top-level aggregate expressions in ORDER BY with aggregate columns."""
+    resolved: list[OrderByItem] = []
+    for item in order_by:
+        expr = item.expr
+        if isinstance(expr, FunctionExpr):
+            for position, agg in enumerate(aggregates, start=1):
+                if expr == agg:
+                    expr = ColumnRef(f"{agg.name.lower()}_{position}")
+                    break
+        resolved.append(OrderByItem(expr, item.ascending))
+    return tuple(resolved)
+
+
+def _validate_columns(expr: Expr, schema: Schema) -> None:
+    """Raise early when an expression references a column missing from schema."""
+    if isinstance(expr, ColumnRef):
+        for column in schema:
+            if column.name == expr.name:
+                return
+        raise QueryExecutionError(f"unknown column {expr.name!r}")
+    for child in _expr_children(expr):
+        _validate_columns(child, schema)
 
 
 def _walk(expr: Expr, found: list[FunctionExpr]) -> None:

@@ -81,6 +81,21 @@ def test_select_group_by() -> None:
     assert result.rows == (("VLDB", 2), ("SIGMOD", 2))
 
 
+def test_select_group_by_order_by_aggregate() -> None:
+    loose = make_catalog()
+    loose.insert("papers", (5, 2019, "VLDB"))
+    result = run(
+        "SELECT venue, COUNT(*) FROM papers GROUP BY venue ORDER BY COUNT(*)",
+        loose,
+    )
+    assert result.rows == (("SIGMOD", 2), ("VLDB", 3))
+
+
+def test_select_empty_table_unknown_column_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        run("SELECT * FROM papers WHERE missing = 1", make_catalog(rows=()))
+
+
 def test_insert_returns_affected_and_persists() -> None:
     catalog = make_catalog()
     result = run("INSERT INTO papers VALUES (5, 2022, 'VLDB')", catalog)
