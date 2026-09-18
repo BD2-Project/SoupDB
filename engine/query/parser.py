@@ -20,6 +20,7 @@ from engine.query.ast import (
     DeleteStatement,
     DropIndexStatement,
     DropTableStatement,
+    ExplainStatement,
     Expr,
     FunctionExpr,
     InExpr,
@@ -32,6 +33,7 @@ from engine.query.ast import (
     SelectColumn,
     SelectStatement,
     Statement,
+    UpdateStatement,
 )
 from engine.query.errors import QueryParseError
 from engine.query.lexer import tokenize
@@ -51,9 +53,10 @@ def _number_value(raw: str) -> int | float:
 class _Parser:
     """Internal parser over the token stream."""
 
-    def __init__(self, tokens: list[Token]) -> None:
+    def __init__(self, tokens: list[Token], sql: str = "") -> None:
         self._tokens = tokens
         self._pos = 0
+        self._sql = sql
 
     def _peek(self) -> Token:
         return self._tokens[self._pos]
@@ -114,6 +117,10 @@ class _Parser:
             raise QueryParseError(f"unexpected token {token.value!r} at position {token.position}")
 
     def parse_statement(self) -> Statement:
+        if self._match_keyword("UPDATE"):
+            return self._parse_update()
+        if self._match_keyword("EXPLAIN"):
+            return self._parse_explain()
         if self._match_keyword("SELECT"):
             return self._parse_select()
         if self._match_keyword("DELETE"):
@@ -129,6 +136,36 @@ class _Parser:
                 return self._parse_drop_index()
             return self._parse_drop_table()
         raise QueryParseError(f"unsupported statement at position {self._peek().position}")
+
+    def _parse_update(self) -> UpdateStatement:
+        table = self._expect_kind(TokenKind.IDENTIFIER).value
+        self._expect_keyword("SET")
+        assignments = [self._parse_assignment()]
+        while self._match_comma():
+            assignments.append(self._parse_assignment())
+        where = None
+        if self._match_keyword("WHERE"):
+            where = self._parse_boolean_expression()
+        self._error_if_not_eof()
+        return UpdateStatement(table=table, assignments=tuple(assignments), where=where)
+
+    def _parse_assignment(self) -> tuple[str, Expr]:
+        token = self._peek()
+        if token.kind not in (TokenKind.IDENTIFIER, TokenKind.KEYWORD):
+            raise QueryParseError(
+                f"expected a column name at position {token.position}, got {token.value!r}"
+            )
+        column = self._advance().value
+        eq = self._peek()
+        if eq.kind is not TokenKind.OPERATOR or eq.value != "=":
+            raise QueryParseError(f"expected '=' at position {eq.position}, got {eq.value!r}")
+        self._advance()
+        return column, self._parse_expression()
+
+    def _parse_explain(self) -> ExplainStatement:
+        inner_sql = self._sql[self._peek().position :]
+        statement = self.parse_statement()
+        return ExplainStatement(sql=inner_sql, statement=statement)
 
     def _parse_delete(self) -> DeleteStatement:
         self._expect_keyword("FROM")
@@ -444,7 +481,7 @@ class _Parser:
 
 def parse(sql: str) -> Statement:
     """Tokenize and parse ``sql`` into its AST statement."""
-    parser = _Parser(tokenize(sql))
+    parser = _Parser(tokenize(sql), sql)
     statement = parser.parse_statement()
     parser._error_if_not_eof()
     return statement
