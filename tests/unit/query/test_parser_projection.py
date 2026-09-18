@@ -57,6 +57,11 @@ def test_select_literal_projection() -> None:
     assert stmt.columns == (SelectColumn(Literal(1)),)
 
 
+def test_select_decimal_literal_projection() -> None:
+    stmt = parse("SELECT 1.25 FROM papers")
+    assert stmt.columns == (SelectColumn(Literal(1.25)),)
+
+
 def test_select_boolean_literals() -> None:
     stmt = parse("SELECT TRUE, FALSE FROM papers")
     assert stmt.columns == (

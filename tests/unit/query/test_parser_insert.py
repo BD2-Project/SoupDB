@@ -28,8 +28,8 @@ def test_insert_multiple_rows() -> None:
 
 
 def test_insert_with_numbers_and_booleans() -> None:
-    stmt = parse("INSERT INTO papers (anio, activo) VALUES (2020, 1)")
-    assert stmt.values == ((Literal(2020), Literal(1)),)
+    stmt = parse("INSERT INTO papers (anio, activo) VALUES (2020, TRUE)")
+    assert stmt.values == ((Literal(2020), Literal(True)),)
 
 
 def test_insert_case_insensitive() -> None:

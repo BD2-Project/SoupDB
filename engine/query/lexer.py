@@ -56,12 +56,19 @@ def _is_identifier_part(char: str) -> bool:
 
 
 def _scan_string(sql: str, i: int) -> tuple[str, int]:
-    """Scan a single-quoted string; returns its content and next index."""
+    """Scan a single-quoted string; returns its content and next index.
+
+    A doubled apostrophe (``''``) contributes one literal quote to the content.
+    """
     i += 1
     chars: list[str] = []
     while i < len(sql):
         char = sql[i]
         if char == "'":
+            if i + 1 < len(sql) and sql[i + 1] == "'":
+                chars.append("'")
+                i += 2
+                continue
             return "".join(chars), i + 1
         chars.append(char)
         i += 1
@@ -103,8 +110,9 @@ def tokenize(sql: str) -> list[Token]:
             continue
 
         if char == "'":
+            start = i
             content, i = _scan_string(sql, i)
-            tokens.append(Token(TokenKind.STRING, content, i - len(content) - 2))
+            tokens.append(Token(TokenKind.STRING, content, start))
             continue
 
         if char in _DIGITS:

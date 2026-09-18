@@ -41,9 +41,24 @@ def test_comparison_operators() -> None:
     assert ops == ["<>", "<=", ">=", "!="]
 
 
+def test_decimal_number_token() -> None:
+    toks = token_values("SELECT 1.25 FROM papers")
+    assert (TokenKind.NUMBER, "1.25") in toks
+
+
 def test_string_literal_single_quotes() -> None:
     toks = token_values("titulo = 'RAG sobre papers'")
     assert toks[-1] == (TokenKind.STRING, "RAG sobre papers")
+
+
+def test_string_literal_escaped_apostrophe() -> None:
+    toks = token_values("autor = 'O''Reilly'")
+    assert toks[-1] == (TokenKind.STRING, "O'Reilly")
+
+
+def test_string_token_position_points_at_opening_quote() -> None:
+    tokens = [t for t in tokenize("autor = 'x'") if t.kind is TokenKind.STRING]
+    assert tokens[0].position == 8
 
 
 def test_parentheses_and_commas() -> None:
