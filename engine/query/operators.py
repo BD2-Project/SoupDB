@@ -10,12 +10,13 @@ from functools import cmp_to_key
 from time import perf_counter
 from typing import Any
 
+from engine.algorithms.external_hash import external_hash_group_by
 from engine.algorithms.external_sort import external_sort
 from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
 from engine.common.rid import RID
 from engine.common.schema import ColumnDef, ColumnType
-from engine.indexes.base import Index
+from engine.indexes.base import Index, Key
 from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
@@ -540,8 +541,25 @@ def _aggregate_schema(
     return tuple(columns)
 
 
+@dataclass
+class _RunningAggregate:
+    """Incremental state of a single aggregate over a group."""
+
+    count: int = 0
+    total: int | float = 0
+    minimum: object | None = None
+    maximum: object | None = None
+
+
 class Aggregate(_VolcanoBase):
-    """In-memory group-by aggregation over the full input stream."""
+    """Group-by aggregation over the full input stream.
+
+    In-memory by default. When ``memory_limit_bytes`` is given and there is a
+    GROUP BY key while no aggregate uses ``DISTINCT``, the groups are computed
+    externally with ``external_hash_group_by`` (bounded memory, disk-backed
+    hash partitions). Group keys must be encodable by the external hash
+    format: ``int``, ``str`` and tuples of either.
+    """
 
     def __init__(
         self,
@@ -549,6 +567,7 @@ class Aggregate(_VolcanoBase):
         group_by: tuple[Expr, ...],
         aggregates: tuple[FunctionExpr, ...],
         disk_manager: DiskManager | None = None,
+        memory_limit_bytes: int | None = None,
     ) -> None:
         super().__init__((child,), disk_manager)
         self._child = child
@@ -556,30 +575,129 @@ class Aggregate(_VolcanoBase):
         self._aggregates = aggregates
         self._input_schema = child.schema
         self.schema = _aggregate_schema(group_by, aggregates, self._input_schema)
+        self._memory_limit = memory_limit_bytes
+        self._spill = (
+            memory_limit_bytes is not None
+            and bool(group_by)
+            and not any(expression.distinct for expression in aggregates)
+        )
+        self._buffer: Iterator[tuple[object, ...]] | None = None
+        self._external: Iterator[tuple[object, ...]] | None = None
 
-    def open(self) -> None:
-        super().open()
-        groups: dict[tuple[object, ...], list[tuple[object, ...]]]
-        if self._group_by:
-            groups = {}
-        else:
-            groups = {(): []}
+    def _record_stream(self) -> Iterator[Record]:
         while True:
             record = self._child.next()
             if record is None:
-                break
-            row = decode_row(record.data, self._input_schema)
-            key = tuple(evaluate(expr, row, self._input_schema) for expr in self._group_by)
-            groups.setdefault(key, []).append(row)
-        buffered = []
-        for key, group in groups.items():
-            values = tuple(
-                evaluate_aggregate(expr, group, self._input_schema) for expr in self._aggregates
+                return
+            yield record
+
+    def _group_key(self, record: Record) -> Key:
+        row = decode_row(record.data, self._input_schema)
+        values = tuple(evaluate(expr, row, self._input_schema) for expr in self._group_by)
+        return values[0] if len(values) == 1 else values
+
+    def _aggregate_step(
+        self,
+        state: list[_RunningAggregate] | None,
+        record: Record,
+    ) -> list[_RunningAggregate]:
+        if state is None:
+            state = [_RunningAggregate() for _ in self._aggregates]
+        row = decode_row(record.data, self._input_schema)
+        for index, expression in enumerate(self._aggregates):
+            accumulator = state[index]
+            name = expression.name.upper()
+            if expression.arg is None:
+                if name == "COUNT":
+                    accumulator.count += 1
+                continue
+            value = evaluate(expression.arg, row, self._input_schema)
+            if value is None:
+                continue
+            accumulator.count += 1
+            if name in ("SUM", "AVG"):
+                accumulator.total += value
+            if name == "MIN":
+                if accumulator.minimum is None or value < accumulator.minimum:
+                    accumulator.minimum = value
+            if name == "MAX":
+                if accumulator.maximum is None or value > accumulator.maximum:
+                    accumulator.maximum = value
+        return state
+
+    def _finish_group(self, state: list[_RunningAggregate]) -> tuple[object, ...]:
+        values = []
+        for index, expression in enumerate(self._aggregates):
+            accumulator = state[index]
+            name = expression.name.upper()
+            if name == "COUNT":
+                values.append(accumulator.count)
+            elif name == "SUM":
+                if accumulator.count == 0:
+                    raise QueryExecutionError("SUM of an empty group is undefined")
+                values.append(accumulator.total)
+            elif name == "AVG":
+                if accumulator.count == 0:
+                    raise QueryExecutionError("AVG of an empty group is undefined")
+                values.append(float(accumulator.total) / accumulator.count)
+            elif name == "MIN":
+                if accumulator.count == 0:
+                    raise QueryExecutionError("MIN of an empty group is undefined")
+                values.append(accumulator.minimum)
+            elif name == "MAX":
+                if accumulator.count == 0:
+                    raise QueryExecutionError("MAX of an empty group is undefined")
+                values.append(accumulator.maximum)
+            else:
+                raise QueryExecutionError(f"unsupported aggregate {name!r}")
+        return tuple(values)
+
+    def _emit_group(self, key: Key, state: list[_RunningAggregate]) -> tuple[object, ...]:
+        values = self._finish_group(state)
+        if isinstance(key, tuple):
+            return key + values
+        return (key,) + values
+
+    def open(self) -> None:
+        super().open()
+        if self._spill:
+            groups = external_hash_group_by(
+                self._record_stream(),
+                self._group_key,
+                self._aggregate_step,
+                memory_limit_bytes=self._memory_limit,
             )
-            buffered.append(key + values)
-        self._buffer = iter(buffered)
+            self._external = (self._emit_group(key, state) for key, state in groups)
+            self._buffer = None
+        else:
+            groups: dict[tuple[object, ...], list[tuple[object, ...]]]
+            if self._group_by:
+                groups = {}
+            else:
+                groups = {(): []}
+            while True:
+                record = self._child.next()
+                if record is None:
+                    break
+                row = decode_row(record.data, self._input_schema)
+                key = tuple(evaluate(expr, row, self._input_schema) for expr in self._group_by)
+                groups.setdefault(key, []).append(row)
+            buffered = []
+            for key, group in groups.items():
+                values = tuple(
+                    evaluate_aggregate(expr, group, self._input_schema) for expr in self._aggregates
+                )
+                buffered.append(key + values)
+            self._buffer = iter(buffered)
 
     def next(self) -> Record | None:
+        if self._spill:
+            try:
+                row = next(self._external)
+            except StopIteration:
+                return None
+            self._rows += 1
+            return Record(data=encode_row(row, self.schema))
         try:
             row = next(self._buffer)
         except StopIteration:
@@ -589,6 +707,7 @@ class Aggregate(_VolcanoBase):
 
     def close(self) -> None:
         self._buffer = None
+        self._external = None
         super().close()
 
     def explain(self) -> PlanNode:

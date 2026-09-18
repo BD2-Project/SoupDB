@@ -1,5 +1,7 @@
 """Tests for the spill mode of the Aggregate volcano operator."""
 
+import pytest
+
 from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
 from engine.common.schema import ColumnDef, ColumnType
@@ -130,16 +132,13 @@ def test_agg_spill_without_grouping_stays_in_memory() -> None:
 
 
 def test_agg_spill_avg_empty_raises() -> None:
-    try:
+    with pytest.raises(QueryExecutionError):
         agg_spill(
             (),
             (FunctionExpr("AVG", ColumnRef("anio")),),
             memory=128,
             rows=(),
         )
-        assert False, "expected QueryExecutionError"
-    except QueryExecutionError:
-        pass
 
 
 def test_agg_spill_explain_reports_rows() -> None:
