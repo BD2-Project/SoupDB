@@ -135,6 +135,11 @@ def test_delete_filtered() -> None:
     assert len(run("SELECT * FROM papers", catalog).rows) == 2
 
 
+def test_delete_empty_table_unknown_column_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        run("DELETE FROM papers WHERE missing = 1", make_catalog(rows=()))
+
+
 def test_delete_all() -> None:
     catalog = make_catalog()
     result = run("DELETE FROM papers", catalog)

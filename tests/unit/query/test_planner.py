@@ -148,6 +148,16 @@ def test_plan_insert_duplicate_columns_raises() -> None:
         plan(parse(sql), make_catalog())
 
 
+def test_plan_delete_unknown_column_in_where_raises() -> None:
+    with pytest.raises(QueryExecutionError):
+        plan(parse("DELETE FROM papers WHERE missing = 1"), make_catalog())
+
+
+def test_plan_delete_with_where_builds() -> None:
+    result = plan(parse("DELETE FROM papers WHERE anio = 2020"), make_catalog())
+    assert result.statement is not None
+
+
 def test_plan_insert_value_count_mismatch_raises() -> None:
     with pytest.raises(QueryExecutionError):
         plan(parse("INSERT INTO papers VALUES (1, 2020)"), make_catalog())

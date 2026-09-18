@@ -120,8 +120,10 @@ def _plan_insert(statement: InsertStatement, catalog: Any) -> Plan:
 
 
 def _plan_delete(statement: DeleteStatement, catalog: Any) -> Plan:
-    catalog.schema(statement.table)
+    schema = catalog.schema(statement.table)
     catalog.file_org(statement.table)
+    if statement.where is not None:
+        _validate_columns(statement.where, schema)
     return Plan(statement=statement)
 
 
