@@ -29,3 +29,7 @@ class TransactionError(SoupDBError):
 
 class QueryParseError(SoupDBError):
     """Invalid SQL syntax found while tokenizing or parsing."""
+
+
+class QueryExecutionError(SoupDBError):
+    """Invalid values found while evaluating an executed query."""
