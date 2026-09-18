@@ -3,7 +3,7 @@
 The evaluator is a pure module: :func:`evaluate` resolves scalar expressions and
 predicates, :func:`evaluate_aggregate` computes aggregate functions over a group
 of rows. Rows are plain ``tuple`` of values and the schema is the ordered tuple
-of :class:`engine.query.ast.ColumnDef` nodes from the AST (column ``i`` maps to
+of :class:`engine.common.schema.ColumnDef` nodes (column ``i`` maps to
 ``row[i]``).
 
 Comparisons are strict: operands must share the exact same type
@@ -14,9 +14,9 @@ import re
 from collections.abc import Iterable
 
 from engine.common.errors import QueryExecutionError
+from engine.common.schema import ColumnDef
 from engine.query.ast import (
     BetweenExpr,
-    ColumnDef,
     ColumnRef,
     CompareExpr,
     Expr,

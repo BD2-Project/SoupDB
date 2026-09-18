@@ -1,17 +1,8 @@
 """SQL abstract syntax tree nodes for query processing."""
 
 from dataclasses import dataclass
-from enum import Enum
 
-
-class ColumnType(Enum):
-    """Supported column types in a table definition."""
-
-    INT = "INT"
-    FLOAT = "FLOAT"
-    VARCHAR = "VARCHAR"
-    TEXT = "TEXT"
-    BOOL = "BOOL"
+from engine.common.schema import ColumnDef, ColumnType  # noqa: F401  (re-export)
 
 
 class Statement:
@@ -145,15 +136,6 @@ class DeleteStatement(Statement):
 
     table: str
     where: Expr | None
-
-
-@dataclass(frozen=True)
-class ColumnDef:
-    """One column definition inside a CREATE TABLE statement."""
-
-    name: str
-    type_name: ColumnType
-    length: int | None = None
 
 
 @dataclass(frozen=True)
