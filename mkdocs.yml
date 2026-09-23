@@ -44,6 +44,7 @@ markdown_extensions:
 nav:
   - Inicio: index.md
   - Contratos: contratos.md
+  - Protocolo: protocolo.md
   - Transacciones: transacciones.md
   - API Reference:
       - common: api/common.md
