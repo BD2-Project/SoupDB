@@ -66,6 +66,29 @@ def test_autocommit_persists_single_statement() -> None:
     session.close()
 
 
+def test_autocommit_does_not_leave_active_transaction() -> None:
+    session = TransactionalSession(make_catalog())
+    session.execute("SELECT * FROM accounts")
+    assert session.current_transaction() is None
+    session.close()
+
+
+def test_autocommit_releases_locks() -> None:
+    session = TransactionalSession(make_catalog())
+    session.execute("INSERT INTO accounts VALUES (3, 300)")
+    assert session.transaction_manager.lock_manager.locks_held(1) == frozenset()
+    session.close()
+
+
+def test_autocommit_then_explicit_begin() -> None:
+    session = TransactionalSession(make_catalog())
+    session.execute("SELECT * FROM accounts")
+    tx = session.begin()
+    assert session.current_transaction() is tx
+    session.rollback()
+    session.close()
+
+
 def test_exclusive_write_blocks_concurrent_reader() -> None:
     catalog = make_catalog()
     manager = TransactionManager()
