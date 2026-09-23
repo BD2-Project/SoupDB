@@ -99,11 +99,14 @@ class TransactionalSession:
         if self.current_transaction() is None:
             self.begin()
             try:
-                return self._run(statement)
+                result = self._run(statement)
             except BaseException:
                 if self.current_transaction() is not None:
                     self.rollback()
                 raise
+            else:
+                self.commit()
+            return result
         return self._run(statement)
 
     @contextmanager
