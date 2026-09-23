@@ -108,10 +108,13 @@ Ejecuta transferencias simultáneas sobre la tabla `accounts`:
 1. **Sin control de concurrencia** → actualizaciones perdidas (race condition): el saldo final es menor al esperado.
 2. **Con transacciones strict 2PL** → resultado serializable: el saldo final coincide con el esperado.
 
+> La parte transaccional usa **lock exclusivo de tabla** para todo el read-modify-write. Con el patrón `DELETE` + `INSERT` el registro desaparece físicamente entre ambas sentencias y un S lock de tabla no escondería ese hueco ante otros lectores; serializar la transferencia hace el resultado determinista.
+
 ## Decisiones y limitaciones
 
 - **Undo journal en memoria** para dar atomicidad al `ROLLBACK` (insert/remove por tabla). La persistencia/duración (WAL) se implementa en la fase 2 de recuperación.
 - El motor no soporta `UPDATE`; la demo usa el patrón `DELETE` + `INSERT` para modelar el read-modify-write.
+- La detección de deadlocks se demuestra en `tests/unit/transactions/test_deadlock_detection.py` (dos transacciones en ciclo por wait-for graph).
 - Los locks de índices no se deshacen en el rollback (pendiente de la fase de recuperación); las pruebas usan tablas sin índices.
 
 Ver API reference en [api/transactions](api/transactions.md).
