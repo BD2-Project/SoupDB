@@ -13,6 +13,7 @@ from typing import Any
 
 from engine.common.errors import TransactionError
 from engine.query import execute_sql
+from engine.transactions.base import LockMode
 from engine.transactions.session import TransactionalSession
 from engine.transactions.transaction_manager import TransactionManager
 
@@ -95,6 +96,11 @@ def transactional_result(
             while True:
                 try:
                     with session.transaction():
+                        # Lock exclusivo de tabla para todo el read-modify-write:
+                        # con DELETE+INSERT el registro desaparece fisicamente entre
+                        # ambas sentencias y un S lock de tabla no esconderia ese
+                        # hueco ante otros lectores. Serializa la transferencia.
+                        session._lock(("table", "accounts"), LockMode.EXCLUSIVE)
                         rows = session.execute(
                             f"SELECT balance FROM accounts WHERE id = {account_id}"
                         )
