@@ -35,6 +35,10 @@ class DeadlockDetected(SoupDBError):
     """A deadlock cycle was detected; the victim must abort."""
 
 
+class ProtocolError(SoupDBError):
+    """Malformed or unsupported wire protocol frame."""
+
+
 class QueryParseError(SoupDBError):
     """Invalid SQL syntax found while tokenizing or parsing."""
 
