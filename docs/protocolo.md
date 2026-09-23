@@ -2,6 +2,8 @@
 
 Contrato congelado entre el **gestor SoupDB** (servidor) y el **driver rsoup** (cliente). Ambos codecs implementan exactamente este formato: Python en `engine/transactions/protocol.py` y Rust en `rsoup/src/protocol.rs`.
 
+> Referencias del driver: [repo](https://github.com/BD2-Project/rsoup) · [documentación](https://github.com/BD2-Project/rsoup/tree/main/docs) · [resumen del protocolo](https://github.com/BD2-Project/rsoup/blob/main/docs/protocolo.md). Ver también [driver.md](driver.md).
+
 ## Frame
 
 Todos los enteros van en **big-endian**.

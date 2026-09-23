@@ -45,6 +45,7 @@ nav:
   - Inicio: index.md
   - Contratos: contratos.md
   - Protocolo: protocolo.md
+  - Driver: driver.md
   - Transacciones: transacciones.md
   - API Reference:
       - common: api/common.md
