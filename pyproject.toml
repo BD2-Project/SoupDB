@@ -54,6 +54,9 @@ known-first-party = ["engine"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: tests intensivos de integracion (activos por defecto; desactivar con SKIP_INTEGRATION=1)",
+]
 
 [tool.coverage.run]
 source = ["engine"]
