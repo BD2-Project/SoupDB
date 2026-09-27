@@ -111,7 +111,7 @@ def test_concurrent_clients_insert_and_commit(server) -> None:
                         f"INSERT INTO accounts VALUES ({account_id}, {index * 10 + r})"
                     ),
                 )
-                assert opcode == proto.OP_RESULT, proto.decode_error(payload)
+                assert opcode == proto.OP_OK, proto.decode_error(payload)
                 request(conn, proto.OP_COMMIT)
         except Exception as exc:  # noqa: BLE001
             with guard:

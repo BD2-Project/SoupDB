@@ -139,7 +139,12 @@ class ConnectionHandler:
             if opcode == proto.OP_QUERY:
                 sql = proto.decode_query(payload)
                 result = session.execute(sql)
-                return proto.encode_frame(proto.OP_RESULT, proto.encode_resultset(result))
+                # Un SELECT devuelve RESULT; DML y DDL devuelven OK con las filas
+                # afectadas, como fija docs/protocolo.md y espera el driver rsoup
+                # (QueryResult::Affected). Antes todo salía como RESULT vacío.
+                if result.columns:
+                    return proto.encode_frame(proto.OP_RESULT, proto.encode_resultset(result))
+                return proto.encode_frame(proto.OP_OK, proto.encode_ok(result.affected))
             _LOGGER.warning("unknown opcode %s", opcode)
             return self._error(proto.ERR_GENERIC, f"unknown opcode {opcode}")
         except SoupDBError as exc:
