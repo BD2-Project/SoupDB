@@ -80,7 +80,7 @@ def test_insert_within_transaction_and_rollback(server) -> None:
             request(
                 conn, proto.OP_QUERY, proto.encode_query("INSERT INTO accounts VALUES (3, 300)")
             )[0]
-            == proto.OP_RESULT
+            == proto.OP_OK
         )
         assert request(conn, proto.OP_ROLLBACK)[0] == proto.OP_OK
         _opcode, payload = request(
@@ -99,7 +99,7 @@ def test_insert_within_transaction_and_commit(server) -> None:
             request(
                 conn, proto.OP_QUERY, proto.encode_query("INSERT INTO accounts VALUES (3, 300)")
             )[0]
-            == proto.OP_RESULT
+            == proto.OP_OK
         )
         assert request(conn, proto.OP_COMMIT)[0] == proto.OP_OK
         _opcode, payload = request(
@@ -143,7 +143,7 @@ def test_concurrent_clients_share_concurrency_control(server) -> None:
             request(
                 conn_a, proto.OP_QUERY, proto.encode_query("INSERT INTO accounts VALUES (9, 999)")
             )[0]
-            == proto.OP_RESULT
+            == proto.OP_OK
         )
         opcode, payload = request(
             conn_b, proto.OP_QUERY, proto.encode_query("SELECT * FROM accounts")
