@@ -59,9 +59,16 @@ def test_project_infers_column_types() -> None:
     assert project.schema[1].type_name is ColumnType.INT
 
 
-def test_project_default_aliases() -> None:
+def test_project_uses_source_column_name() -> None:
     scan = TableScan(load_fake(ROWS), PAPERS_SCHEMA)
     project = Project(scan, (SelectColumn(ColumnRef("titulo")),))
+    assert [column.name for column in project.schema] == ["titulo"]
+
+
+def test_project_falls_back_to_positional_name() -> None:
+    """Una expresión sin nombre propio ni alias sí usa column_<n>."""
+    scan = TableScan(load_fake(ROWS), PAPERS_SCHEMA)
+    project = Project(scan, (SelectColumn(Literal("X")),))
     assert [column.name for column in project.schema] == ["column_1"]
 
 

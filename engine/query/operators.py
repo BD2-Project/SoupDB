@@ -326,11 +326,16 @@ def _infer_type(expr: Expr, schema: Schema) -> ColumnDef:
 
 
 def _infer_schema(projections: tuple[SelectColumn, ...], input_schema: Schema) -> Schema:
-    """Output schema for a projection list: alias or ``column_<n>`` names."""
+    """Output schema for a projection list.
+
+    El nombre sale del alias; si no hay, del nombre real de la columna de origen,
+    y solo las expresiones sin nombre propio caen en ``column_<n>``. El frontend
+    usa estos nombres como encabezados de la tabla de resultados.
+    """
     columns = []
     for index, selection in enumerate(projections, start=1):
-        name = selection.alias or f"column_{index}"
         column = _infer_type(selection.expr, input_schema)
+        name = selection.alias or column.name or f"column_{index}"
         columns.append(ColumnDef(name, column.type_name, column.length))
     return tuple(columns)
 
