@@ -51,8 +51,10 @@ nav:
       - common: api/common.md
       - storage: api/storage.md
       - indexes: api/indexes.md
+      - rtree: api/rtree.md
       - query: api/query.md
       - transactions: api/transactions.md
   - Indexación: indexacion_algoritmos_externos.md
+  - R-Tree: rtree.md
   - Decisiones: decisiones.md
   - Estrategia de release: estrategia-release.md

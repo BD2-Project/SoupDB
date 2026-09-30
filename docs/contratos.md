@@ -19,3 +19,4 @@ Reglas del contrato:
 - `op` en el plan de ejecución es string libre: en la Parte 3 aparecerá `InvertedIndexScan` y en la Parte 4 `HNSWSearch` sin tocar el renderizador.
 - El esquema soporta `VARCHAR(n)` y `TEXT` desde el día uno (longitud variable).
 - El control de concurrencia se consume a través de `ConcurrencyStrategy` (nunca de una implementación concreta); las estrategias son intercambiables. Ver [Transacciones](transacciones.md).
+- El **R-Tree** (`engine/indexes/rtree/`) es una implementación de `Index` con `supports_range=True`: `search` por punto y `range_search` por caja espacial o rango 1D (las claves escalares se mapean al eje X para cumplir la conformance suite). Ver [R-Tree](rtree.md).

@@ -162,3 +162,19 @@ El catálogo es persistente: registra cada índice en `SysIndexes`, hace
 `INSERT`/`DELETE` vía `indexes_for`. Los planes de `explain()` reportan el
 delta de lecturas/escrituras de los `DiskManager`s que el catálogo expone por
 *duck typing*.
+
+### R-Tree (núcleo espacial)
+
+Núcleo del R-Tree en memoria (`engine/indexes/rtree/`) para la **Parte 2**
+(almacenamiento de coordenadas y mapas):
+
+- `Point(x, y)` como clave espacial y `MBR` (rectángulo mínimo) con `union`,
+  `area`, `enlargement`, `contains` e `intersects`.
+- Estructura fija (`RTreeNode`) con capacidad `order`; inserción con elección
+  de subárbol por menor enlargement y **Quadratic Split**; MBRs actualizados
+  en cada mutación.
+- `search(point)` / `range_search` (caja espacial y rango 1D) y `remove` simple
+  con poda de nodos vacíos.
+- Persistencia memoria ↔ disco: `save`/`load`/`open` con codec binario.
+
+Ver [R-Tree](rtree.md) para diseño completo, uso y limitaciones.
