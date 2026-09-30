@@ -10,6 +10,7 @@ from engine.common.errors import UnsupportedOperation
 from engine.common.rid import RID
 from engine.indexes.bplus_tree import BPlusTree
 from engine.indexes.extendible_hash import ExtendibleHash
+from engine.indexes.rtree.rtree import RTree
 from engine.storage.buffer_manager import BufferManager
 from engine.storage.disk_manager import DiskManager
 from tests.fakes.fake_index import FakeIndex
@@ -17,12 +18,14 @@ from tests.fakes.fake_index import FakeIndex
 PAGE_SIZE = 256
 
 
-@pytest.fixture(params=["fake", "bplus", "hash"])
+@pytest.fixture(params=["fake", "bplus", "hash", "rtree"])
 def index(request, tmp_path):
     disk_manager = None
 
     if request.param == "fake":
         idx = FakeIndex()
+    elif request.param == "rtree":
+        idx = RTree(order=2)
     else:
         disk_manager = DiskManager(
             tmp_path / "index.db",
