@@ -1,5 +1,6 @@
 from .bounds import euclidean_min_distance, haversine_latitude_lower_bound
 from .geometry import Polygon2D
+from .knn import SpatialHit, knn_hits, knn_search
 from .metrics import (
     EARTH_RADIUS_M,
     SpatialMetric,
@@ -32,4 +33,7 @@ __all__ = [
     "Polygon2D",
     "point_in_polygon",
     "point_on_segment",
+    "SpatialHit",
+    "knn_hits",
+    "knn_search",
 ]

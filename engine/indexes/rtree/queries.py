@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from engine.algorithms.spatial.knn import (
+    SpatialHit,
+    knn_search,
+)
+from engine.algorithms.spatial.knn import (
+    knn_hits as search_knn_hits,
+)
 from engine.algorithms.spatial.metrics import SpatialMetric
 from engine.algorithms.spatial.range_query import (
     iter_radius_entries,
@@ -51,3 +58,29 @@ class SpatialQueries:
                 metric,
             )
         ]
+
+    def knn(
+        self,
+        center: Point,
+        k: int,
+        metric: SpatialMetric,
+    ) -> list[RID]:
+        return knn_search(
+            self._root(),
+            center,
+            k,
+            metric,
+        )
+
+    def knn_hits(
+        self,
+        center: Point,
+        k: int,
+        metric: SpatialMetric,
+    ) -> list[SpatialHit]:
+        return search_knn_hits(
+            self._root(),
+            center,
+            k,
+            metric,
+        )
