@@ -10,6 +10,7 @@ Comparisons are strict: operands must share the exact same type
 (``type(a) is type(b)``); an int is never coerced to a float.
 """
 
+import math
 import re
 from collections.abc import Iterable
 
@@ -19,6 +20,7 @@ from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
     CompareExpr,
+    DistanceExpr,
     Expr,
     FunctionExpr,
     InExpr,
@@ -26,6 +28,7 @@ from engine.query.ast import (
     Literal,
     LogicalExpr,
     NotExpr,
+    PointExpr,
 )
 
 _COMPARISONS = {"=", "<>", "!=", "<", "<=", ">", ">="}
@@ -76,6 +79,28 @@ def evaluate(expr: Expr, row: Row, schema: Schema) -> object:
         value = evaluate(expr.value, row, schema)
         pattern = evaluate(expr.pattern, row, schema)
         return _like(value, pattern)
+
+    if isinstance(expr, PointExpr):
+        x = evaluate(expr.x, row, schema)
+        y = evaluate(expr.y, row, schema)
+        if not _is_numeric(x):
+            raise QueryExecutionError(f"POINT requires numeric coordinates, got {type(x).__name__}")
+        if not _is_numeric(y):
+            raise QueryExecutionError(f"POINT requires numeric coordinates, got {type(y).__name__}")
+        return (float(x), float(y))
+
+    if isinstance(expr, DistanceExpr):
+        left = evaluate(expr.left, row, schema)
+        right = evaluate(expr.right, row, schema)
+        if not _is_point_value(left):
+            raise QueryExecutionError(
+                f"distance operands must be POINT values, got {type(left).__name__}"
+            )
+        if not _is_point_value(right):
+            raise QueryExecutionError(
+                f"distance operands must be POINT values, got {type(right).__name__}"
+            )
+        return math.hypot(left[0] - right[0], left[1] - right[1])
 
     if isinstance(expr, FunctionExpr):
         raise QueryExecutionError(f"aggregate {expr.name} is not allowed in a scalar expression")
@@ -165,6 +190,12 @@ def _like(value: object, pattern: object) -> bool:
 
 def _is_numeric(value: object) -> bool:
     return type(value) is int or type(value) is float
+
+
+def _is_point_value(value: object) -> bool:
+    if type(value) is not tuple or len(value) != 2:
+        return False
+    return all(type(coord) is float for coord in value)
 
 
 def _sum(values: list[object]) -> int | float:

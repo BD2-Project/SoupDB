@@ -21,6 +21,7 @@ from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
     CompareExpr,
+    DistanceExpr,
     Expr,
     FunctionExpr,
     InExpr,
@@ -29,6 +30,7 @@ from engine.query.ast import (
     LogicalExpr,
     NotExpr,
     OrderByItem,
+    PointExpr,
     SelectColumn,
 )
 from engine.query.evaluator import Schema, evaluate, evaluate_aggregate
@@ -322,6 +324,10 @@ def _infer_type(expr: Expr, schema: Schema) -> ColumnDef:
         return ColumnDef("", ColumnType.BOOL)
     if isinstance(expr, FunctionExpr):
         return ColumnDef("", ColumnType.FLOAT)
+    if isinstance(expr, PointExpr):
+        return ColumnDef("", ColumnType.POINT)
+    if isinstance(expr, DistanceExpr):
+        return ColumnDef("", ColumnType.FLOAT)
     return ColumnDef("", ColumnType.TEXT)
 
 
@@ -501,6 +507,54 @@ class Sort(_VolcanoBase):
     def explain(self) -> PlanNode:
         keys = [str(item.expr) for item in self._order_by]
         return self._plan("Sort", {"keys": keys})
+
+
+class Limit(_VolcanoBase):
+    """Emits at most ``limit`` rows of the input stream after skipping ``offset``.
+
+    Streaming: rows are pulled from the child on demand, so OFFSET does not
+    materialize the skipped prefix and LIMIT stops pulling as soon as the
+    quota is met.
+    """
+
+    def __init__(
+        self,
+        child: Operator,
+        limit: int,
+        offset: int = 0,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        if limit < 0:
+            raise QueryExecutionError("LIMIT must be non-negative")
+        if offset < 0:
+            raise QueryExecutionError("OFFSET must be non-negative")
+        super().__init__((child,), disk_manager)
+        self._child = child
+        self._limit = limit
+        self._offset = offset
+        self.schema = child.schema
+
+    def open(self) -> None:
+        super().open()
+        self._emitted = 0
+        self._skipped = 0
+
+    def next(self) -> Record | None:
+        while self._skipped < self._offset:
+            if self._child.next() is None:
+                return None
+            self._skipped += 1
+        if self._emitted >= self._limit:
+            return None
+        record = self._child.next()
+        if record is None:
+            return None
+        self._emitted += 1
+        self._rows += 1
+        return record
+
+    def explain(self) -> PlanNode:
+        return self._plan("Limit", {"limit": self._limit, "offset": self._offset})
 
 
 def _find_column(name: str, schema: Schema) -> ColumnDef:

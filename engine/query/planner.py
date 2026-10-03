@@ -32,6 +32,7 @@ from engine.query.ast import (
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
+    DistanceExpr,
     DropIndexStatement,
     DropTableStatement,
     ExplainStatement,
@@ -40,10 +41,12 @@ from engine.query.ast import (
     InExpr,
     InsertStatement,
     LikeExpr,
+    LimitClause,
     Literal,
     LogicalExpr,
     NotExpr,
     OrderByItem,
+    PointExpr,
     SelectColumn,
     SelectStatement,
     Statement,
@@ -55,6 +58,7 @@ from engine.query.operators import (
     Filter,
     IndexLookup,
     IndexRangeScan,
+    Limit,
     Operator,
     Project,
     Sort,
@@ -126,6 +130,9 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
         root = Project(root, selections, disk_manager)
     if statement.distinct:
         root = Distinct(root, None, disk_manager)
+    clause: LimitClause | None = statement.limit
+    if clause is not None:
+        root = Limit(root, _limit_value(clause.limit), _limit_value(clause.offset), disk_manager)
     return Plan(statement=statement, root=root, output_schema=root.schema)
 
 
@@ -197,6 +204,15 @@ def _plan_drop_index(statement: DropIndexStatement, catalog: Any) -> Plan:
     if catalog.index_location(statement.index_name) is None:
         raise QueryExecutionError(f"unknown index {statement.index_name!r}")
     return Plan(statement=statement)
+
+
+def _limit_value(literal: Literal | None) -> int:
+    """Integer value of a LIMIT/OFFSET literal; a missing OFFSET means zero."""
+    if literal is None:
+        return 0
+    if type(literal.value) is not int:
+        raise QueryExecutionError("LIMIT/OFFSET must be an integer")
+    return literal.value
 
 
 def _scan_or_index(
@@ -339,4 +355,8 @@ def _expr_children(expr: Expr) -> tuple[Expr, ...]:
         return (expr.value, expr.pattern)
     if isinstance(expr, FunctionExpr) and expr.arg is not None:
         return (expr.arg,)
+    if isinstance(expr, PointExpr):
+        return (expr.x, expr.y)
+    if isinstance(expr, DistanceExpr):
+        return (expr.left, expr.right)
     return ()

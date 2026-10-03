@@ -9,12 +9,14 @@ from engine.query.ast import (
     ColumnRef,
     ColumnType,
     CompareExpr,
+    DistanceExpr,
     FunctionExpr,
     InExpr,
     LikeExpr,
     Literal,
     LogicalExpr,
     NotExpr,
+    PointExpr,
 )
 from engine.query.evaluator import evaluate, evaluate_aggregate
 
@@ -295,3 +297,44 @@ def test_aggregate_unknown_function_raises() -> None:
     expr = FunctionExpr("MEDIAN", ColumnRef("nota"))
     with pytest.raises(QueryExecutionError):
         evaluate_aggregate(expr, NOTAS, NOTAS_SCHEMA)
+
+
+POINT_SCHEMA = (
+    ColumnDef("id", ColumnType.INT),
+    ColumnDef("ubicacion", ColumnType.POINT),
+)
+POINT_ROW = (1, (2.0, 3.5))
+
+
+def test_point_expression_evaluates_to_float_tuple() -> None:
+    assert evaluate(PointExpr(Literal(1), Literal(2.5)), POINT_ROW, POINT_SCHEMA) == (1.0, 2.5)
+
+
+def test_point_expression_rejects_non_numeric_coordinates() -> None:
+    for bad in (Literal("a"), Literal(True), ColumnRef("ubicacion")):
+        with pytest.raises(QueryExecutionError, match="POINT"):
+            evaluate(PointExpr(bad, Literal(1)), POINT_ROW, POINT_SCHEMA)
+
+
+def test_distance_expression_euclidean() -> None:
+    a = PointExpr(Literal(0), Literal(0))
+    b = PointExpr(Literal(3), Literal(4))
+    assert evaluate(DistanceExpr(a, b), POINT_ROW, POINT_SCHEMA) == 5.0
+
+
+def test_distance_between_column_and_point() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    assert evaluate(
+        DistanceExpr(ColumnRef("ubicacion"), pt), POINT_ROW, POINT_SCHEMA
+    ) == pytest.approx(2.692582403567252)
+
+
+def test_distance_expr_rejects_non_point_operands() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    for case in (
+        DistanceExpr(ColumnRef("id"), pt),
+        DistanceExpr(pt, ColumnRef("id")),
+        DistanceExpr(ColumnRef("ubicacion"), Literal(1)),
+    ):
+        with pytest.raises(QueryExecutionError, match="distance"):
+            evaluate(case, POINT_ROW, POINT_SCHEMA)

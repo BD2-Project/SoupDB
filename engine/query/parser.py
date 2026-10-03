@@ -21,6 +21,7 @@ from engine.query.ast import (
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
+    DistanceExpr,
     DropIndexStatement,
     DropTableStatement,
     ExplainStatement,
@@ -37,6 +38,7 @@ from engine.query.ast import (
     LogicalExpr,
     NotExpr,
     OrderByItem,
+    PointExpr,
     SelectColumn,
     SelectStatement,
     Statement,
@@ -247,8 +249,13 @@ class _Parser:
 
     def _parse_column_def(self) -> ColumnDef:
         name = self._expect_kind(TokenKind.IDENTIFIER).value
-        type_token = self._expect_kind(TokenKind.IDENTIFIER)
-        type_name = self._column_type(type_token.value, type_token.position)
+        token = self._peek()
+        if token.kind not in (TokenKind.IDENTIFIER, TokenKind.KEYWORD):
+            raise QueryParseError(
+                f"expected a column type at position {token.position}, got {token.value!r}"
+            )
+        self._advance()
+        type_name = self._column_type(token.value, token.position)
         length = None
         if type_name is ColumnType.VARCHAR:
             self._expect_kind(TokenKind.LPAREN)
@@ -530,6 +537,24 @@ class _Parser:
         self._expect_kind(TokenKind.RPAREN)
         return FunctionExpr(name=name, arg=arg, distinct=distinct)
 
+    def _parse_point_expr(self) -> PointExpr:
+        self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        x = self._parse_expression()
+        self._expect_kind(TokenKind.COMMA)
+        y = self._parse_expression()
+        self._expect_kind(TokenKind.RPAREN)
+        return PointExpr(x=x, y=y)
+
+    def _parse_distance_expr(self) -> DistanceExpr:
+        self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        left = self._parse_expression()
+        self._expect_kind(TokenKind.COMMA)
+        right = self._parse_expression()
+        self._expect_kind(TokenKind.RPAREN)
+        return DistanceExpr(left=left, right=right)
+
     def _parse_primary(self) -> Expr:
         token = self._peek()
 
@@ -550,6 +575,12 @@ class _Parser:
 
         if self._check_keyword_in(_AGGREGATES) and self._checks_lparen_next():
             return self._parse_function_call()
+
+        if self._check_keyword("POINT") and self._checks_lparen_next():
+            return self._parse_point_expr()
+
+        if self._check_keyword("DISTANCE") and self._checks_lparen_next():
+            return self._parse_distance_expr()
 
         if self._match_kind(TokenKind.IDENTIFIER):
             return ColumnRef(token.value)
