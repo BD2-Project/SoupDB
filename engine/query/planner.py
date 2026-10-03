@@ -121,7 +121,9 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
     if grouped:
         root = Aggregate(root, statement.group_by, aggregates, disk_manager)
     if statement.order_by:
-        order_by = _resolve_aggregate_order_by(statement.order_by, aggregates)
+        aliases = _projection_aliases(statement.columns)
+        order_by = _resolve_alias_order_by(statement.order_by, aliases)
+        order_by = _resolve_aggregate_order_by(order_by, aggregates)
         for item in order_by:
             _validate_columns(item.expr, root.schema)
         root = Sort(root, order_by, disk_manager=disk_manager)
@@ -320,6 +322,50 @@ def _resolve_aggregate_order_by(
                 if expr == agg:
                     expr = ColumnRef(f"{agg.name.lower()}_{position}")
                     break
+        resolved.append(OrderByItem(expr, item.ascending))
+    return tuple(resolved)
+
+
+def _projection_aliases(columns: tuple[SelectColumn, ...]) -> dict[str, Expr]:
+    """Map every projection alias to the expression it names.
+
+    Only explicit aliases are registered: an unaliased projection keeps its
+    base column name, which ORDER BY already resolves against the input
+    schema. When the same alias appears twice the last projection wins.
+    """
+    return {selection.alias: selection.expr for selection in columns if selection.alias}
+
+
+def _resolve_alias_order_by(
+    order_by: tuple[OrderByItem, ...],
+    aliases: dict[str, Expr],
+) -> tuple[OrderByItem, ...]:
+    """Replace ORDER BY keys naming a projection alias with that expression.
+
+    ``Sort`` is planned *below* ``Project`` so a key may reference a column
+    that is not projected (``SELECT nombre FROM t ORDER BY edad``); the alias
+    map is therefore not part of the schema the keys are validated against.
+    Instead every key is an alias lookup done *before* validation and before
+    the ``Sort`` is built, which keeps both behaviours: any expression of the
+    projection list is orderable by its alias, whatever its shape (a column,
+    an arithmetic or spatial expression, or an aggregate), and non-projected
+    base columns keep working.
+
+    Precedence: an alias shadows a base column of the same name, matching SQL,
+    where ORDER BY names the *output* column. ``SELECT venue AS anio FROM t
+    ORDER BY anio`` therefore sorts by ``venue`` and not by ``t.anio``; when
+    the name is neither an alias nor a base column it stays unresolved and
+    :func:`_validate_columns` reports ``unknown column``.
+
+    Aliases resolve one level only: a key that names another alias (``SELECT a
+    AS p, p + 1 AS q ORDER BY q``) is not a legal projection here and remains
+    an unresolved column.
+    """
+    resolved: list[OrderByItem] = []
+    for item in order_by:
+        expr = item.expr
+        if isinstance(expr, ColumnRef) and expr.name in aliases:
+            expr = aliases[expr.name]
         resolved.append(OrderByItem(expr, item.ascending))
     return tuple(resolved)
 
