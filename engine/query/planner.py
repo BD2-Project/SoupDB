@@ -26,6 +26,7 @@ from typing import Any
 from engine.common.errors import QueryExecutionError
 from engine.indexes.base import Index
 from engine.query.ast import (
+    BeginTransactionStatement,
     BetweenExpr,
     ColumnRef,
     CompareExpr,
@@ -35,6 +36,7 @@ from engine.query.ast import (
     DistanceExpr,
     DropIndexStatement,
     DropTableStatement,
+    EndTransactionStatement,
     ExplainStatement,
     Expr,
     FunctionExpr,
@@ -99,6 +101,8 @@ def plan(statement: Statement, catalog: Any) -> Plan:
         return _plan_drop_table(statement, catalog)
     if isinstance(statement, DropIndexStatement):
         return _plan_drop_index(statement, catalog)
+    if isinstance(statement, (BeginTransactionStatement, EndTransactionStatement)):
+        return _plan_transaction_control(statement)
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
 
 
@@ -205,6 +209,16 @@ def _plan_drop_table(statement: DropTableStatement, catalog: Any) -> Plan:
 def _plan_drop_index(statement: DropIndexStatement, catalog: Any) -> Plan:
     if catalog.index_location(statement.index_name) is None:
         raise QueryExecutionError(f"unknown index {statement.index_name!r}")
+    return Plan(statement=statement)
+
+
+def _plan_transaction_control(statement: Statement) -> Plan:
+    """Accept ``BEGIN``/``END`` without an operator tree or catalog checks.
+
+    The plan only carries the statement: opening and closing transactions is a
+    session duty (thread-local state plus undo journal), so there is nothing
+    for the planner to validate nor for the operator tree to run.
+    """
     return Plan(statement=statement)
 
 

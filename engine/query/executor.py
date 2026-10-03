@@ -12,11 +12,13 @@ from engine.common.record import Record, decode_row, encode_row
 from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index
 from engine.query.ast import (
+    BeginTransactionStatement,
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
     DropIndexStatement,
     DropTableStatement,
+    EndTransactionStatement,
     ExplainStatement,
     InsertStatement,
     SelectStatement,
@@ -56,7 +58,31 @@ def execute(plan: Plan, catalog: Any) -> ResultSet:
         return ResultSet(columns=())
     if isinstance(statement, ExplainStatement):
         return _execute_explain(plan, catalog)
+    if isinstance(statement, (BeginTransactionStatement, EndTransactionStatement)):
+        raise _transaction_control_error(statement)
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
+
+
+def _transaction_control_error(statement: Statement) -> QueryExecutionError:
+    """Refuse to run transaction control outside a transactional session.
+
+    Reaching this point means the statement bypassed
+    :meth:`engine.transactions.session.TransactionalSession.execute_statement`,
+    which is the only place that owns the thread-local transaction. A silent
+    no-op would be the worst outcome here: the caller would read ``BEGIN
+    TRANSACTION`` as "my statements are now atomic", while the engine had
+    already auto-committed each one individually, so a failure in the middle
+    would leave the group half applied. Failing loudly keeps the illusion of
+    atomicity from forming in the first place.
+    """
+    name = "BEGIN" if isinstance(statement, BeginTransactionStatement) else "END"
+    return QueryExecutionError(
+        f"{name} TRANSACTION cannot be executed here: transaction boundaries are "
+        "held by the transactional session, not by the statement executor. Send it "
+        "through TransactionalSession.execute() (engine.transactions.session) so the "
+        "transaction state is tracked; running it here would leave every statement "
+        "auto-committed"
+    )
 
 
 def _execute_select(plan: Plan) -> ResultSet:

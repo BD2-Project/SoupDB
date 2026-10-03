@@ -61,6 +61,10 @@ def select_all(conn) -> tuple:
     return proto.decode_resultset(payload).rows
 
 
+def sql(conn, text: str) -> tuple[int, bytes]:
+    return request(conn, proto.OP_QUERY, proto.encode_query(text))
+
+
 def test_full_lifecycle_over_tcp(server) -> None:
     conn = connect(server)
     try:
@@ -167,3 +171,111 @@ def test_persistence_after_server_restart(database) -> None:
     finally:
         conn.close()
     second.shutdown()
+
+
+def test_sql_transaction_group_commits_over_tcp(server) -> None:
+    """BEGIN TRANSACTION agrupa sentencias por OP_QUERY y END TRANSACTION confirma."""
+    conn = connect(server)
+    try:
+        assert sql(conn, "BEGIN TRANSACTION")[0] == proto.OP_OK
+        assert sql(conn, "INSERT INTO accounts VALUES (30, 300)")[0] == proto.OP_OK
+        assert sql(conn, "INSERT INTO accounts VALUES (31, 310)")[0] == proto.OP_OK
+        assert sql(conn, "DELETE FROM accounts WHERE id = 1")[0] == proto.OP_OK
+        opcode, payload = sql(conn, "END TRANSACTION")
+        assert opcode == proto.OP_OK
+        assert proto.decode_ok(payload) == 0
+        assert select_all(conn) == ((2, 200), (30, 300), (31, 310))
+    finally:
+        conn.close()
+
+
+def test_sql_transaction_group_rolls_back_over_tcp(server) -> None:
+    """El mismo grupo revertedido: BEGIN TRANSACTION, INSERT, rollback del protocolo."""
+    conn = connect(server)
+    try:
+        assert sql(conn, "BEGIN TRANSACTION")[0] == proto.OP_OK
+        assert sql(conn, "INSERT INTO accounts VALUES (40, 400)")[0] == proto.OP_OK
+        assert request(conn, proto.OP_ROLLBACK)[0] == proto.OP_OK
+        assert select_all(conn) == ((1, 100), (2, 200))
+    finally:
+        conn.close()
+
+
+def test_sql_transaction_group_is_invisible_until_end_over_tcp(server) -> None:
+    """Otra conexión no ve el grupo abierto y sí lo ve tras END TRANSACTION."""
+    writer = connect(server)
+    reader = connect(server)
+    try:
+        assert sql(writer, "BEGIN TRANSACTION")[0] == proto.OP_OK
+        assert sql(writer, "INSERT INTO accounts VALUES (50, 500)")[0] == proto.OP_OK
+        opcode, payload = sql(reader, "SELECT * FROM accounts")
+        assert opcode == proto.OP_ERROR
+        assert proto.decode_error(payload)[0] in (
+            proto.ERR_TRANSACTION,
+            proto.ERR_LOCK_TIMEOUT,
+            proto.ERR_DEADLOCK,
+        )
+        assert sql(writer, "END TRANSACTION")[0] == proto.OP_OK
+        assert (50, 500) in select_all(reader)
+    finally:
+        writer.close()
+        reader.close()
+
+
+def test_sql_transaction_group_survives_restart_over_tcp(database) -> None:
+    """El commit por END TRANSACTION queda persistido como el del protocolo."""
+    def make_server():
+        handler = ConnectionHandler(
+            database,
+            TransactionManager(),
+            host="127.0.0.1",
+            port=0,
+            max_connections=4,
+            lock_timeout_ms=1000,
+        )
+        handler.bind()
+        thread = threading.Thread(target=handler.serve_forever, daemon=True)
+        thread.start()
+        return handler
+
+    first = make_server()
+    conn = connect(first)
+    try:
+        assert sql(conn, "BEGIN TRANSACTION")[0] == proto.OP_OK
+        assert sql(conn, "INSERT INTO accounts VALUES (60, 600)")[0] == proto.OP_OK
+        assert sql(conn, "END TRANSACTION")[0] == proto.OP_OK
+    finally:
+        conn.close()
+    first.shutdown()
+
+    second = make_server()
+    conn = connect(second)
+    try:
+        assert (60, 600) in select_all(conn)
+    finally:
+        conn.close()
+    second.shutdown()
+
+
+def test_sql_transaction_control_errors_over_tcp(server) -> None:
+    conn = connect(server)
+    try:
+        opcode, payload = sql(conn, "END TRANSACTION")
+        assert opcode == proto.OP_ERROR
+        code, message = proto.decode_error(payload)
+        assert code == proto.ERR_TRANSACTION
+        assert "no active transaction" in message
+
+        assert sql(conn, "BEGIN TRANSACTION")[0] == proto.OP_OK
+        opcode, payload = sql(conn, "BEGIN")
+        assert opcode == proto.OP_ERROR
+        code, message = proto.decode_error(payload)
+        assert code == proto.ERR_TRANSACTION
+        assert "already active" in message
+        assert request(conn, proto.OP_ROLLBACK)[0] == proto.OP_OK
+
+        opcode, payload = sql(conn, "BEGIN TRANSACTION extra")
+        assert opcode == proto.OP_ERROR
+        assert proto.decode_error(payload)[0] == proto.ERR_PARSE
+    finally:
+        conn.close()

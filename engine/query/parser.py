@@ -12,6 +12,7 @@ the comparison level.
 """
 
 from engine.query.ast import (
+    BeginTransactionStatement,
     BetweenExpr,
     BinaryExpr,
     ColumnDef,
@@ -24,6 +25,7 @@ from engine.query.ast import (
     DistanceExpr,
     DropIndexStatement,
     DropTableStatement,
+    EndTransactionStatement,
     ExplainStatement,
     Expr,
     FunctionExpr,
@@ -128,6 +130,10 @@ class _Parser:
     def parse_statement(self) -> Statement:
         if self._match_keyword("UPDATE"):
             return self._parse_update()
+        if self._match_keyword("BEGIN"):
+            return self._parse_begin_transaction()
+        if self._match_keyword("END"):
+            return self._parse_end_transaction()
         if self._match_keyword("EXPLAIN"):
             return self._parse_explain()
         if self._match_keyword("SELECT"):
@@ -145,6 +151,18 @@ class _Parser:
                 return self._parse_drop_index()
             return self._parse_drop_table()
         raise QueryParseError(f"unsupported statement at position {self._peek().position}")
+
+    def _parse_begin_transaction(self) -> BeginTransactionStatement:
+        """Parse ``BEGIN`` and ``BEGIN TRANSACTION`` (the word is optional)."""
+        self._match_keyword("TRANSACTION")
+        self._error_if_not_eof()
+        return BeginTransactionStatement()
+
+    def _parse_end_transaction(self) -> EndTransactionStatement:
+        """Parse ``END`` and ``END TRANSACTION`` (the word is optional)."""
+        self._match_keyword("TRANSACTION")
+        self._error_if_not_eof()
+        return EndTransactionStatement()
 
     def _parse_update(self) -> UpdateStatement:
         table = self._expect_kind(TokenKind.IDENTIFIER).value

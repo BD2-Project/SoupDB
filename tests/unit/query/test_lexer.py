@@ -68,6 +68,15 @@ def test_is_and_null_keywords() -> None:
     assert (TokenKind.NULL, "NULL") in toks
 
 
+def test_begin_end_transaction_keywords() -> None:
+    toks = token_values("BEGIN TRANSACTION")
+    assert toks == [
+        (TokenKind.KEYWORD, "BEGIN"),
+        (TokenKind.KEYWORD, "TRANSACTION"),
+    ]
+    assert token_values("END") == [(TokenKind.KEYWORD, "END")]
+
+
 def test_join_keywords_normalized_uppercase() -> None:
     toks = token_values("explain select * from a inner join b on a = b where x is null")
     assert (TokenKind.KEYWORD, "EXPLAIN") in toks
@@ -78,7 +87,9 @@ def test_join_keywords_normalized_uppercase() -> None:
 
 
 def test_new_keywords_are_not_identifiers() -> None:
-    toks = token_values("update set join inner having limit offset is null explain")
+    toks = token_values(
+        "update set join inner having limit offset is null explain begin end transaction"
+    )
     assert all(kind is not TokenKind.IDENTIFIER for kind, _ in toks)
 
 

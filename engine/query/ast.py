@@ -256,3 +256,23 @@ class DropIndexStatement(Statement):
     """``DROP INDEX name`` removes an index."""
 
     index_name: str
+
+
+@dataclass(frozen=True)
+class BeginTransactionStatement(Statement):
+    """``BEGIN [TRANSACTION]``: opens a transaction on the current session thread.
+
+    ``TRANSACTION`` is optional, so both ``BEGIN`` and ``BEGIN TRANSACTION``
+    produce this node. The node carries no payload: the transaction itself
+    lives in the transactional session (thread-local), not in the AST.
+    """
+
+
+@dataclass(frozen=True)
+class EndTransactionStatement(Statement):
+    """``END [TRANSACTION]``: closes the active transaction with a commit.
+
+    ``TRANSACTION`` is optional, so both ``END`` and ``END TRANSACTION``
+    produce this node. ``END`` closes the transaction committing it, the same
+    semantics already supported by ``TransactionalSession.commit()``.
+    """

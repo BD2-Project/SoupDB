@@ -159,3 +159,95 @@ def test_concurrent_clients_share_concurrency_control(server) -> None:
     finally:
         conn_a.close()
         conn_b.close()
+
+
+def sql(conn: socket.socket, text: str) -> tuple[int, bytes]:
+    return request(conn, proto.OP_QUERY, proto.encode_query(text))
+
+
+def select_rows(conn: socket.socket) -> tuple:
+    opcode, payload = sql(conn, "SELECT * FROM accounts")
+    assert opcode == proto.OP_RESULT
+    return proto.decode_resultset(payload).rows
+
+
+def test_sql_begin_end_transaction_over_tcp_commits(server) -> None:
+    conn = connect(server)
+    try:
+        assert sql(conn, "BEGIN TRANSACTION")[0] == proto.OP_OK
+        assert sql(conn, "INSERT INTO accounts VALUES (3, 300)")[0] == proto.OP_OK
+        assert sql(conn, "INSERT INTO accounts VALUES (4, 400)")[0] == proto.OP_OK
+        opcode, payload = sql(conn, "END TRANSACTION")
+        assert opcode == proto.OP_OK
+        assert proto.decode_ok(payload) == 0
+        assert select_rows(conn) == ((1, 100), (2, 200), (3, 300), (4, 400))
+    finally:
+        conn.close()
+
+
+def test_sql_begin_then_protocol_rollback_over_tcp(server) -> None:
+    conn = connect(server)
+    try:
+        assert sql(conn, "BEGIN TRANSACTION")[0] == proto.OP_OK
+        assert sql(conn, "INSERT INTO accounts VALUES (5, 500)")[0] == proto.OP_OK
+        assert request(conn, proto.OP_ROLLBACK)[0] == proto.OP_OK
+        assert select_rows(conn) == ((1, 100), (2, 200))
+    finally:
+        conn.close()
+
+
+def test_sql_short_forms_over_tcp(server) -> None:
+    conn = connect(server)
+    try:
+        assert sql(conn, "BEGIN")[0] == proto.OP_OK
+        assert sql(conn, "INSERT INTO accounts VALUES (6, 600)")[0] == proto.OP_OK
+        assert sql(conn, "END")[0] == proto.OP_OK
+        assert select_rows(conn) == ((1, 100), (2, 200), (6, 600))
+    finally:
+        conn.close()
+
+
+def test_nested_sql_begin_over_tcp_returns_error_frame(server) -> None:
+    conn = connect(server)
+    try:
+        assert sql(conn, "BEGIN TRANSACTION")[0] == proto.OP_OK
+        opcode, payload = sql(conn, "BEGIN TRANSACTION")
+        assert opcode == proto.OP_ERROR
+        code, message = proto.decode_error(payload)
+        assert code == proto.ERR_TRANSACTION
+        assert "already active" in message
+        assert request(conn, proto.OP_ROLLBACK)[0] == proto.OP_OK
+    finally:
+        conn.close()
+
+
+def test_sql_end_without_transaction_over_tcp_returns_error_frame(server) -> None:
+    conn = connect(server)
+    try:
+        opcode, payload = sql(conn, "END TRANSACTION")
+        assert opcode == proto.OP_ERROR
+        code, message = proto.decode_error(payload)
+        assert code == proto.ERR_TRANSACTION
+        assert "no active transaction" in message
+    finally:
+        conn.close()
+
+
+def test_sql_transaction_group_is_isolated_from_other_connections(server) -> None:
+    writer = connect(server)
+    reader = connect(server)
+    try:
+        assert sql(writer, "BEGIN TRANSACTION")[0] == proto.OP_OK
+        assert sql(writer, "INSERT INTO accounts VALUES (7, 700)")[0] == proto.OP_OK
+        opcode, payload = sql(reader, "SELECT * FROM accounts")
+        assert opcode == proto.OP_ERROR
+        assert proto.decode_error(payload)[0] in (
+            proto.ERR_TRANSACTION,
+            proto.ERR_LOCK_TIMEOUT,
+            proto.ERR_DEADLOCK,
+        )
+        assert sql(writer, "END TRANSACTION")[0] == proto.OP_OK
+        assert select_rows(reader) == ((1, 100), (2, 200), (7, 700))
+    finally:
+        writer.close()
+        reader.close()

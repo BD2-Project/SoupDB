@@ -3,7 +3,9 @@
 The session wraps a catalog so that every access path goes through strict 2PL
 locks. Each thread holds its own active transaction (thread-local); statements
 run inside ``BEGIN/COMMIT`` explicitly or are auto-committed as a single
-statement transaction when no transaction is active.
+statement transaction when no transaction is active. Boundaries can also be
+driven from SQL text (``BEGIN [TRANSACTION]`` / ``END [TRANSACTION]``), which
+this session intercepts before the auto-commit path.
 """
 
 import os
@@ -20,6 +22,7 @@ from engine.common.errors import (
 from engine.common.record import Record
 from engine.common.rid import RID
 from engine.query import ResultSet
+from engine.query.ast import BeginTransactionStatement, EndTransactionStatement
 from engine.query.executor import execute as execute_plan
 from engine.query.parser import parse
 from engine.query.planner import plan as build_plan
@@ -96,6 +99,10 @@ class TransactionalSession:
         return self.execute_statement(parse(sql))
 
     def execute_statement(self, statement: Any) -> ResultSet:
+        if isinstance(statement, BeginTransactionStatement):
+            return self._execute_begin_transaction()
+        if isinstance(statement, EndTransactionStatement):
+            return self._execute_end_transaction()
         if self.current_transaction() is None:
             self.begin()
             try:
@@ -108,6 +115,27 @@ class TransactionalSession:
                 self.commit()
             return result
         return self._run(statement)
+
+    def _execute_begin_transaction(self) -> ResultSet:
+        """``BEGIN [TRANSACTION]`` opens the thread transaction.
+
+        ``begin()`` rejects a nested BEGIN with "a transaction is already active
+        on this thread"; the statement never reaches the executor, so the
+        auto-commit path cannot fire and close a transaction the caller believes
+        is still open.
+        """
+        self.begin()
+        return ResultSet(columns=(), affected=0)
+
+    def _execute_end_transaction(self) -> ResultSet:
+        """``END [TRANSACTION]`` commits the active thread transaction.
+
+        ``commit()`` goes through ``_current()``, so ending without an active
+        transaction raises "no active transaction on this thread" instead of
+        silently doing nothing.
+        """
+        self.commit()
+        return ResultSet(columns=(), affected=0)
 
     @contextmanager
     def transaction(self):
