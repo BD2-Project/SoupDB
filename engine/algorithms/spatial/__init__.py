@@ -9,6 +9,7 @@ from .metrics import (
     haversine_distance,
     haversine_metric,
 )
+from .polygon_query import iter_polygon_entries, polygon_search
 from .predicates import point_in_polygon, point_on_segment
 from .validation import (
     point_from_latlon,
@@ -36,4 +37,6 @@ __all__ = [
     "SpatialHit",
     "knn_hits",
     "knn_search",
+    "iter_polygon_entries",
+    "polygon_search",
 ]

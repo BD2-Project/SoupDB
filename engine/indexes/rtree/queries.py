@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from engine.algorithms.spatial.geometry import Polygon2D
 from engine.algorithms.spatial.knn import (
     SpatialHit,
     knn_search,
@@ -8,6 +9,9 @@ from engine.algorithms.spatial.knn import (
     knn_hits as search_knn_hits,
 )
 from engine.algorithms.spatial.metrics import SpatialMetric
+from engine.algorithms.spatial.polygon_query import (
+    polygon_search as search_polygon,
+)
 from engine.algorithms.spatial.range_query import (
     iter_radius_entries,
     iter_range_entries,
@@ -83,4 +87,13 @@ class SpatialQueries:
             center,
             k,
             metric,
+        )
+
+    def polygon_search(
+        self,
+        polygon: Polygon2D,
+    ) -> list[RID]:
+        return search_polygon(
+            self._root(),
+            polygon,
         )
