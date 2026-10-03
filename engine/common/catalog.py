@@ -11,7 +11,12 @@ a regular heap file managed through :class:`engine.storage.file_manager.FileMana
   declared length (character count for VARCHAR, 0 otherwise). The byte size of
   a value is computed per record by the codec.
 - ``SysIndexes``: one row per index: name, owner table, indexed column and
-  structure type (BTREE or HASH).
+  structure type (BTREE, HASH or RTREE).
+
+``RTREE`` is the spatial structure (:mod:`engine.indexes.rtree`): it indexes a
+POINT column and only answers box (range) queries, so it is registered apart
+from the scalar structures and the catalog validates the column type at
+``create_index`` time.
 """
 
 from collections.abc import Callable
@@ -24,6 +29,7 @@ from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index
 from engine.indexes.bplus_tree import BPlusTree
 from engine.indexes.extendible_hash import ExtendibleHash
+from engine.indexes.rtree import RTree
 from engine.storage.base import FileOrganization
 from engine.storage.file_manager import FileManager
 from engine.storage.heap_file import HeapFile
@@ -59,7 +65,11 @@ _SYS_TABLES = (
 
 _RESERVED_PREFIX = "Sys"
 _SUPPORTED_ENGINES = ("HEAP", "SEQUENTIAL")
-_SUPPORTED_INDEX_TYPES = ("BTREE", "HASH")
+#: Scalar structures: keys are values of a single column.
+_SCALAR_INDEX_TYPES = ("BTREE", "HASH")
+#: Spatial structure: the key is the POINT value of the indexed column.
+_SPATIAL_INDEX_TYPE = "RTREE"
+_SUPPORTED_INDEX_TYPES = (*_SCALAR_INDEX_TYPES, _SPATIAL_INDEX_TYPE)
 
 
 @dataclass
@@ -191,13 +201,13 @@ class Catalog:
         if column not in {c.name for c in table.schema}:
             raise QueryExecutionError(f"unknown column {column!r} in table {table_name!r}")
         if index_type not in _SUPPORTED_INDEX_TYPES:
-            raise QueryExecutionError(f"unsupported index type {index_type!r}; use BTREE or HASH")
+            raise QueryExecutionError(
+                f"unsupported index type {index_type!r}; use {', '.join(_SUPPORTED_INDEX_TYPES)}"
+            )
+        _check_indexable_column(table, table_name, column, index_type)
 
         index = self._open_index(index_name, index_type)
-        position = _column_position(table.schema, column)
-        for _rid, record in table.file.scan():
-            row = decode_row(record.data, table.schema)
-            index.insert(row[position], _rid)
+        self._fill_index(table, index, column, index_type)
         table.indexes[index_name] = _IndexEntry(
             index_name=index_name,
             column=column,
@@ -317,7 +327,7 @@ class Catalog:
                 index_name=index_name,
                 column=column,
                 index_type=index_type,
-                index=self._open_index(index_name, index_type),
+                index=self._build_index(table, index_name, column, index_type),
             )
 
     def _index_names(self) -> set[str]:
@@ -336,7 +346,50 @@ class Catalog:
             return SequentialFile(disk_manager, buffer_manager, _key_fn_for(columns))
         raise QueryExecutionError(f"unsupported engine {strategy!r}")
 
+    def _build_index(
+        self,
+        table: _Table,
+        index_name: str,
+        column: str,
+        index_type: str,
+    ) -> Index:
+        """Open ``index_name`` with the entries of ``column`` already in ``table``.
+
+        BTREE and HASH persist their own pages: the file they were filled into is
+        all they need to come back. The spatial index has no page-backed form in
+        its public API (``RTree`` only serializes to a filesystem path with
+        ``save``/``load``/``open``, and the paginated variant lives in a private
+        module), so the catalog treats it as a *derived* structure and rebuilds
+        it from the table every time the database is opened. Rebuilding is what
+        guarantees a reopened index answers exactly like the table it indexes,
+        instead of coming back empty; the cost is one sequential pass per
+        spatial index, paid once at open time.
+        """
+        index = self._open_index(index_name, index_type)
+        if index_type == _SPATIAL_INDEX_TYPE:
+            self._fill_index(table, index, column, index_type)
+        return index
+
+    def _fill_index(
+        self,
+        table: _Table,
+        index: Index,
+        column: str,
+        index_type: str,
+    ) -> None:
+        """Insert every row of ``table`` into ``index``, keyed by ``column``."""
+        position = _column_position(table.schema, column)
+        for rid, record in table.file.scan():
+            value = decode_row(record.data, table.schema)[position]
+            if value is None and index_type == _SPATIAL_INDEX_TYPE:
+                # A NULL coordinate is not a location: there is nothing to index,
+                # and a row that cannot be located cannot answer a radius query.
+                continue
+            index.insert(value, rid)
+
     def _open_index(self, index_name: str, index_type: str) -> Index:
+        if index_type == _SPATIAL_INDEX_TYPE:
+            return RTree()
         disk_manager, buffer_manager = self._files.storage(f"ix_{index_name}")
         if index_type == "BTREE":
             return BPlusTree(disk_manager, buffer_manager)
@@ -377,6 +430,23 @@ def _check_columns(columns: tuple[ColumnDef, ...]) -> None:
         if column.name in seen:
             raise QueryExecutionError(f"duplicate column {column.name!r}")
         seen.add(column.name)
+
+
+def _check_indexable_column(
+    table: _Table,
+    table_name: str,
+    column: str,
+    index_type: str,
+) -> None:
+    """Reject a spatial index on a column that cannot hold a location."""
+    if index_type != _SPATIAL_INDEX_TYPE:
+        return
+    definition = next(item for item in table.schema if item.name == column)
+    if definition.type_name is not ColumnType.POINT:
+        raise QueryExecutionError(
+            f"a spatial index requires a POINT column; column {column!r} of table "
+            f"{table_name!r} is {definition.type_name.value}"
+        )
 
 
 def _column_position(columns: tuple[ColumnDef, ...], name: str) -> int:

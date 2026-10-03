@@ -34,6 +34,7 @@ from engine.query.ast import (
     SelectColumn,
 )
 from engine.query.evaluator import Schema, evaluate, evaluate_aggregate
+from engine.query.spatial_metrics import EUCLIDEAN
 from engine.storage.base import FileOrganization
 from engine.storage.disk_manager import DiskManager
 
@@ -267,6 +268,82 @@ class IndexRangeScan(_VolcanoBase):
     def explain(self) -> PlanNode:
         detail = {"lo": str(self._lo), "hi": str(self._hi)}
         return self._plan("IndexRangeScan", detail)
+
+
+class SpatialIndexScan(_VolcanoBase):
+    """Radius query through a spatial index (leaf operator).
+
+    The circle ``distance(point, center) < radius`` is contained in the
+    axis-aligned box ``center ± radius`` - ``|point.x - center.x| <= distance``
+    and likewise for ``y`` - so the box is a SUPERCONSET of the circle and
+    ``index.range_search`` returns every row that could match. The box is not a
+    circle, so the ``Filter`` the planner puts on top re-evaluates the exact
+    predicate: the rows emitted are the rows of the radius, and the rows the box
+    wrongly contains are discarded without ever being read from disk.
+
+    Only euclidean radii are served here, the one metric whose bound is planar
+    and independent of the row; a geodesic radius would need a latitude
+    dependent bound and stays on the full scan (see the planner).
+    """
+
+    def __init__(
+        self,
+        index: Index,
+        fetch: Callable[[RID], Record | None],
+        center: tuple[float, float],
+        radius: float,
+        schema: Schema,
+        index_name: str,
+        column: str,
+        metric: str = EUCLIDEAN,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((), disk_manager)
+        self._index = index
+        self._fetch = fetch
+        self._center = (float(center[0]), float(center[1]))
+        self._radius = float(radius)
+        self._index_name = index_name
+        self._column = column
+        self._metric = metric
+        self.schema = schema
+
+    def open(self) -> None:
+        super().open()
+        if not self._index.supports_range:
+            raise QueryExecutionError("spatial search requested but the index does not support it")
+        radius = self._radius
+        center_x, center_y = self._center
+        candidates = self._index.range_search(
+            (center_x - radius, center_y - radius),
+            (center_x + radius, center_y + radius),
+        )
+        self._buffer = iter((rid, self._fetch(rid)) for rid in candidates)
+
+    def next(self) -> Record | None:
+        while True:
+            try:
+                _, record = next(self._buffer)
+            except StopIteration:
+                return None
+            if record is None:
+                continue
+            self._rows += 1
+            return record
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        detail = {
+            "index": self._index_name,
+            "column": self._column,
+            "center": self._center,
+            "radius": self._radius,
+            "metric": self._metric,
+        }
+        return self._plan("SpatialIndexScan", detail)
 
 
 class Filter(_VolcanoBase):

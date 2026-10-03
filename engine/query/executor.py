@@ -26,7 +26,7 @@ from engine.query.ast import (
 )
 from engine.query.evaluator import Schema, evaluate
 from engine.query.operators import PlanNode
-from engine.query.planner import Plan
+from engine.query.planner import Plan, is_spatial_index
 from engine.query.resultset import ResultSet
 
 
@@ -115,6 +115,8 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
         rid = file_org.insert(Record(data=encode_row(tuple(values), schema)))
         for position, column in enumerate(schema):
             for index in _indexes_for_column(catalog, statement.table, column.name).values():
+                if _skip_index_key(index, values[position]):
+                    continue
                 index.insert(values[position], rid)
         affected += 1
     return ResultSet(columns=(), affected=affected)
@@ -134,6 +136,8 @@ def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
             continue
         for position, column in enumerate(schema):
             for index in _indexes_for_column(catalog, statement.table, column.name).values():
+                if _skip_index_key(index, row[position]):
+                    continue
                 index.remove(row[position], rid)
         affected += 1
     return ResultSet(columns=(), affected=affected)
@@ -145,6 +149,18 @@ def _indexes_for_column(catalog: Any, table: str, column: str) -> dict[str, Inde
         return catalog.indexes_for(table, column)
     except (AttributeError, NotImplementedError):
         return {}
+
+
+def _skip_index_key(index: Index, value: object) -> bool:
+    """Whether a NULL value must stay out of ``index``.
+
+    A spatial index has no way to store a NULL coordinate: it is not a location,
+    so there is no point to insert, search or remove, and the structure rejects
+    the key outright. Keeping the row out of the index is what lets a NULL row
+    coexist with the index - the radius query simply has no candidate for it.
+    Scalar indexes keep their current behaviour untouched here.
+    """
+    return value is None and is_spatial_index(index)
 
 
 def _column_index(schema: Schema, name: str) -> int:

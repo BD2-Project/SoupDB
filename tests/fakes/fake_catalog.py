@@ -3,12 +3,17 @@
 Mimics the duck-typed interface the planner docs: ``schema``, ``file_org``,
 ``indexes``, ``indexes_for``, ``create_table``, ``index_location``,
 ``drop_table`` and ``drop_index`` plus extra test helpers (``insert``,
-``add_index``).
+``add_index``, ``add_spatial_index``).
+
+``add_spatial_index`` registers a real :class:`engine.indexes.rtree.RTree` so the
+spatial access path is exercised against the same structure the persistent
+catalog uses, not against a stand-in that could hide a mismatch.
 """
 
 from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
 from engine.indexes.base import Index
+from engine.indexes.rtree import RTree
 from engine.query.evaluator import Schema
 from tests.fakes.fake_index import FakeIndex
 from tests.fakes.fake_storage import FakeFileOrganization
@@ -81,9 +86,9 @@ class FakeCatalog:
         self,
         name: str,
         column: str,
-        index: FakeIndex | None = None,
+        index: Index | None = None,
         index_name: str | None = None,
-    ) -> FakeIndex:
+    ) -> Index:
         table = self._tables[name]
         index_name = index_name or f"idx_{column}"
         if index_name in self._index_names:
@@ -93,9 +98,24 @@ class FakeCatalog:
         position = _column_index(table.schema, column)
         for rid, record in table.file_org.scan():
             row = decode_row(record.data, table.schema)
+            if row[position] is None and isinstance(index, RTree):
+                # Un NULL no es una ubicación: el índice espacial lo rechaza.
+                continue
             index.insert(row[position], rid)
         self._index_names[index_name] = (name, column)
         return index
+
+    def add_spatial_index(
+        self,
+        name: str,
+        column: str,
+        index_name: str | None = None,
+        order: int = 4,
+    ) -> RTree:
+        """Register a real R-Tree over ``column`` and fill it with existing rows."""
+        tree = RTree(order=order)
+        self.add_index(name, column, index=tree, index_name=index_name or f"idx_{column}_rtree")
+        return tree
 
     def index_location(self, index_name: str) -> tuple[str, str] | None:
         return self._index_names.get(index_name)
@@ -121,4 +141,6 @@ class FakeCatalog:
         rid = table.file_org.insert(Record(data=encode_row(row, schema)))
         for position, column in enumerate(schema):
             for index in self.indexes_for(name, column.name).values():
+                if row[position] is None and isinstance(index, RTree):
+                    continue
                 index.insert(row[position], rid)
