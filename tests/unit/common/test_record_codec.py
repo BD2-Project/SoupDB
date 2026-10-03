@@ -94,6 +94,45 @@ def test_decode_bool() -> None:
     assert decode_row(b"\x02", schema) == (False,)
 
 
+def test_encode_point() -> None:
+    schema = (ColumnDef("ubicacion", ColumnType.POINT),)
+    data = encode_row(((3.0, -1.5),), schema)
+    assert data == b"\x01" + struct.pack("<dd", 3.0, -1.5)
+
+
+def test_decode_point() -> None:
+    schema = (ColumnDef("ubicacion", ColumnType.POINT),)
+    data = b"\x01" + struct.pack("<dd", 1.5, 2.25)
+    assert decode_row(data, schema) == ((1.5, 2.25),)
+
+
+def test_encode_point_coerces_int_coordinates() -> None:
+    schema = (ColumnDef("ubicacion", ColumnType.POINT),)
+    data = encode_row(((3, -1),), schema)
+    assert data == b"\x01" + struct.pack("<dd", 3.0, -1.0)
+    assert decode_row(data, schema) == ((3.0, -1.0),)
+
+
+def test_encode_wrong_point_type_raises() -> None:
+    schema = (ColumnDef("ubicacion", ColumnType.POINT),)
+    for value in [1, "ab", (1,), (1, 2, 3), (1, "a"), (None, None), (True, False)]:
+        with pytest.raises(QueryExecutionError):
+            encode_row((value,), schema)
+
+
+def test_decode_invalid_point_flag_raises() -> None:
+    schema = (ColumnDef("ubicacion", ColumnType.POINT),)
+    with pytest.raises(QueryExecutionError, match="POINT"):
+        decode_row(b"\x02", schema)
+
+
+def test_decode_truncated_point_raises() -> None:
+    schema = (ColumnDef("ubicacion", ColumnType.POINT),)
+    data = b"\x01" + struct.pack("<d", 3.0) + b"\x00\x01"
+    with pytest.raises(QueryExecutionError):
+        decode_row(data, schema)
+
+
 def test_encode_varchar_with_length_prefix() -> None:
     schema = (ColumnDef("titulo", ColumnType.VARCHAR, length=32),)
     data = encode_row(("RAG",), schema)

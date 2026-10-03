@@ -56,6 +56,12 @@ def test_having_limit_offset_explain_keywords() -> None:
     assert (TokenKind.KEYWORD, "OFFSET") in toks
 
 
+def test_point_and_distance_keywords() -> None:
+    toks = token_values("POINT(1, 2) distance(a, b)")
+    assert toks[0] == (TokenKind.KEYWORD, "POINT")
+    assert toks[6] == (TokenKind.KEYWORD, "DISTANCE")
+
+
 def test_is_and_null_keywords() -> None:
     toks = token_values("SELECT * FROM t WHERE autor IS NULL")
     assert (TokenKind.KEYWORD, "IS") in toks

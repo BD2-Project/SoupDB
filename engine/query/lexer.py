@@ -42,6 +42,8 @@ _KEYWORDS = {
     "AVG",
     "MIN",
     "MAX",
+    "POINT",
+    "DISTANCE",
     "UPDATE",
     "SET",
     "JOIN",

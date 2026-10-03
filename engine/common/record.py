@@ -3,9 +3,10 @@
 Rows are encoded to a packed byte blob and stored in :class:`Record.data`.
 Each column starts with a flag byte: ``0x00`` marks NULL and then no column
 bytes follow. Otherwise the column payload follows the flag: INT 4 bytes,
-FLOAT 8 bytes, BOOL 1 byte (``0x01`` True, ``0x02`` False), and VARCHAR/TEXT
-as a ``uint32`` length prefix followed by the UTF-8 bytes. All integers are
-little-endian; no alignment. Empty rows encode to ``b""``.
+FLOAT 8 bytes, POINT 16 bytes (two little-endian doubles), BOOL 1 byte
+(``0x01`` True, ``0x02`` False), and VARCHAR/TEXT as a ``uint32`` length prefix
+followed by the UTF-8 bytes. All integers are little-endian; no alignment.
+Empty rows encode to ``b""``.
 """
 
 import struct
@@ -71,6 +72,16 @@ def encode_value(out: bytearray, value: object, column: ColumnDef) -> None:
         out += b"\x01" if value else b"\x02"
         return
 
+    if column.type_name is ColumnType.POINT:
+        if not _is_point(value):
+            raise QueryExecutionError(
+                f"column {column.name!r} expects POINT, got {type(value).__name__}"
+            )
+        x, y = value
+        out += b"\x01"
+        out += struct.pack("<dd", float(x), float(y))
+        return
+
     if column.type_name in (ColumnType.VARCHAR, ColumnType.TEXT):
         out += b"\x01"
         encode_text(out, value, column)
@@ -129,6 +140,14 @@ def decode_value(data: bytes, offset: int, column: ColumnDef) -> tuple[object, i
             return False, offset
         raise QueryExecutionError(f"invalid BOOL byte {flag!r}")
 
+    if column.type_name is ColumnType.POINT:
+        if flag != b"\x01":
+            raise QueryExecutionError(f"invalid POINT flag byte {flag!r}")
+        raw_x, offset = _take_bytes(data, offset, 8)
+        raw_y, offset = _take_bytes(data, offset, 8)
+        x, y = struct.unpack("<dd", raw_x + raw_y)
+        return (x, y), offset
+
     if column.type_name in (ColumnType.VARCHAR, ColumnType.TEXT):
         if flag != b"\x01":
             raise QueryExecutionError(f"invalid text flag byte {flag!r}")
@@ -145,6 +164,12 @@ def decode_text(data: bytes, offset: int) -> tuple[object, int]:
         return raw.decode("utf-8"), offset
     except UnicodeDecodeError as exc:
         raise QueryExecutionError("invalid UTF-8 in text column") from exc
+
+
+def _is_point(value: object) -> bool:
+    if type(value) is not tuple or len(value) != 2:
+        return False
+    return all(type(coord) in (int, float) for coord in value)
 
 
 def _take_bytes(data: bytes, offset: int, size: int) -> tuple[bytes, int]:

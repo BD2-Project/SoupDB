@@ -108,6 +108,22 @@ class FunctionExpr(Expr):
 
 
 @dataclass(frozen=True)
+class PointExpr(Expr):
+    """Spatial constructor ``POINT(x, y)``."""
+
+    x: Expr
+    y: Expr
+
+
+@dataclass(frozen=True)
+class DistanceExpr(Expr):
+    """Euclidean distance ``distance(left, right)`` between two points."""
+
+    left: Expr
+    right: Expr
+
+
+@dataclass(frozen=True)
 class SelectColumn:
     """One projected column in a SELECT list."""
 

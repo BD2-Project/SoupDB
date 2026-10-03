@@ -9,6 +9,7 @@ from engine.query.ast import (
     CompareExpr,
     CreateTableStatement,
     DeleteStatement,
+    DistanceExpr,
     ExplainStatement,
     FunctionExpr,
     HavingClause,
@@ -22,6 +23,7 @@ from engine.query.ast import (
     LogicalExpr,
     NotExpr,
     OrderByItem,
+    PointExpr,
     SelectColumn,
     SelectStatement,
     UpdateStatement,
@@ -56,6 +58,23 @@ def test_function_expression() -> None:
     assert fn.name == "COUNT"
     assert fn.arg == ColumnRef("id")
     assert fn.distinct is False
+
+
+def test_point_expression_structure() -> None:
+    point = PointExpr(Literal(1), Literal(2.5))
+    assert point.x == Literal(1)
+    assert point.y == Literal(2.5)
+    assert point == PointExpr(Literal(1), Literal(2.5))
+    assert point != PointExpr(Literal(1), Literal(3))
+
+
+def test_distance_expression_structure() -> None:
+    point = PointExpr(Literal(3), Literal(4))
+    dist = DistanceExpr(ColumnRef("ubicacion"), point)
+    assert dist.left == ColumnRef("ubicacion")
+    assert dist.right == point
+    assert dist == DistanceExpr(ColumnRef("ubicacion"), point)
+    assert dist != DistanceExpr(point, ColumnRef("ubicacion"))
 
 
 def test_select_statement_full_shape() -> None:
