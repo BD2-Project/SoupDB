@@ -8,9 +8,14 @@ of :class:`engine.common.schema.ColumnDef` nodes (column ``i`` maps to
 
 Comparisons are strict: operands must share the exact same type
 (``type(a) is type(b)``); an int is never coerced to a float.
+
+``distance(a, b)`` and ``distance(a, b, 'metrica')`` delegate to
+:mod:`engine.query.spatial_metrics`: ``'euclidean'`` (default, plane distance in
+coordinate units) or ``'haversine'`` (geodesic distance in kilometres). Both
+metrics always return a float, so the strict comparison rule above applies to
+their results as well.
 """
 
-import math
 import re
 from collections.abc import Iterable
 
@@ -30,6 +35,7 @@ from engine.query.ast import (
     NotExpr,
     PointExpr,
 )
+from engine.query.spatial_metrics import distance
 
 _COMPARISONS = {"=", "<>", "!=", "<", "<=", ">", ">="}
 _AGGREGATES = {"COUNT", "SUM", "AVG", "MIN", "MAX"}
@@ -100,7 +106,10 @@ def evaluate(expr: Expr, row: Row, schema: Schema) -> object:
             raise QueryExecutionError(
                 f"distance operands must be POINT values, got {type(right).__name__}"
             )
-        return math.hypot(left[0] - right[0], left[1] - right[1])
+        try:
+            return distance(left, right, expr.metric)
+        except ValueError as exc:
+            raise QueryExecutionError(str(exc)) from exc
 
     if isinstance(expr, FunctionExpr):
         raise QueryExecutionError(f"aggregate {expr.name} is not allowed in a scalar expression")

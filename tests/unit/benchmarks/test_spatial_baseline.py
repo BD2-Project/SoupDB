@@ -3,14 +3,31 @@ import random
 
 import pytest
 
-from benchmarks.spatial_baseline import SequentialSpatialScan
+from benchmarks.spatial_baseline import (
+    EARTH_RADIUS_KM,
+    EUCLIDEAN_DISTANCE,
+    HAVERSINE_DISTANCE,
+    METRIC_DISTANCES,
+    SequentialSpatialScan,
+    distance_function,
+    metric_functions,
+)
 from engine.common.rid import RID
 from engine.indexes.rtree.mbr import MBR
 from engine.indexes.rtree.point import Point
+from engine.query.spatial_metrics import normalize_metric
 
 
 def euclidean(a: Point, b: Point) -> float:
     return math.hypot(a.x - b.x, a.y - b.y)
+
+
+def haversine_oracle(a: Point, b: Point) -> float:
+    """Independent geodesic formula (atan2 form) to cross-check the baseline."""
+    phi1, phi2 = math.radians(a.y), math.radians(b.y)
+    d_phi, d_lambda = phi2 - phi1, math.radians(b.x - a.x)
+    h = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    return 2 * EARTH_RADIUS_KM * math.atan2(math.sqrt(h), math.sqrt(1 - h))
 
 
 class CountingDistance:
@@ -215,3 +232,177 @@ def test_matches_brute_force_oracle(seed: int, size: int) -> None:
         ]
         ranked = sorted(entries, key=lambda e: (euclidean(center, e[0]), e[0], e[1]))
         assert scan.knn(center, k, euclidean) == [rid for _p, rid in ranked[:k]]
+
+
+# --- segunda métrica: haversine ------------------------------------------
+
+
+#: Capitales como Point(lon, lat); el RID es el identificador estable del R-Tree.
+CITIES = {
+    "Montevideo": Point(-56.1645, -34.9011),
+    "Buenos Aires": Point(-58.3816, -34.6037),
+    "Santiago": Point(-70.6483, -33.4489),
+    "Lisboa": Point(-9.1393, 38.7223),
+    "Paris": Point(2.3522, 48.8566),
+}
+CITY_SCAN = SequentialSpatialScan((point, RID(i, 0)) for i, point in enumerate(CITIES.values()))
+MONTEVIDEO = CITY_SCAN.knn(Point(-56.1645, -34.9011), 1, HAVERSINE_DISTANCE)[0]
+
+#: Distancias de referencia desde Montevideo (km, radio medio 6371.0088).
+MVD_BUE_KM = 205.23235938356873
+MVD_SCL_KM = 1340.9793901132298
+MVD_LIS_KM = 9508.412014033962
+MVD_PAR_KM = 10960.801628543702
+
+
+def test_baseline_exposes_both_metrics() -> None:
+    assert set(METRIC_DISTANCES) == {"euclidean", "haversine"}
+    assert METRIC_DISTANCES["euclidean"] is EUCLIDEAN_DISTANCE
+    assert METRIC_DISTANCES["haversine"] is HAVERSINE_DISTANCE
+    assert distance_function() is EUCLIDEAN_DISTANCE
+    assert distance_function("haversine") is HAVERSINE_DISTANCE
+    assert distance_function("Haversine") is HAVERSINE_DISTANCE
+    assert distance_function(normalize_metric("haversine")) is HAVERSINE_DISTANCE
+    assert set(metric_functions()) == {EUCLIDEAN_DISTANCE, HAVERSINE_DISTANCE}
+
+
+def test_baseline_shares_the_euclidean_convention_with_the_engine() -> None:
+    # El baseline importa la métrica del motor: mismo resultado bit a bit.
+    for a in CITIES.values():
+        for b in CITIES.values():
+            assert EUCLIDEAN_DISTANCE(a, b) == euclidean(a, b)
+
+
+def test_haversine_radius_in_kilometres() -> None:
+    inside = CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 300.0, HAVERSINE_DISTANCE)
+    assert inside == [MONTEVIDEO, RID(1, 0)]
+    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 1000.0, HAVERSINE_DISTANCE) == [
+        MONTEVIDEO,
+        RID(1, 0),
+    ]
+    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 2000.0, HAVERSINE_DISTANCE) == [
+        MONTEVIDEO,
+        RID(1, 0),
+        RID(2, 0),
+    ]
+    assert CITY_SCAN.radius_search(Point(0, 60), 1.0, HAVERSINE_DISTANCE) == []
+
+
+def test_haversine_radius_zero_matches_only_the_same_point() -> None:
+    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 0, HAVERSINE_DISTANCE) == [
+        MONTEVIDEO
+    ]
+    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9010), 0, HAVERSINE_DISTANCE) == []
+
+
+def test_haversine_antipodal_pair_at_half_circumference() -> None:
+    antipodal = SequentialSpatialScan(
+        [(Point(0, 0), RID(0, 0)), (Point(180, 0), RID(1, 0)), (Point(-180, 0), RID(2, 0))]
+    )
+    half_circumference = math.pi * EARTH_RADIUS_KM
+    # Los tres son antipodales del origen: los tres caen dentro del radio.
+    assert antipodal.radius_search(Point(0, 0), half_circumference, HAVERSINE_DISTANCE) == [
+        RID(0, 0),
+        RID(1, 0),
+        RID(2, 0),
+    ]
+    assert antipodal.radius_search(
+        Point(0, 0), half_circumference - 0.001, HAVERSINE_DISTANCE
+    ) == [RID(0, 0)]
+    assert antipodal.radius_search(Point(0, 0), half_circumference, HAVERSINE_DISTANCE) == [
+        RID(0, 0),
+        RID(1, 0),
+        RID(2, 0),
+    ]
+    # El origen está a 0 km; los otros dos empatan a media circunferencia y el
+    # desempate sigue siendo determinista: (Point, RID) ordena -180 antes que 180.
+    assert antipodal.knn(Point(0, 0), 2, HAVERSINE_DISTANCE) == [RID(0, 0), RID(2, 0)]
+
+
+def test_haversine_knn_returns_nearest_first() -> None:
+    nearest = CITY_SCAN.knn(Point(-56.1645, -34.9011), 4, HAVERSINE_DISTANCE)
+    assert nearest == [MONTEVIDEO, RID(1, 0), RID(2, 0), RID(3, 0)]
+    assert CITY_SCAN.knn(Point(-56.1645, -34.9011), 99, HAVERSINE_DISTANCE) == [
+        MONTEVIDEO,
+        RID(1, 0),
+        RID(2, 0),
+        RID(3, 0),
+        RID(4, 0),
+    ]
+
+
+def test_haversine_knn_tie_break_is_deterministic() -> None:
+    entries = [
+        (Point(0, 1), RID(9, 9)),
+        (Point(1, 0), RID(7, 1)),
+        (Point(-1, 0), RID(3, 3)),
+        (Point(0, -1), RID(4, 4)),
+        (Point(1, 0), RID(7, 0)),
+    ]
+    expected = [RID(3, 3), RID(4, 4), RID(9, 9), RID(7, 0), RID(7, 1)]
+    for seed in range(10):
+        shuffled = entries[:]
+        random.Random(seed).shuffle(shuffled)
+        scan = SequentialSpatialScan(shuffled)
+        assert scan.knn(Point(0, 0), 5, HAVERSINE_DISTANCE) == expected
+        assert scan.knn(Point(0, 0), 2, HAVERSINE_DISTANCE) == expected[:2]
+
+
+def test_both_metrics_can_be_compared_on_the_same_dataset() -> None:
+    """Mismo radio, dos métricas: en grados entra el vecino, en km no."""
+    center = Point(-56.1645, -34.9011)
+    in_degrees = CITY_SCAN.radius_search(center, 3.0, EUCLIDEAN_DISTANCE)
+    in_kilometres = CITY_SCAN.radius_search(center, 3.0, HAVERSINE_DISTANCE)
+    assert in_degrees == [MONTEVIDEO, RID(1, 0)]
+    assert in_kilometres == [MONTEVIDEO]
+    # El subconjunto en km nunca es un superconjunto ni un subconjunto del de grados.
+    assert set(in_kilometres) < set(in_degrees)
+
+
+def test_metric_distance_functions_evaluate_every_entry() -> None:
+    scan = _scan(*[(i, i) for i in range(50)])
+    for distance_fn in metric_functions():
+        scan.radius_search(Point(0, 0), 1000.0, distance_fn)
+        scan.knn(Point(0, 0), 1, distance_fn)
+
+
+def test_haversine_matches_brute_force_oracle() -> None:
+    rng = random.Random(7)
+    entries = [
+        (
+            Point(
+                round(rng.uniform(-180.0, 180.0), 4),
+                round(rng.uniform(-90.0, 90.0), 4),
+            ),
+            RID(rng.randint(0, 5), i),
+        )
+        for i in range(200)
+    ]
+    scan = SequentialSpatialScan(entries)
+
+    for _ in range(20):
+        center = Point(
+            round(rng.uniform(-180.0, 180.0), 4), round(rng.uniform(-90.0, 90.0), 4)
+        )
+        radius = rng.choice([0, 1, 100, 1000, 5000, 10000, 20015])
+        k = rng.randint(1, len(entries) + 3)
+
+        assert scan.radius_search(center, radius, HAVERSINE_DISTANCE) == [
+            rid for p, rid in entries if haversine_oracle(center, p) <= radius
+        ]
+        ranked = sorted(
+            entries,
+            key=lambda e: (round(haversine_oracle(center, e[0]), 9), e[0], e[1]),
+        )
+        assert scan.knn(center, k, HAVERSINE_DISTANCE) == [rid for _p, rid in ranked[:k]]
+
+
+def test_haversine_rejects_out_of_range_coordinates() -> None:
+    scan = SequentialSpatialScan([(Point(0, 0), RID(0, 0))])
+    with pytest.raises(ValueError, match=r"longitude in \[-180, 180\]"):
+        scan.radius_search(Point(200, 0), 10.0, HAVERSINE_DISTANCE)
+    with pytest.raises(ValueError, match=r"latitude in \[-90, 90\]"):
+        scan.knn(Point(0, 91), 1, HAVERSINE_DISTANCE)
+    # El radio sigue validándose antes de calcular distancias.
+    with pytest.raises(ValueError, match="radius"):
+        scan.radius_search(Point(200, 0), -1.0, HAVERSINE_DISTANCE)

@@ -82,3 +82,75 @@ def test_parse_create_table_with_point_column() -> None:
 def test_parse_point_without_parenthesis_is_not_function() -> None:
     with pytest.raises(QueryParseError):
         parse("SELECT * FROM t WHERE POINT = 5")
+
+
+# --- distance(a, b, 'metrica') -------------------------------------------
+
+
+def test_parse_distance_without_metric_defaults_to_euclidean() -> None:
+    stmt = parse("SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2)) < 5.0")
+    assert isinstance(stmt, SelectStatement)
+    assert isinstance(stmt.where, CompareExpr)
+    assert stmt.where.left == DistanceExpr(
+        ColumnRef("ubicacion"), PointExpr(Literal(1), Literal(2))
+    )
+    assert stmt.where.left.metric == "euclidean"
+
+
+def test_parse_distance_with_haversine_metric() -> None:
+    stmt = parse(
+        "SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2), 'haversine') < 100.0"
+    )
+    assert isinstance(stmt, SelectStatement)
+    assert stmt.where == CompareExpr(
+        DistanceExpr(ColumnRef("ubicacion"), PointExpr(Literal(1), Literal(2)), "haversine"),
+        "<",
+        Literal(100.0),
+    )
+
+
+def test_parse_distance_metric_is_normalized_to_lowercase() -> None:
+    for literal in ("'haversine'", "'Haversine'", "'  HAVersine  '"):
+        stmt = parse(f"SELECT nombre FROM t ORDER BY distance(p, POINT(0, 0), {literal}) DESC")
+        assert isinstance(stmt, SelectStatement)
+        assert stmt.order_by[0].expr.metric == "haversine"
+        assert stmt.order_by[0].ascending is False
+
+
+def test_parse_distance_metric_in_projection_and_where() -> None:
+    sql = (
+        "SELECT distance(ubicacion, POINT(0, 0), 'haversine') AS d FROM t "
+        "WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 10.0 LIMIT 5"
+    )
+    stmt = parse(sql)
+    assert isinstance(stmt, SelectStatement)
+    assert isinstance(stmt.columns[0].expr, DistanceExpr)
+    assert stmt.columns[0].expr.metric == "haversine"
+    assert isinstance(stmt.where, CompareExpr)
+    assert stmt.where.left.metric == "haversine"
+    assert stmt.limit is not None and stmt.limit.limit == Literal(5)
+
+
+def test_parse_distance_with_unknown_metric_fails() -> None:
+    with pytest.raises(QueryParseError, match="unknown distance metric"):
+        parse("SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2), 'manhattan') < 5.0")
+
+
+def test_parse_distance_unknown_metric_error_mentions_position_and_names() -> None:
+    with pytest.raises(QueryParseError) as excinfo:
+        parse("SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2), 'manhattan') < 5.0")
+    message = str(excinfo.value)
+    assert "manhattan" in message
+    assert "euclidean" in message and "haversine" in message
+    assert "position" in message
+
+
+@pytest.mark.parametrize("argument", ["haversine", "1", "metrico", "POINT(1, 2)", "NULL"])
+def test_parse_distance_metric_must_be_a_string_literal(argument: str) -> None:
+    with pytest.raises(QueryParseError, match="metric must be a string literal"):
+        parse(f"SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2), {argument}) < 5.0")
+
+
+def test_parse_distance_with_too_many_arguments_fails() -> None:
+    with pytest.raises(QueryParseError):
+        parse("SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2), 'haversine', 3) < 5.0")

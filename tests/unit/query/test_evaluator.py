@@ -338,3 +338,63 @@ def test_distance_expr_rejects_non_point_operands() -> None:
     ):
         with pytest.raises(QueryExecutionError, match="distance"):
             evaluate(case, POINT_ROW, POINT_SCHEMA)
+
+
+def test_distance_expr_rejects_non_point_operands_for_every_metric() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    for metric in ("euclidean", "haversine"):
+        for case in (
+            DistanceExpr(ColumnRef("id"), pt, metric),
+            DistanceExpr(pt, ColumnRef("id"), metric),
+        ):
+            with pytest.raises(
+                QueryExecutionError, match="distance operands must be POINT values, got int"
+            ):
+                evaluate(case, POINT_ROW, POINT_SCHEMA)
+
+
+def test_distance_expr_haversine_metric() -> None:
+    a = PointExpr(Literal(-56.1645), Literal(-34.9011))
+    b = PointExpr(Literal(-58.3816), Literal(-34.6037))
+    assert evaluate(DistanceExpr(a, b, "haversine"), POINT_ROW, POINT_SCHEMA) == pytest.approx(
+        205.23235938356873
+    )
+    assert evaluate(DistanceExpr(a, a, "haversine"), POINT_ROW, POINT_SCHEMA) == 0.0
+
+
+def test_distance_expr_default_metric_equals_explicit_euclidean() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    assert evaluate(
+        DistanceExpr(ColumnRef("ubicacion"), pt), POINT_ROW, POINT_SCHEMA
+    ) == evaluate(
+        DistanceExpr(ColumnRef("ubicacion"), pt, "euclidean"), POINT_ROW, POINT_SCHEMA
+    )
+
+
+def test_distance_expr_metric_name_is_normalized_at_evaluation() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    assert evaluate(
+        DistanceExpr(pt, pt, "Haversine"), POINT_ROW, POINT_SCHEMA
+    ) == evaluate(DistanceExpr(pt, pt, "haversine"), POINT_ROW, POINT_SCHEMA)
+
+
+def test_distance_expr_unknown_metric_fails_at_evaluation() -> None:
+    # Guarda para un AST construido a mano: el parser ya rechaza el SQL.
+    pt = PointExpr(Literal(1), Literal(1))
+    with pytest.raises(QueryExecutionError, match="unknown distance metric 'manhattan'"):
+        evaluate(DistanceExpr(pt, pt, "manhattan"), POINT_ROW, POINT_SCHEMA)
+
+
+def test_distance_expr_haversine_rejects_coordinates_out_of_range() -> None:
+    out_of_range = PointExpr(Literal(0), Literal(91))
+    inside = PointExpr(Literal(0), Literal(0))
+    with pytest.raises(QueryExecutionError, match=r"latitude in \[-90, 90\], got 91.0"):
+        evaluate(DistanceExpr(out_of_range, inside, "haversine"), POINT_ROW, POINT_SCHEMA)
+    with pytest.raises(QueryExecutionError, match=r"longitude in \[-180, 180\], got 400.0"):
+        evaluate(
+            DistanceExpr(PointExpr(Literal(400), Literal(0)), inside, "haversine"),
+            POINT_ROW,
+            POINT_SCHEMA,
+        )
+    # La euclidiana es métrica de plano y no valida el rango geográfico.
+    assert evaluate(DistanceExpr(out_of_range, inside), POINT_ROW, POINT_SCHEMA) == 91.0

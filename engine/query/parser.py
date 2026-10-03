@@ -48,6 +48,7 @@ from engine.query.ast import (
 )
 from engine.query.errors import QueryParseError
 from engine.query.lexer import tokenize
+from engine.query.spatial_metrics import normalize_metric
 from engine.query.tokens import Token, TokenKind
 
 _COMPARISON_OPS = {"=", "<>", "!=", "<", "<=", ">", ">="}
@@ -570,8 +571,30 @@ class _Parser:
         left = self._parse_expression()
         self._expect_kind(TokenKind.COMMA)
         right = self._parse_expression()
+        metric = "euclidean"
+        if self._match_comma():
+            metric = self._parse_distance_metric()
         self._expect_kind(TokenKind.RPAREN)
-        return DistanceExpr(left=left, right=right)
+        return DistanceExpr(left=left, right=right, metric=metric)
+
+    def _parse_distance_metric(self) -> str:
+        """Third argument of ``distance``: a string literal naming the metric.
+
+        The name is known at parse time, so an unknown metric is rejected here
+        (as a ``QueryParseError``) instead of failing later at evaluation time,
+        together with the rest of the literal syntax. The canonical lowercase
+        name is stored in the AST.
+        """
+        token = self._peek()
+        if token.kind is not TokenKind.STRING:
+            raise QueryParseError(
+                "distance() metric must be a string literal at position "
+                f"{token.position}, got {token.value!r}"
+            )
+        try:
+            return normalize_metric(self._advance().value)
+        except ValueError as exc:
+            raise QueryParseError(f"{exc} at position {token.position}") from exc
 
     def _parse_primary(self) -> Expr:
         token = self._peek()

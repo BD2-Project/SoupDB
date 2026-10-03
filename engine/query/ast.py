@@ -117,10 +117,19 @@ class PointExpr(Expr):
 
 @dataclass(frozen=True)
 class DistanceExpr(Expr):
-    """Euclidean distance ``distance(left, right)`` between two points."""
+    """``distance(left, right)`` or ``distance(left, right, 'metric')``.
+
+    ``metric`` names the distance metric as a string literal and defaults to
+    ``'euclidean'``: ``'euclidean'`` is the plane distance in coordinate units
+    and ``'haversine'`` the geodesic distance in kilometres (see
+    :mod:`engine.query.spatial_metrics`). The parser stores the canonical
+    lowercase name, so ``DistanceExpr`` with two arguments stays equal to the
+    same node built explicitly with ``metric='euclidean'``.
+    """
 
     left: Expr
     right: Expr
+    metric: str = "euclidean"
 
 
 @dataclass(frozen=True)
