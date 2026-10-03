@@ -77,3 +77,12 @@ def validate_mbr(box: MBR, *, name: str = "box") -> MBR:
         raise ValueError(f"{name}.min_y must not exceed {name}.max_y")
 
     return MBR(min_x, min_y, max_x, max_y)
+
+
+def validate_radius(radius: object, *, name: str = "radius") -> float:
+    radius_value = _finite_number(radius, name=name)
+
+    if radius_value < 0:
+        raise ValueError(f"{name} must be non-negative")
+
+    return radius_value

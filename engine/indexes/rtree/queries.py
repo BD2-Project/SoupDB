@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from engine.algorithms.spatial.range_query import iter_range_entries
+from engine.algorithms.spatial.metrics import SpatialMetric
+from engine.algorithms.spatial.range_query import (
+    iter_radius_entries,
+    iter_range_entries,
+)
 from engine.algorithms.spatial.traversal import iter_leaf_entries
 from engine.common.rid import RID
 from engine.indexes.rtree.mbr import MBR
@@ -29,5 +33,21 @@ class SpatialQueries:
             for _point, rid in iter_range_entries(
                 self._root(),
                 box,
+            )
+        ]
+
+    def radius_search(
+        self,
+        center: Point,
+        radius: float,
+        metric: SpatialMetric,
+    ) -> list[RID]:
+        return [
+            rid
+            for _point, rid in iter_radius_entries(
+                self._root(),
+                center,
+                radius,
+                metric,
             )
         ]
