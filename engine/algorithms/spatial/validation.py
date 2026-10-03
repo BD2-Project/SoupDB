@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from engine.indexes.rtree import Point
+from engine.indexes.rtree import MBR, Point
 
 
 def _finite_number(value: object, *, name: str) -> float:
@@ -59,3 +59,21 @@ def point_from_latlon(latitude: object, longitude: object) -> Point:
     )
 
     return validate_geographic_point(point)
+
+
+def validate_mbr(box: MBR, *, name: str = "box") -> MBR:
+    if not isinstance(box, MBR):
+        raise TypeError(f"{name} must be an MBR")
+
+    min_x = _finite_number(box.min_x, name=f"{name}.min_x")
+    min_y = _finite_number(box.min_y, name=f"{name}.min_y")
+    max_x = _finite_number(box.max_x, name=f"{name}.max_x")
+    max_y = _finite_number(box.max_y, name=f"{name}.max_y")
+
+    if min_x > max_x:
+        raise ValueError(f"{name}.min_x must not exceed {name}.max_x")
+
+    if min_y > max_y:
+        raise ValueError(f"{name}.min_y must not exceed {name}.max_y")
+
+    return MBR(min_x, min_y, max_x, max_y)
