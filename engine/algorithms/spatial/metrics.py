@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import partial
 
-from engine.indexes.rtree import Point
+from engine.indexes.rtree import MBR, Point
 
 from .validation import (
     validate_cartesian_point,
@@ -11,6 +14,17 @@ from .validation import (
 )
 
 EARTH_RADIUS_M = 6_371_000.0
+
+DistanceFn = Callable[[Point, Point], float]
+LowerBoundFn = Callable[[Point, MBR], float]
+
+
+@dataclass(frozen=True)
+class SpatialMetric:
+    name: str
+    unit: str
+    distance: DistanceFn
+    lower_bound: LowerBoundFn
 
 
 def euclidean_distance(a: Point, b: Point) -> float:
@@ -49,3 +63,33 @@ def haversine_distance(
     )
 
     return radius * central_angle
+
+
+def euclidean_metric() -> SpatialMetric:
+    from .bounds import euclidean_min_distance
+
+    return SpatialMetric(
+        name="euclidean",
+        unit="coordinate_units",
+        distance=euclidean_distance,
+        lower_bound=euclidean_min_distance,
+    )
+
+
+def haversine_metric(
+    *,
+    earth_radius_m: float = EARTH_RADIUS_M,
+) -> SpatialMetric:
+    from .bounds import haversine_latitude_lower_bound
+
+    radius = validate_earth_radius(earth_radius_m)
+
+    return SpatialMetric(
+        name="haversine",
+        unit="meters",
+        distance=partial(haversine_distance, earth_radius_m=radius),
+        lower_bound=partial(
+            haversine_latitude_lower_bound,
+            earth_radius_m=radius,
+        ),
+    )
