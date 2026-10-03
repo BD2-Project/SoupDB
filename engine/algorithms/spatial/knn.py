@@ -10,6 +10,7 @@ from engine.indexes.rtree.node import RTreeNode
 from engine.indexes.rtree.point import Point
 
 from .metrics import SpatialMetric
+from .stats import SpatialQueryStats
 from .traversal import iter_child_nodes
 from .validation import validate_cartesian_point
 
@@ -74,6 +75,8 @@ def knn_hits(
     center: Point,
     k: int,
     metric: SpatialMetric,
+    *,
+    stats: SpatialQueryStats | None = None,
 ) -> list[SpatialHit]:
     if not isinstance(metric, SpatialMetric):
         raise TypeError("metric must be a SpatialMetric")
@@ -96,6 +99,9 @@ def knn_hits(
         ]
     ] = []
 
+    if stats is not None:
+        stats.bound_evaluations += 1
+
     root_lower_bound = metric.lower_bound(center, root.mbr)
 
     heapq.heappush(
@@ -107,16 +113,32 @@ def knn_hits(
         ),
     )
 
+    if stats is not None:
+        stats.heap_pushes += 1
+        stats.observe_frontier(len(frontier))
+
     tau = math.inf
 
     while frontier:
         lower_bound, _sequence, node = heapq.heappop(frontier)
 
+        if stats is not None:
+            stats.heap_pops += 1
+
         if len(best) == k and lower_bound > tau:
+            if stats is not None:
+                stats.nodes_pruned += 1 + len(frontier)
             break
+
+        if stats is not None:
+            stats.visit_node(is_leaf=node.is_leaf)
 
         if node.is_leaf:
             for point, rid in node.entries:
+                if stats is not None:
+                    stats.entries_examined += 1
+                    stats.distance_evaluations += 1
+
                 distance = metric.distance(center, point)
                 hit = SpatialHit(
                     point=point,
@@ -138,12 +160,18 @@ def knn_hits(
                     if rank < worst_rank:
                         heapq.heapreplace(best, heap_item)
 
+                if stats is not None:
+                    stats.observe_candidates(len(best))
+
             if len(best) == k:
                 tau = _positive_rank(best[0][0])[0]
 
             continue
 
         for child_mbr, child in iter_child_nodes(node):
+            if stats is not None:
+                stats.bound_evaluations += 1
+
             child_lower_bound = metric.lower_bound(
                 center,
                 child_mbr,
@@ -159,6 +187,12 @@ def knn_hits(
                     ),
                 )
 
+                if stats is not None:
+                    stats.heap_pushes += 1
+                    stats.observe_frontier(len(frontier))
+            elif stats is not None:
+                stats.nodes_pruned += 1
+
     hits = [item[2] for item in best]
     hits.sort(key=_rank)
 
@@ -170,6 +204,8 @@ def knn_search(
     center: Point,
     k: int,
     metric: SpatialMetric,
+    *,
+    stats: SpatialQueryStats | None = None,
 ) -> list[RID]:
     return [
         hit.rid
@@ -178,5 +214,6 @@ def knn_search(
             center,
             k,
             metric,
+            stats=stats,
         )
     ]

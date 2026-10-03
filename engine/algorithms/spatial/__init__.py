@@ -11,6 +11,7 @@ from .metrics import (
 )
 from .polygon_query import iter_polygon_entries, polygon_search
 from .predicates import point_in_polygon, point_on_segment
+from .stats import SpatialQueryStats
 from .validation import (
     point_from_latlon,
     validate_cartesian_point,
@@ -39,4 +40,5 @@ __all__ = [
     "knn_search",
     "iter_polygon_entries",
     "polygon_search",
+    "SpatialQueryStats",
 ]
