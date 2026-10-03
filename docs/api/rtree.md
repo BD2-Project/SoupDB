@@ -15,3 +15,7 @@
 ## R-Tree
 
 ::: engine.indexes.rtree.rtree
+
+## Consultas espaciales avanzadas
+
+::: engine.indexes.rtree.queries
