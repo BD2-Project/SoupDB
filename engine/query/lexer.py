@@ -52,6 +52,7 @@ _KEYWORDS = {
     "IS",
     "NULL",
     "EXPLAIN",
+    "ANALYZE",
 }
 
 _OPERATORS = {">=", "<=", "<>", "!=", ">", "<", "=", "+", "-", "/", "%"}

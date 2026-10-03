@@ -170,9 +170,10 @@ class _Parser:
         return column, self._parse_expression()
 
     def _parse_explain(self) -> ExplainStatement:
+        analyze = self._match_keyword("ANALYZE")
         inner_sql = self._sql[self._peek().position :]
         statement = self.parse_statement()
-        return ExplainStatement(sql=inner_sql, statement=statement)
+        return ExplainStatement(sql=inner_sql, statement=statement, analyze=analyze)
 
     def _parse_delete(self) -> DeleteStatement:
         self._expect_keyword("FROM")

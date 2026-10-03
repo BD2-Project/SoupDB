@@ -34,6 +34,7 @@ from engine.query.ast import (
     DeleteStatement,
     DropIndexStatement,
     DropTableStatement,
+    ExplainStatement,
     Expr,
     FunctionExpr,
     InExpr,
@@ -80,6 +81,8 @@ def plan(statement: Statement, catalog: Any) -> Plan:
     """Build the execution plan for a parsed statement."""
     if isinstance(statement, SelectStatement):
         return _plan_select(statement, catalog)
+    if isinstance(statement, ExplainStatement):
+        return _plan_explain(statement, catalog)
     if isinstance(statement, InsertStatement):
         return _plan_insert(statement, catalog)
     if isinstance(statement, DeleteStatement):
@@ -124,6 +127,14 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
     if statement.distinct:
         root = Distinct(root, None, disk_manager)
     return Plan(statement=statement, root=root, output_schema=root.schema)
+
+
+def _plan_explain(statement: ExplainStatement, catalog: Any) -> Plan:
+    """Validate the inner statement against the catalog and keep its tree."""
+    if statement.statement is None:
+        raise QueryExecutionError("EXPLAIN requires an inner statement")
+    inner = plan(statement.statement, catalog)
+    return Plan(statement=statement, root=inner.root, output_schema=inner.output_schema)
 
 
 def _plan_insert(statement: InsertStatement, catalog: Any) -> Plan:

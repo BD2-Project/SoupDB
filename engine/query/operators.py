@@ -99,8 +99,8 @@ class _VolcanoBase(Operator):
         self._rows = 0
         self._started = False
         self._start = 0.0
-        self._reads0 = 0
-        self._writes0 = 0
+        self._reads0 = disk_manager.reads if disk_manager is not None else 0
+        self._writes0 = disk_manager.writes if disk_manager is not None else 0
         self.schema: Schema = ()
         """Schema of the records this operator emits."""
 

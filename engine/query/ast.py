@@ -192,12 +192,14 @@ class UpdateStatement(Statement):
 class ExplainStatement(Statement):
     """``EXPLAIN <inner statement>``.
 
-    ``sql`` keeps the raw inner text and ``statement`` its parsed AST when
-    available, otherwise None.
+    ``sql`` keeps the raw inner text, ``statement`` its parsed AST when
+    available, and ``analyze`` whether the plan must be executed to gather
+    real runtime metrics (``EXPLAIN ANALYZE``).
     """
 
     sql: str
     statement: Statement | None = None
+    analyze: bool = False
 
 
 @dataclass(frozen=True)
