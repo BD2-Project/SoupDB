@@ -248,7 +248,9 @@ def main() -> None:
             "Levantalo con: docker compose up -d postgres"
         ) from error
 
-    path = write_results("postgres_gist", results)
+    # Misma suite que compare_spatial_indexes: las tres técnicas son el mismo
+    # experimento 2.2.4 y tienen que poder leerse juntas.
+    path = write_results("spatial_indexes", results)
     print(f"{len(results)} mediciones escritas en {path}")
 
 
