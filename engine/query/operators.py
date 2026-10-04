@@ -4,7 +4,7 @@ Frozen contract between query processing and the rest of the engine.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from functools import cmp_to_key
 from time import perf_counter
@@ -185,21 +185,22 @@ class IndexLookup(_VolcanoBase):
     def __init__(
         self,
         index: Index,
-        fetch: Callable[[RID], Record | None],
+        file_org: FileOrganization,
         key: object,
         schema: Schema,
         disk_manager: DiskManager | None = None,
     ) -> None:
         super().__init__((), disk_manager)
         self._index = index
-        self._fetch = fetch
+        self._file_org = file_org
         self._key = key
         self.schema = schema
 
     def open(self) -> None:
         super().open()
+        self._file_org.lock_shared()
         candidates = self._index.search(self._key)
-        self._buffer = iter((rid, self._fetch(rid)) for rid in candidates)
+        self._buffer = iter((rid, self._file_org.fetch(rid)) for rid in candidates)
 
     def next(self) -> Record | None:
         while True:
@@ -230,7 +231,7 @@ class IndexRangeScan(_VolcanoBase):
     def __init__(
         self,
         index: Index,
-        fetch: Callable[[RID], Record | None],
+        file_org: FileOrganization,
         lo: object,
         hi: object,
         schema: Schema,
@@ -238,17 +239,18 @@ class IndexRangeScan(_VolcanoBase):
     ) -> None:
         super().__init__((), disk_manager)
         self._index = index
-        self._fetch = fetch
+        self._file_org = file_org
         self._lo = lo
         self._hi = hi
         self.schema = schema
 
     def open(self) -> None:
         super().open()
+        self._file_org.lock_shared()
         if not self._index.supports_range:
             raise QueryExecutionError("range search requested but the index does not support it")
         candidates = self._index.range_search(self._lo, self._hi)
-        self._buffer = iter((rid, self._fetch(rid)) for rid in candidates)
+        self._buffer = iter((rid, self._file_org.fetch(rid)) for rid in candidates)
 
     def next(self) -> Record | None:
         while True:
@@ -289,7 +291,7 @@ class SpatialIndexScan(_VolcanoBase):
     def __init__(
         self,
         index: Index,
-        fetch: Callable[[RID], Record | None],
+        file_org: FileOrganization,
         center: tuple[float, float],
         radius: float,
         schema: Schema,
@@ -300,7 +302,7 @@ class SpatialIndexScan(_VolcanoBase):
     ) -> None:
         super().__init__((), disk_manager)
         self._index = index
-        self._fetch = fetch
+        self._file_org = file_org
         self._center = (float(center[0]), float(center[1]))
         self._radius = float(radius)
         self._index_name = index_name
@@ -310,6 +312,7 @@ class SpatialIndexScan(_VolcanoBase):
 
     def open(self) -> None:
         super().open()
+        self._file_org.lock_shared()
         if not self._index.supports_range:
             raise QueryExecutionError("spatial search requested but the index does not support it")
         radius = self._radius
@@ -318,7 +321,7 @@ class SpatialIndexScan(_VolcanoBase):
             (center_x - radius, center_y - radius),
             (center_x + radius, center_y + radius),
         )
-        self._buffer = iter((rid, self._fetch(rid)) for rid in candidates)
+        self._buffer = iter((rid, self._file_org.fetch(rid)) for rid in candidates)
 
     def next(self) -> Record | None:
         while True:

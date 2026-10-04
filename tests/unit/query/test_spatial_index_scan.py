@@ -56,7 +56,7 @@ def scan_of(
 ) -> SpatialIndexScan:
     return SpatialIndexScan(
         tree,
-        fake.fetch,
+        fake,
         center=center,
         radius=radius,
         schema=LUGARES,
@@ -128,7 +128,7 @@ def test_index_without_range_support_raises() -> None:
     plain = FakeIndex(supports_range=False)
     operator = SpatialIndexScan(
         plain,
-        fake.fetch,
+        fake,
         center=CENTER,
         radius=RADIUS,
         schema=LUGARES,

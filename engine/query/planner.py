@@ -272,7 +272,7 @@ def _scan_or_index(
     ):
         index = _index_for_column(catalog, statement.table, where.left.name, point=True)
         if index is not None:
-            return IndexLookup(index, file_org.fetch, where.right.value, schema, disk_manager)
+            return IndexLookup(index, file_org, where.right.value, schema, disk_manager)
     if (
         isinstance(where, BetweenExpr)
         and isinstance(where.value, ColumnRef)
@@ -282,7 +282,7 @@ def _scan_or_index(
         index = _index_for_column(catalog, statement.table, where.value.name, point=False)
         if index is not None:
             return IndexRangeScan(
-                index, file_org.fetch, where.lo.value, where.hi.value, schema, disk_manager
+                index, file_org, where.lo.value, where.hi.value, schema, disk_manager
             )
     spatial = _spatial_radius_scan(catalog, statement, file_org, schema, disk_manager)
     if spatial is not None:
@@ -362,7 +362,7 @@ def _spatial_radius_scan(
     index_name, index = found
     return SpatialIndexScan(
         index,
-        file_org.fetch,
+        file_org,
         center=(center_x, center_y),
         radius=radius,
         schema=schema,

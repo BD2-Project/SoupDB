@@ -326,3 +326,6 @@ class _LockingFileOrganization(FileOrganization):
         self._session._lock(("table", self._table), LockMode.SHARED)
         return self._inner.scan()
 
+    def lock_shared(self) -> None:
+        self._session._lock(("table", self._table), LockMode.SHARED)
+
