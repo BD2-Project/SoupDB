@@ -12,11 +12,13 @@ from typing import Any
 
 from engine.algorithms.external_hash import external_hash_group_by
 from engine.algorithms.external_sort import external_sort
+from engine.algorithms.spatial import SpatialMetric
 from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
 from engine.common.rid import RID
 from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index, Key
+from engine.indexes.rtree import Point, RTree, SpatialQueries
 from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
@@ -347,6 +349,130 @@ class SpatialIndexScan(_VolcanoBase):
             "metric": self._metric,
         }
         return self._plan("SpatialIndexScan", detail)
+
+
+class SpatialKnnScan(_VolcanoBase):
+    """Nearest-neighbour rows taken from a spatial index (leaf operator).
+
+    Serves ``ORDER BY distance(column, POINT(x, y)) LIMIT k`` when the column
+    carries a spatial index and the metric is euclidean, the one metric whose
+    distance bound over an R-Tree node is planar and independent of the row.
+
+    The index is asked two questions: ``knn_hits`` gives the distance ``d_k`` of
+    the k-th nearest row, and ``radius_search(d_k)`` - inclusive, ``distance <=
+    radius`` - returns every row at that distance or closer. ``k`` already
+    includes the OFFSET, because the rows after the skipped ones are candidates
+    too.
+
+    The index is used only when the k nearest rows are UNAMBIGUOUS: exactly k rows
+    within ``d_k`` and all of them at pairwise different distances. Only then is
+    the answer independent of the order the rows come in, and the ``Sort`` +
+    ``Limit`` planned on top produce the very same result as on a full scan.
+
+    In every other case the operator falls back to the full scan, and the reason
+    is that the tie cannot be resolved here:
+
+    - two rows at the same distance tie, and SQL leaves the tie to the input
+      order. Here that order is the table's own scan order, which the query layer
+      cannot reproduce: heap files scan page by page, but a sequential file walks
+      its chain of pages in clustering-key order (``SequentialFile.scan``), so the
+      same table in the same order can report its rows in two different
+      sequences. The index breaks ties by ``(distance, x, y, page, slot)``, a
+      third rule, and reusing its k rows verbatim answers a different question
+      than the scan does.
+    - fewer than k rows come back. A NULL coordinate is not a location, so those
+      rows are not in the index by design, and the k the index can offer is then
+      the k of the rows it can locate.
+
+    A RID that no longer resolves to a live row also falls back: an index entry
+    pointing nowhere would be silently dropped instead of read.
+
+    Both fallbacks read the table, so an ambiguous index costs a scan and never a
+    wrong answer: ``EXPLAIN`` shows the planned path, and the ambiguity is only
+    knowable from the data.
+    """
+
+    def __init__(
+        self,
+        index: Index,
+        file_org: FileOrganization,
+        center: tuple[float, float],
+        k: int,
+        schema: Schema,
+        index_name: str,
+        column: str,
+        metric: SpatialMetric,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((), disk_manager)
+        self._index = index
+        self._file_org = file_org
+        self._file_org = file_org
+        self._center = (float(center[0]), float(center[1]))
+        self._k = k
+        self._index_name = index_name
+        self._column = column
+        self._metric = metric
+        self.schema = schema
+
+    def _indexed_rows(self) -> list[tuple[RID, Record]] | None:
+        """The k nearest rows read from the index, or None to scan the table."""
+        if not isinstance(self._index, RTree):
+            raise QueryExecutionError(
+                "nearest-neighbour search requested but the index is not an R-Tree"
+            )
+        queries = SpatialQueries(self._index)
+        center = Point(self._center[0], self._center[1])
+        hits = queries.knn_hits(center, self._k, self._metric)
+        if len(hits) < self._k:
+            return None
+        candidates = queries.radius_search(center, hits[-1].distance, self._metric)
+        if len(candidates) != self._k:
+            # Otra fila está tan cerca como la k-ésima: el resultado depende del
+            # orden en que lleguen las filas y ese orden es el del escaneo.
+            return None
+        distances = {hit.distance for hit in hits}
+        if len(distances) != self._k:
+            return None
+        rows = [(rid, self._file_org.fetch(rid)) for rid in candidates]
+        if any(record is None for _, record in rows):
+            # El índice menciona una fila que ya no existe: no es de fiar.
+            return None
+        return rows
+
+    def open(self) -> None:
+        super().open()
+        self._file_org.lock_shared()
+        rows = self._indexed_rows()
+        if rows is None:
+            self._buffer = self._file_org.scan()
+        else:
+            self._buffer = iter(rows)
+
+    def next(self) -> Record | None:
+        while True:
+            try:
+                _, record = next(self._buffer)
+            except StopIteration:
+                return None
+            if record is None:
+                continue
+            self._rows += 1
+            return record
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        detail = {
+            "index": self._index_name,
+            "column": self._column,
+            "center": self._center,
+            "k": self._k,
+            "metric": self._metric.name,
+        }
+        return self._plan("SpatialKnnScan", detail)
 
 
 class Filter(_VolcanoBase):

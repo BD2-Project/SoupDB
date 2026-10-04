@@ -26,6 +26,7 @@ access path, because its key is a location and not a scalar value.
 from dataclasses import dataclass
 from typing import Any
 
+from engine.algorithms.spatial import euclidean_metric
 from engine.common.errors import QueryExecutionError
 from engine.common.schema import ColumnType
 from engine.indexes.base import Index
@@ -70,6 +71,7 @@ from engine.query.operators import (
     Project,
     Sort,
     SpatialIndexScan,
+    SpatialKnnScan,
     TableScan,
 )
 from engine.query.spatial_metrics import EUCLIDEAN
@@ -133,16 +135,39 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
         raise QueryExecutionError(
             "SELECT * cannot be combined with GROUP BY or aggregate functions"
         )
-    root: Operator = _scan_or_index(catalog, statement, file_org, schema, disk_manager)
-    if statement.where is not None:
-        _validate_columns(statement.where, schema)
-        root = Filter(root, statement.where, schema, disk_manager)
-    if grouped:
-        root = Aggregate(root, statement.group_by, aggregates, disk_manager)
+    # El ORDER BY se resuelve antes de elegir la hoja: el camino de acceso
+    # depende de la primera clave (un ORDER BY por distance abre la vía del k-NN
+    # sobre el índice espacial).
+    order_by: tuple[OrderByItem, ...] = ()
     if statement.order_by:
         aliases = _projection_aliases(statement.columns)
         order_by = _resolve_alias_order_by(statement.order_by, aliases)
         order_by = _resolve_aggregate_order_by(order_by, aggregates)
+    root: Operator = _scan_or_index(
+        catalog,
+        statement,
+        file_org,
+        schema,
+        disk_manager,
+        order_by=order_by,
+        grouped=grouped,
+    )
+    if statement.where is not None:
+        _validate_columns(statement.where, schema)
+        root = Filter(root, statement.where, schema, disk_manager)
+    # Una fila sin coordenada no tiene distancia: se filtra antes del Sort para
+    # que NULL nunca llegue a ordenar (no son ordenables) y para que el camino con
+    # índice y el escaneo completo coincidan tambien con coordenadas nulas.
+    #
+    # El filtro es hoy un no-op: `distance` lanza ante un operando NULL en vez de
+    # devolver NULL, asi que el predicado nunca ve una distancia desconocida. No es
+    # un filtro decorativo: es el sitio exacto donde el motor distinguira NULL de
+    # FALSE, y anadirlo mas tarde cambiaria la forma del plan.
+    for expression in _distance_order_keys(order_by):
+        root = Filter(root, _is_not_null(expression), schema, disk_manager)
+    if grouped:
+        root = Aggregate(root, statement.group_by, aggregates, disk_manager)
+    if order_by:
         for item in order_by:
             _validate_columns(item.expr, root.schema)
         root = Sort(root, order_by, disk_manager=disk_manager)
@@ -259,11 +284,13 @@ def _scan_or_index(
     file_org: FileOrganization,
     schema: Schema,
     disk_manager: DiskManager | None,
+    order_by: tuple[OrderByItem, ...] = (),
+    grouped: bool = False,
 ) -> Operator:
     """Pick the access path: index leaf when the WHERE allows it, else scan."""
     where = statement.where
     if where is None:
-        return TableScan(file_org, schema, disk_manager)
+        return _scan_or_knn(catalog, statement, file_org, schema, disk_manager, order_by, grouped)
     if (
         isinstance(where, CompareExpr)
         and where.op == "="
@@ -287,7 +314,141 @@ def _scan_or_index(
     spatial = _spatial_radius_scan(catalog, statement, file_org, schema, disk_manager)
     if spatial is not None:
         return spatial
+    return _scan_or_knn(catalog, statement, file_org, schema, disk_manager, order_by, grouped)
+
+
+def _scan_or_knn(
+    catalog: Any,
+    statement: SelectStatement,
+    file_org: FileOrganization,
+    schema: Schema,
+    disk_manager: DiskManager | None,
+    order_by: tuple[OrderByItem, ...],
+    grouped: bool,
+) -> Operator:
+    """Full scan, or the k-NN index path when the ORDER BY/LIMIT shape allows it.
+
+    A ``WHERE`` never reaches here with the k-NN path enabled: the predicate is
+    applied above the leaf, and ``_spatial_knn_scan`` refuses any statement that
+    filters, because the k nearest rows of the *whole* table are not the k
+    nearest of the *filtered* rows.
+    """
+    knn = _spatial_knn_scan(catalog, statement, file_org, schema, disk_manager, order_by, grouped)
+    if knn is not None:
+        return knn
     return TableScan(file_org, schema, disk_manager)
+
+
+def _spatial_knn_scan(
+    catalog: Any,
+    statement: SelectStatement,
+    file_org: FileOrganization,
+    schema: Schema,
+    disk_manager: DiskManager | None,
+    order_by: tuple[OrderByItem, ...],
+    grouped: bool,
+) -> Operator | None:
+    """Plan ``ORDER BY distance(column, POINT(...)) LIMIT k`` through the index.
+
+    The recognized shape is an ascending euclidean distance on a POINT column as
+    the FIRST sort key, with a ``LIMIT`` to bound the result. The operator asks
+    the index only how far the k-th nearest row is, so the rows themselves are
+    still chosen by the ``Sort`` + ``Limit`` planned on top and the outcome is the
+    outcome of the full scan (see :class:`~engine.query.operators.SpatialKnnScan`).
+
+    Returns None - leaving the statement on a full scan, exactly as before - when
+    any of the following does not hold, because the index could then answer a
+    different question than the scan:
+
+    - there is no WHERE: the k nearest rows of the table are not the k nearest of
+      the surviving rows, so the index would be pruning rows it must not.
+    - there is no ``GROUP BY``, aggregate or ``DISTINCT``: ``LIMIT`` then counts
+      groups or distinct values, not rows, and one group may hold many rows.
+    - there is a ``LIMIT`` greater than zero: without one every row is needed, so
+      there is no k to ask the index for, and ``LIMIT 0`` returns nothing at all.
+    - the distance is the ONLY sort key. A second key would decide a tie between
+      two rows at the same distance, which the operator resolves by falling back
+      to the full scan; asking for that fallback is not worth the index query.
+    - the sort key is ascending. ``DESC`` needs the k *farthest* rows, which a
+      nearest-neighbour query does not return.
+    - the metric is euclidean: the index bound is planar, so a haversine k-NN
+      would be answered with the wrong neighbourhood.
+    - centre coordinates are numeric literals, the column is a POINT column and it
+      has a spatial index.
+
+    Whether the k rows come out unambiguous is a property of the data, not of the
+    statement, so the operator decides it while running and falls back to the full
+    scan when they do not (see :class:`~engine.query.operators.SpatialKnnScan`).
+    """
+    if statement.where is not None or grouped or statement.distinct:
+        return None
+    clause = statement.limit
+    if clause is None or len(order_by) != 1:
+        return None
+    if _limit_value(clause.limit) <= 0:
+        return None
+    # El OFFSET también consume filas del camino ordenado: entran en el k.
+    k = _limit_value(clause.limit) + _limit_value(clause.offset)
+    if k <= 0:
+        return None
+    head = order_by[0]
+    if not head.ascending:
+        return None
+    expression = head.expr
+    if not isinstance(expression, DistanceExpr) or expression.metric != EUCLIDEAN:
+        return None
+    if not isinstance(expression.left, ColumnRef) or not isinstance(expression.right, PointExpr):
+        return None
+    center_x = _number_literal(expression.right.x)
+    center_y = _number_literal(expression.right.y)
+    if center_x is None or center_y is None:
+        return None
+    column = expression.left.name
+    if _column_type(schema, column) is not ColumnType.POINT:
+        return None
+    found = _spatial_index_for_column(catalog, statement.table, column)
+    if found is None:
+        return None
+    index_name, index = found
+    return SpatialKnnScan(
+        index,
+        file_org,
+        center=(center_x, center_y),
+        k=k,
+        schema=schema,
+        index_name=index_name,
+        column=column,
+        metric=euclidean_metric(),
+        disk_manager=disk_manager,
+    )
+
+
+def _distance_order_keys(order_by: tuple[OrderByItem, ...]) -> tuple[DistanceExpr, ...]:
+    """Distance expressions the ORDER BY sorts by, without duplicates."""
+    seen: list[DistanceExpr] = []
+    for item in order_by:
+        if isinstance(item.expr, DistanceExpr) and item.expr not in seen:
+            seen.append(item.expr)
+    return tuple(seen)
+
+
+def _is_not_null(expression: DistanceExpr) -> CompareExpr:
+    """Predicate that is TRUE exactly when the distance is known.
+
+    ``distance(...) >= 0.0`` holds for every real distance and is UNKNOWN when an
+    operand is NULL, which keeps such rows out of the ordering. It is a filter on
+    the distance itself, not on the coordinate, so it also drops a row whose
+    coordinate is NULL while another column is what the distance reads.
+
+    Today this predicate is inert, and deliberately so: the evaluator raises on a
+    NULL operand instead of returning NULL, so the filter never sees an unknown
+    distance. It is kept in the plan because it is exactly where NULL support will
+    land -- the moment ``distance`` returns NULL instead of raising, the predicate
+    starts dropping the rows and this needs no change. Adding it later would mean
+    the shape of the plan, and therefore every plan test, would depend on when
+    NULL support landed.
+    """
+    return CompareExpr(left=expression, op=">=", right=Literal(0.0))
 
 
 def is_spatial_index(index: Index) -> bool:
