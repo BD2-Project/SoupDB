@@ -98,6 +98,8 @@ def evaluate(expr: Expr, row: Row, schema: Schema) -> object:
     if isinstance(expr, DistanceExpr):
         left = evaluate(expr.left, row, schema)
         right = evaluate(expr.right, row, schema)
+        if left is None or right is None:
+            return None
         if not _is_point_value(left):
             raise QueryExecutionError(
                 f"distance operands must be POINT values, got {type(left).__name__}"
@@ -168,6 +170,8 @@ def _require_bool(value: object) -> bool:
 def _compare(left: object, op: str, right: object) -> bool:
     if op not in _COMPARISONS:
         raise QueryExecutionError(f"unsupported comparison operator {op!r}")
+    if left is None or right is None:
+        return False
     _require_same_type(left, right)
     if op == "=":
         return left == right
