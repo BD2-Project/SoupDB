@@ -16,7 +16,10 @@ services:
       - engine-data:/app/data
 
   postgres:
-    image: postgres:16
+    # PostGIS sobre PostgreSQL 16: la comparación 2.2.4 necesita distancias en metros
+    # sobre `geography`. El tipo `point` nativo solo da distancia euclidiana en grados,
+    # que no es comparable con el haversine del motor.
+    image: postgis/postgis:16-3.4
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-soupdb}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-soupdb}
