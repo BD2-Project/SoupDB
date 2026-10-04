@@ -58,6 +58,8 @@ _KEYWORDS = {
     "BEGIN",
     "END",
     "TRANSACTION",
+    "POLYGON",
+    "INTERSECTS",
 }
 
 _OPERATORS = {">=", "<=", "<>", "!=", ">", "<", "=", "+", "-", "/", "%"}
