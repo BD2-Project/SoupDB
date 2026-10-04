@@ -18,7 +18,7 @@ from engine.common.record import Record, decode_row, encode_row
 from engine.common.rid import RID
 from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index, Key
-from engine.indexes.rtree import Point, RTree, SpatialQueries
+from engine.indexes.rtree import Point, Polygon2D, RTree, SpatialQueries
 from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
@@ -473,6 +473,66 @@ class SpatialKnnScan(_VolcanoBase):
             "metric": self._metric.name,
         }
         return self._plan("SpatialKnnScan", detail)
+
+
+
+class SpatialPolygonScan(_VolcanoBase):
+    """Polygon intersection query through a spatial index (leaf operator).
+
+    Uses the index's ``polygon_search`` to fetch exactly those rows whose point
+    lies inside the polygon. For a spatial index (RTree), this is a two-phase
+    query: candidates from polygon MBR, then exact point-in-polygon tests; the
+    operator reads only the rows that pass the exact test.
+    """
+
+    def __init__(
+        self,
+        index: Index,
+        file_org: FileOrganization,
+        polygon: Polygon2D,
+        schema: Schema,
+        index_name: str,
+        column: str,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((), disk_manager)
+        self._index = index
+        self._file_org = file_org
+        self._polygon = polygon
+        self._index_name = index_name
+        self._column = column
+        self.schema = schema
+
+    def open(self) -> None:
+        super().open()
+        self._file_org.lock_shared()
+        queries = SpatialQueries(self._index)
+        candidates = queries.polygon_search(self._polygon)
+        self._buffer = iter((rid, self._file_org.fetch(rid)) for rid in candidates)
+
+    def next(self) -> Record | None:
+        while True:
+            try:
+                _, record = next(self._buffer)
+            except StopIteration:
+                return None
+            if record is None:
+                continue
+            self._rows += 1
+            return record
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        detail = {
+            "index": self._index_name,
+            "column": self._column,
+            "polygon": str(self._polygon.vertices),
+        }
+        return self._plan("SpatialPolygonScan", detail)
+
 
 
 class Filter(_VolcanoBase):

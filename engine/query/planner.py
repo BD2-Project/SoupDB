@@ -77,6 +77,7 @@ from engine.query.operators import (
     Sort,
     SpatialIndexScan,
     SpatialKnnScan,
+    SpatialPolygonScan,
     TableScan,
 )
 from engine.query.spatial_metrics import EUCLIDEAN
@@ -319,6 +320,9 @@ def _scan_or_index(
     spatial = _spatial_radius_scan(catalog, statement, file_org, schema, disk_manager)
     if spatial is not None:
         return spatial
+    poly = _spatial_polygon_scan(catalog, statement, file_org, schema, disk_manager)
+    if poly is not None:
+        return poly
     return _scan_or_knn(catalog, statement, file_org, schema, disk_manager, order_by, grouped)
 
 
@@ -537,6 +541,69 @@ def _spatial_radius_scan(
         metric=expression.metric,
         disk_manager=disk_manager,
     )
+
+
+
+def _spatial_polygon_scan(
+    catalog: Any,
+    statement: SelectStatement,
+    file_org: FileOrganization,
+    schema: Schema,
+    disk_manager: DiskManager | None,
+) -> Operator | None:
+    """Plan an intersects predicate with a polygon literal through a spatial index."""
+    where = statement.where
+    if not isinstance(where, IntersectsExpr):
+        return None
+    left, right = where.left, where.right
+
+    from engine.indexes.rtree.point import Point
+    from engine.algorithms.spatial.geometry import Polygon2D
+    def try_build_polygon(other_expr: Expr) -> Polygon2D | None:
+        if not isinstance(other_expr, PolygonExpr):
+            return None
+        verts = []
+        for v in other_expr.vertices:
+            if not isinstance(v, PointExpr):
+                return None
+            cx = _number_literal(v.x)
+            cy = _number_literal(v.y)
+            if cx is None or cy is None:
+                return None
+            verts.append((cx, cy))
+        try:
+            from engine.indexes.rtree.point import Point
+            from engine.algorithms.spatial.geometry import Polygon2D
+
+            return Polygon2D(tuple(Point(x, y) for x, y in verts))
+        except Exception:
+            return None
+
+    polygon = None
+    column_ref = None
+    if isinstance(left, ColumnRef) and _column_type(schema, left.name) is ColumnType.POINT:
+        polygon = try_build_polygon(right)
+        column_ref = left
+    elif isinstance(right, ColumnRef) and _column_type(schema, right.name) is ColumnType.POINT:
+        polygon = try_build_polygon(left)
+        column_ref = right
+
+    if polygon is None or column_ref is None:
+        return None
+    found = _spatial_index_for_column(catalog, statement.table, column_ref.name)
+    if found is None:
+        return None
+    index_name, index = found
+    return SpatialPolygonScan(
+        index,
+        file_org,
+        polygon=polygon,
+        schema=schema,
+        index_name=index_name,
+        column=column_ref.name,
+        disk_manager=disk_manager,
+    )
+
 
 
 def _spatial_index_for_column(
