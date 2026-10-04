@@ -48,6 +48,9 @@ from engine.query.ast import (
     FunctionExpr,
     InExpr,
     InsertStatement,
+    IntersectsExpr,
+    IsNullExpr,
+    JoinClause,
     LikeExpr,
     LimitClause,
     Literal,
@@ -55,9 +58,11 @@ from engine.query.ast import (
     NotExpr,
     OrderByItem,
     PointExpr,
+    PolygonExpr,
     SelectColumn,
     SelectStatement,
     Statement,
+    UpdateStatement,
 )
 from engine.query.evaluator import Schema
 from engine.query.operators import (
@@ -710,7 +715,7 @@ def _walk(expr: Expr, found: list[FunctionExpr]) -> None:
 
 
 def _expr_children(expr: Expr) -> tuple[Expr, ...]:
-    if isinstance(expr, (CompareExpr, LogicalExpr)):
+    if isinstance(expr, (CompareExpr, LogicalExpr, DistanceExpr, IntersectsExpr)):
         return (expr.left, expr.right)
     if isinstance(expr, NotExpr):
         return (expr.operand,)
@@ -724,6 +729,8 @@ def _expr_children(expr: Expr) -> tuple[Expr, ...]:
         return (expr.arg,)
     if isinstance(expr, PointExpr):
         return (expr.x, expr.y)
+    if isinstance(expr, PolygonExpr):
+        return expr.vertices
     if isinstance(expr, DistanceExpr):
         return (expr.left, expr.right)
     return ()

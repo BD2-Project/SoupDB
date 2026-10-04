@@ -32,6 +32,7 @@ from engine.query.ast import (
     HavingClause,
     InExpr,
     InsertStatement,
+    IntersectsExpr,
     IsNullExpr,
     JoinClause,
     LikeExpr,
@@ -41,6 +42,7 @@ from engine.query.ast import (
     NotExpr,
     OrderByItem,
     PointExpr,
+    PolygonExpr,
     SelectColumn,
     SelectStatement,
     Statement,
@@ -443,7 +445,7 @@ class _Parser:
 
     @staticmethod
     def _is_boolean_expression(expr: Expr) -> bool:
-        if isinstance(expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr)):
+        if isinstance(expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr, IntersectsExpr)):
             return True
         if isinstance(expr, Literal) and isinstance(expr.value, bool):
             return True
@@ -596,6 +598,35 @@ class _Parser:
         except ValueError as exc:
             raise QueryParseError(f"{exc} at position {token.position}") from exc
 
+    def _parse_polygon_expr(self) -> PolygonExpr:
+        self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        vertices: list[Expr] = []
+        self._expect_kind(TokenKind.LPAREN)
+        x = self._parse_expression()
+        self._expect_kind(TokenKind.COMMA)
+        y = self._parse_expression()
+        self._expect_kind(TokenKind.RPAREN)
+        vertices.append(PointExpr(x=x, y=y))
+        while self._match_comma():
+            self._expect_kind(TokenKind.LPAREN)
+            x = self._parse_expression()
+            self._expect_kind(TokenKind.COMMA)
+            y = self._parse_expression()
+            self._expect_kind(TokenKind.RPAREN)
+            vertices.append(PointExpr(x=x, y=y))
+        self._expect_kind(TokenKind.RPAREN)
+        return PolygonExpr(vertices=tuple(vertices))
+
+    def _parse_intersects_expr(self) -> IntersectsExpr:
+        self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        left = self._parse_expression()
+        self._expect_kind(TokenKind.COMMA)
+        right = self._parse_expression()
+        self._expect_kind(TokenKind.RPAREN)
+        return IntersectsExpr(left=left, right=right)
+
     def _parse_primary(self) -> Expr:
         token = self._peek()
 
@@ -622,6 +653,12 @@ class _Parser:
 
         if self._check_keyword("DISTANCE") and self._checks_lparen_next():
             return self._parse_distance_expr()
+
+        if self._check_keyword("POLYGON") and self._checks_lparen_next():
+            return self._parse_polygon_expr()
+
+        if self._check_keyword("INTERSECTS") and self._checks_lparen_next():
+            return self._parse_intersects_expr()
 
         if self._match_kind(TokenKind.IDENTIFIER):
             return ColumnRef(token.value)
