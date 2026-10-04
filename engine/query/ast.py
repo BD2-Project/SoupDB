@@ -133,6 +133,28 @@ class DistanceExpr(Expr):
 
 
 @dataclass(frozen=True)
+class PolygonExpr(Expr):
+    """Spatial constructor ``POLYGON((x1, y1), (x2, y2), ..., (xn, yn))``.
+
+    Vertices are stored as expressions so they may be evaluated per row or be
+    literals.
+    """
+
+    vertices: tuple[Expr, ...]
+
+
+@dataclass(frozen=True)
+class IntersectsExpr(Expr):
+    """Spatial predicate ``intersects(geom_a, geom_b)``.
+
+    Both arguments are geometry expressions (e.g. POINT, POLYGON).
+    """
+
+    left: Expr
+    right: Expr
+
+
+@dataclass(frozen=True)
 class SelectColumn:
     """One projected column in a SELECT list."""
 

@@ -29,13 +29,18 @@ from engine.query.ast import (
     Expr,
     FunctionExpr,
     InExpr,
+    IntersectsExpr,
     LikeExpr,
     Literal,
     LogicalExpr,
     NotExpr,
     PointExpr,
+    PolygonExpr,
 )
 from engine.query.spatial_metrics import distance
+from engine.indexes.rtree import Point
+from engine.algorithms.spatial.geometry import Polygon2D
+from engine.algorithms.spatial.predicates import point_in_polygon
 
 _COMPARISONS = {"=", "<>", "!=", "<", "<=", ">", ">="}
 _AGGREGATES = {"COUNT", "SUM", "AVG", "MIN", "MAX"}
@@ -112,6 +117,37 @@ def evaluate(expr: Expr, row: Row, schema: Schema) -> object:
             return distance(left, right, expr.metric)
         except ValueError as exc:
             raise QueryExecutionError(str(exc)) from exc
+
+    if isinstance(expr, PolygonExpr):
+        vertices = []
+        for v in expr.vertices:
+            val = evaluate(v, row, schema)
+            if not _is_point_value(val):
+                raise QueryExecutionError(
+                    f"POLYGON requires POINT vertices, got {type(val).__name__}"
+                )
+            vertices.append(Point(val[0], val[1]))
+        return Polygon2D(tuple(vertices))
+
+    if isinstance(expr, IntersectsExpr):
+        left = evaluate(expr.left, row, schema)
+        right = evaluate(expr.right, row, schema)
+        # intersects(point, polygon)
+        if _is_point_value(left) and isinstance(right, Polygon2D):
+            pt = Point(left[0], left[1])
+            try:
+                return point_in_polygon(pt, right)
+            except Exception as exc:
+                raise QueryExecutionError(str(exc)) from exc
+        if _is_point_value(right) and isinstance(left, Polygon2D):
+            pt = Point(right[0], right[1])
+            try:
+                return point_in_polygon(pt, left)
+            except Exception as exc:
+                raise QueryExecutionError(str(exc)) from exc
+        raise QueryExecutionError(
+            "intersects requires (POINT, POLYGON) or (POLYGON, POINT)"
+        )
 
     if isinstance(expr, FunctionExpr):
         raise QueryExecutionError(f"aggregate {expr.name} is not allowed in a scalar expression")
