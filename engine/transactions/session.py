@@ -19,10 +19,11 @@ from engine.common.errors import (
     LockNotGranted,
     TransactionError,
 )
-from engine.common.record import Record
+from engine.common.record import Record, decode_row
 from engine.common.rid import RID
 from engine.query import ResultSet
 from engine.query.ast import BeginTransactionStatement, EndTransactionStatement
+from engine.query.executor import _indexes_for_column, _skip_index_key
 from engine.query.executor import execute as execute_plan
 from engine.query.parser import parse
 from engine.query.planner import plan as build_plan
@@ -177,11 +178,56 @@ class TransactionalSession:
         return tx
 
     def _apply_undo(self, journal: list[object]) -> None:
+        """Undo the journal, storage and indexes together.
+
+        Both directions touch the indexes because the journal entry alone no longer
+        describes them: undoing a DELETE re-inserts the row under a NEW RID, and
+        undoing an INSERT has to take back the entry the INSERT added.
+
+        The order is storage first and indexes second, and there is no compensating
+        step if an index insert fails halfway. That is the same fail-stop contract
+        the executor's own INSERT and DELETE already have, and the undo is no more
+        fragile than the statement that wrote the entry it is undoing. What the undo
+        must never do is leave a live row unindexed while reporting success, which is
+        why the index update is not swallowed by a ``try``.
+        """
         for entry in reversed(journal):
             if isinstance(entry, _UndoInsert):
-                self._catalog.file_org(entry.table).remove(entry.rid)
+                file_org = self._catalog.file_org(entry.table)
+                record = file_org.fetch(entry.rid)
+                if record is not None:
+                    self._unindex_row(entry.table, record, entry.rid)
+                file_org.remove(entry.rid)
             elif isinstance(entry, _UndoRemove):
-                self._catalog.file_org(entry.table).insert(entry.record)
+                rid = self._catalog.file_org(entry.table).insert(entry.record)
+                self._index_row(entry.table, entry.record, rid)
+
+    def _index_row(self, table: str, record: Record, rid: RID) -> None:
+        """Index a row that undoing a DELETE has just put back.
+
+        Undoing a DELETE gives the row a NEW RID, so the entry the DELETE removed
+        has to be added again under that new one. Leaving it out makes the row live
+        in the table and absent from every index, and an index that does not
+        describe its table answers wrongly and silently: a rollback would leave
+        every indexed lookup - spatial or scalar - reading a table it no longer
+        matches.
+        """
+        row = self._row_values(table, record)
+        for position, column in enumerate(self._catalog.schema(table)):
+            for index in _indexes_for_column(self._catalog, table, column.name).values():
+                if not _skip_index_key(index, row[position]):
+                    index.insert(row[position], rid)
+
+    def _unindex_row(self, table: str, record: Record, rid: RID) -> None:
+        """Drop from the indexes the row that undoing an INSERT is about to remove."""
+        row = self._row_values(table, record)
+        for position, column in enumerate(self._catalog.schema(table)):
+            for index in _indexes_for_column(self._catalog, table, column.name).values():
+                if not _skip_index_key(index, row[position]):
+                    index.remove(row[position], rid)
+
+    def _row_values(self, table: str, record: Record) -> tuple[object, ...]:
+        return decode_row(record.data, self._catalog.schema(table))
 
     def close(self) -> None:
         self._tm.close()
@@ -279,3 +325,4 @@ class _LockingFileOrganization(FileOrganization):
     def scan(self) -> Any:
         self._session._lock(("table", self._table), LockMode.SHARED)
         return self._inner.scan()
+
