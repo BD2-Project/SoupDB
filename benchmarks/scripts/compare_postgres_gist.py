@@ -23,21 +23,23 @@ dentro del contenedor, igual que lo haría una consola.
 """
 
 import json
-import statistics
 import subprocess
 import time
 
-from benchmarks.harness import BenchmarkResult, write_results
+from benchmarks.scripts.compare_spatial_indexes import (
+    BENCHMARK_RADIUS_VALUES_DEG,
+    QUERIES,
+    SEED,
+)
+from benchmarks.spatial_report import SpatialResult, summarize, write_spatial_results
 from benchmarks.spatial_workload import (
     BENCHMARK_K_VALUES,
     BENCHMARK_RADIUS_VALUES_M,
-    build_spatial_workload,
+    generate_geographic_entries,
+    generate_query_centers,
 )
 
 DATASET_SIZES = (1_000, 10_000, 100_000)
-RUNS = 5
-QUERIES_PER_PARAMETER = 20
-SEED = 20260404
 
 SERVICE = "postgres"
 DATABASE = "soupdb"
@@ -119,20 +121,27 @@ def _prepare(entries) -> None:
         "  rid_slot int NOT NULL,"
         "  lon double precision NOT NULL,"
         "  lat double precision NOT NULL,"
-        "  ubicacion geography(Point, 4326)"
+        "  ubicacion geography(Point, 4326),"
+        # La euclidiana del motor opera sobre grados, así que necesita `geometry`:
+        # `geography` siempre devuelve metros sobre la esfera.
+        "  plano geometry(Point, 4326)"
         ")"
     )
     _copy(entries)
-    _psql(f"UPDATE {TABLE} SET ubicacion = ST_MakePoint(lon, lat)::geography")
+    _psql(
+        f"UPDATE {TABLE} SET ubicacion = ST_MakePoint(lon, lat)::geography, "
+        f"plano = ST_SetSRID(ST_MakePoint(lon, lat), 4326)"
+    )
 
 
-def _create_index() -> tuple[float, int]:
-    """Crea el índice GiST y devuelve (ms, bytes). Es el equivalente a `build`."""
-    _psql(f"DROP INDEX IF EXISTS {TABLE}_geo")
+def _create_index(column: str) -> tuple[float, int]:
+    """Crea el índice GiST sobre una columna y devuelve (ms, bytes)."""
+    name = f"{TABLE}_{column}_gix"
+    _psql(f"DROP INDEX IF EXISTS {name}")
     started = time.perf_counter()
-    _psql(f"CREATE INDEX {TABLE}_geo ON {TABLE} USING gist (ubicacion)")
+    _psql(f"CREATE INDEX {name} ON {TABLE} USING gist ({column})")
     elapsed = (time.perf_counter() - started) * 1000
-    size = int(_psql(f"SELECT pg_relation_size('{TABLE}_geo')").strip() or 0)
+    size = int(_psql(f"SELECT pg_relation_size('{name}')").strip() or 0)
     _psql(f"VACUUM ANALYZE {TABLE}")
     return elapsed, size
 
@@ -151,90 +160,127 @@ def _explain(sql: str) -> tuple[float, int, int]:
     return elapsed, pages, root.get("Actual Rows", 0)
 
 
-def _measure(centers, build_sql) -> list[tuple[float, int, int]]:
-    samples = []
-    for _ in range(RUNS):
-        elapsed = 0.0
-        pages = 0
-        rows = 0
-        for center in centers:
-            one_elapsed, one_pages, one_rows = _explain(build_sql(center))
-            elapsed += one_elapsed
-            pages += one_pages
-            rows += one_rows
-        samples.append((elapsed, pages, rows))
-    return samples
+def _measure(centers, build_sql) -> tuple[list[float], int, int]:
+    """Una medición por consulta: el protocolo pide media, mediana y p95."""
+    samples: list[float] = []
+    pages = 0
+    rows = 0
+    for center in centers:
+        elapsed, one_pages, one_rows = _explain(build_sql(center))
+        samples.append(elapsed)
+        pages += one_pages
+        rows += one_rows
+    return samples, pages, rows
 
 
-def _result(operation: str, records: int, samples, size_bytes: int) -> BenchmarkResult:
-    elapsed = statistics.median(sample[0] for sample in samples)
-    pages = int(statistics.median(sample[1] for sample in samples))
-    rows = int(statistics.median(sample[2] for sample in samples))
-
-    return BenchmarkResult(
+def _result(
+    operation: str,
+    metric: str,
+    parameter: float,
+    records: int,
+    samples: list[float],
+    pages: int,
+    rows: int,
+    build_ms: float,
+    size_bytes: int,
+) -> SpatialResult:
+    mean, median, p95 = summarize(samples)
+    return SpatialResult(
         structure=STRUCTURE,
         operation=operation,
+        metric=metric,
+        parameter=parameter,
         records=records,
-        operations=QUERIES_PER_PARAMETER,
-        elapsed_ms=elapsed,
-        ops_per_second=(QUERIES_PER_PARAMETER / (elapsed / 1000)) if elapsed > 0 else 0.0,
+        queries=len(samples),
+        build_ms=build_ms,
+        elapsed_ms=median,
+        mean_ms=mean,
+        median_ms=median,
+        p95_ms=p95,
         disk_reads=pages,
         disk_writes=0,
         size_bytes=size_bytes,
+        # El proceso de PostgreSQL corre en su contenedor: su RSS no es comparable
+        # con el del motor y se deja en cero en vez de inventar una equivalencia.
+        peak_rss_bytes=0,
         result_count=rows,
     )
 
 
-def run(sizes: tuple[int, ...] = DATASET_SIZES) -> list[BenchmarkResult]:
-    results: list[BenchmarkResult] = []
+def _literal(column: str, center) -> str:
+    """El punto de consulta con el mismo SRID que la columna que se compara."""
+    point = f"ST_SetSRID(ST_MakePoint({center.x}, {center.y}), 4326)"
+    return f"{point}::geography" if column == "ubicacion" else point
+
+
+def _radius_sql(column: str, center, radius: float, spheroid: str) -> str:
+    return (
+        f"SELECT rid_page, rid_slot FROM {TABLE} "
+        f"WHERE ST_DWithin({column}, {_literal(column, center)}, {radius}{spheroid})"
+    )
+
+
+def _knn_sql(column: str, center, k: int) -> str:
+    return (
+        f"SELECT rid_page, rid_slot FROM {TABLE} "
+        f"ORDER BY {column} <-> {_literal(column, center)} LIMIT {k}"
+    )
+
+
+def run(sizes: tuple[int, ...] = DATASET_SIZES) -> list[SpatialResult]:
+    results: list[SpatialResult] = []
 
     for records in sizes:
-        workload = build_spatial_workload(
-            entry_count=records,
-            query_count=QUERIES_PER_PARAMETER,
-            seed=SEED,
-        )
-        _prepare(workload.entries)
-        build_ms, index_bytes = _create_index()
+        entries = generate_geographic_entries(records, seed=SEED)
+        centers = generate_query_centers(QUERIES, seed=SEED)
+        _prepare(entries)
 
-        results.append(
-            BenchmarkResult(
-                structure=STRUCTURE,
-                operation="build",
-                records=records,
-                operations=records,
-                elapsed_ms=build_ms,
-                ops_per_second=(records / (build_ms / 1000)) if build_ms > 0 else 0.0,
-                disk_reads=0,
-                disk_writes=0,
-                size_bytes=index_bytes,
-                result_count=records,
-            )
-        )
+        for metric, column, radii, spheroid in (
+            # `use_spheroid => false`: PostGIS mide sobre el elipsoide WGS84 por
+            # defecto y el motor usa una esfera; esa diferencia movía los puntos
+            # que caen justo sobre el borde del radio.
+            ("haversine", "ubicacion", BENCHMARK_RADIUS_VALUES_M, ", false"),
+            ("euclidean", "plano", BENCHMARK_RADIUS_VALUES_DEG, ""),
+        ):
+            build_ms, index_bytes = _create_index(column)
 
-        centers = [query.center for query in workload.radius_queries][:QUERIES_PER_PARAMETER]
+            for label, radius in zip(BENCHMARK_RADIUS_VALUES_M, radii, strict=True):
+                samples, pages, rows = _measure(
+                    centers,
+                    lambda center, r=radius, c=column, sp=spheroid: _radius_sql(c, center, r, sp),
+                )
+                results.append(
+                    _result(
+                        f"radius_{int(label)}m",
+                        metric,
+                        radius,
+                        records,
+                        samples,
+                        pages,
+                        rows,
+                        build_ms,
+                        index_bytes,
+                    )
+                )
 
-        for radius in BENCHMARK_RADIUS_VALUES_M:
-            samples = _measure(
-                centers,
-                lambda center, radius=radius: (
-                    f"SELECT rid_page, rid_slot FROM {TABLE} "
-                    f"WHERE ST_DWithin(ubicacion, "
-                    f"ST_MakePoint({center.x}, {center.y})::geography, {radius}, false)"
-                ),
-            )
-            results.append(_result(f"radius_{int(radius)}m", records, samples, index_bytes))
-
-        for k in BENCHMARK_K_VALUES:
-            samples = _measure(
-                centers,
-                lambda center, k=k: (
-                    f"SELECT rid_page, rid_slot FROM {TABLE} "
-                    f"ORDER BY ubicacion <-> ST_MakePoint({center.x}, {center.y})::geography "
-                    f"LIMIT {k}"
-                ),
-            )
-            results.append(_result(f"knn_{k}", records, samples, index_bytes))
+            for k in BENCHMARK_K_VALUES:
+                samples, pages, rows = _measure(
+                    centers,
+                    lambda center, kk=k, c=column: _knn_sql(c, center, kk),
+                )
+                results.append(
+                    _result(
+                        f"knn_{k}",
+                        metric,
+                        k,
+                        records,
+                        samples,
+                        pages,
+                        rows,
+                        build_ms,
+                        index_bytes,
+                    )
+                )
 
     return results
 
@@ -250,7 +296,7 @@ def main() -> None:
 
     # Misma suite que compare_spatial_indexes: las tres técnicas son el mismo
     # experimento 2.2.4 y tienen que poder leerse juntas.
-    path = write_results("spatial_indexes", results)
+    path = write_spatial_results("spatial_indexes", results)
     print(f"{len(results)} mediciones escritas en {path}")
 
 
