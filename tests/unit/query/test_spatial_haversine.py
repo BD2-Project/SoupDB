@@ -394,13 +394,18 @@ def test_non_point_operand_still_fails_with_the_same_message(tmp_path: Path) -> 
     catalog.close()
 
 
-def test_int_literal_radius_still_fails_with_strict_typing(tmp_path: Path) -> None:
+def test_int_literal_radius_is_promoted(tmp_path: Path) -> None:
+    # Un radio entero es la forma natural de escribirlo y la que usa el enunciado.
     catalog = make_catalog(tmp_path)
-    with pytest.raises(QueryExecutionError, match="cannot mix float and int values"):
-        execute_sql(
-            "SELECT nombre FROM ciudades WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 100",
-            catalog,
-        )
+    entero = execute_sql(
+        "SELECT nombre FROM ciudades WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 100",
+        catalog,
+    )
+    flotante = execute_sql(
+        "SELECT nombre FROM ciudades WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 100.0",
+        catalog,
+    )
+    assert entero.rows == flotante.rows
     catalog.close()
 
 

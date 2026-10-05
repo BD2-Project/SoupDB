@@ -79,10 +79,11 @@ def test_evaluate_compare_strings() -> None:
     assert evaluate(CompareExpr(Literal("b"), "=", Literal("a")), ROW, SCHEMA) is False
 
 
-def test_evaluate_compare_ints_and_floats_raises() -> None:
+def test_evaluate_compare_ints_and_floats() -> None:
+    # INT y FLOAT son comparables: un radio entero contra una distancia flotante
+    # es la forma natural de escribir el predicado.
     expr = CompareExpr(Literal(1), "=", Literal(1.0))
-    with pytest.raises(QueryExecutionError):
-        evaluate(expr, ROW, SCHEMA)
+    assert evaluate(expr, ROW, SCHEMA) is True
 
 
 def test_evaluate_compare_int_and_str_raises() -> None:
@@ -141,8 +142,13 @@ def test_evaluate_between_strings() -> None:
     assert evaluate(expr, ROW, SCHEMA) is True
 
 
-def test_evaluate_between_mixed_types_raises() -> None:
+def test_evaluate_between_mixes_ints_and_floats() -> None:
     expr = BetweenExpr(Literal(5), Literal(1.0), Literal(10))
+    assert evaluate(expr, ROW, SCHEMA) is True
+
+
+def test_evaluate_between_bool_and_number_raises() -> None:
+    expr = BetweenExpr(Literal(5), Literal(True), Literal(10))
     with pytest.raises(QueryExecutionError):
         evaluate(expr, ROW, SCHEMA)
 

@@ -2,9 +2,6 @@
 and ORDER BY distance ... LIMIT through the full parse -> plan -> execute path.
 """
 
-import pytest
-
-from engine.common.errors import QueryExecutionError
 from engine.common.schema import ColumnDef, ColumnType
 from engine.query.executor import execute
 from engine.query.parser import parse
@@ -49,10 +46,14 @@ def test_where_distance_filters_by_radius() -> None:
     assert result.rows == (("A",), ("B",))
 
 
-def test_where_distance_strict_types_require_float_literal() -> None:
+def test_where_distance_accepts_int_literal() -> None:
+    # El radio se escribe `< 6`, no `< 6.0`: el literal entero se promueve.
     catalog = make_catalog()
-    with pytest.raises(QueryExecutionError, match="cannot mix"):
-        run("SELECT nombre FROM lugares WHERE distance(ubicacion, POINT(0, 0)) < 6", catalog)
+    entero = run("SELECT nombre FROM lugares WHERE distance(ubicacion, POINT(0, 0)) < 6", catalog)
+    flotante = run(
+        "SELECT nombre FROM lugares WHERE distance(ubicacion, POINT(0, 0)) < 6.0", catalog
+    )
+    assert entero.rows == flotante.rows
 
 
 def test_order_by_distance_limit_returns_knn() -> None:
