@@ -42,6 +42,8 @@ _KEYWORDS = {
     "AVG",
     "MIN",
     "MAX",
+    "FORMAT",
+    "JSON",
     "PRIMARY",
     "KEY",
     "POINT",

@@ -193,10 +193,35 @@ class _Parser:
         return column, self._parse_expression()
 
     def _parse_explain(self) -> ExplainStatement:
+        """``EXPLAIN [ANALYZE] [(FORMAT JSON)] <sentencia>``."""
         analyze = self._match_keyword("ANALYZE")
+        json_format = self._parse_explain_options()
         inner_sql = self._sql[self._peek().position :]
         statement = self.parse_statement()
-        return ExplainStatement(sql=inner_sql, statement=statement, analyze=analyze)
+        return ExplainStatement(
+            sql=inner_sql,
+            statement=statement,
+            analyze=analyze,
+            json_format=json_format,
+        )
+
+    def _parse_explain_options(self) -> bool:
+        """Lee ``(FORMAT JSON)``; devuelve si se pidió el formato estructurado."""
+        if not self._checks_lparen_next_token():
+            return False
+        self._expect_kind(TokenKind.LPAREN)
+        self._expect_keyword("FORMAT")
+        token = self._peek()
+        if not self._match_keyword("JSON"):
+            raise QueryParseError(
+                f"unsupported EXPLAIN format at position {token.position}, "
+                f"got {token.value!r}; only JSON is supported"
+            )
+        self._expect_kind(TokenKind.RPAREN)
+        return True
+
+    def _checks_lparen_next_token(self) -> bool:
+        return self._peek().kind is TokenKind.LPAREN
 
     def _parse_delete(self) -> DeleteStatement:
         self._expect_keyword("FROM")
