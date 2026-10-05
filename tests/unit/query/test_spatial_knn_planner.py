@@ -185,7 +185,7 @@ def test_both_paths_filter_out_unknown_distances() -> None:
         node = find(root, "Filter")
         assert node is not None, f"sin filtro implícito con index={index}"
         predicate = str(node.detail["predicate"])
-        assert "op='>='" in predicate and "value=0.0" in predicate
+        assert ">= 0.0" in predicate
         # El filtro va sobre la hoja y por debajo del Sort.
         assert find(root, "Sort") is not None
         assert node.children[0].op in {"SpatialKnnScan", "TableScan"}

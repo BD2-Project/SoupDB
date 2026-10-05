@@ -13,6 +13,7 @@ from engine.common.errors import QueryExecutionError
 from engine.common.schema import ColumnDef, ColumnType
 from engine.query.ast import BinaryExpr, ColumnRef, Literal
 from engine.query.executor import execute
+from engine.query.format_expr import format_expr
 from engine.query.parser import parse
 from engine.query.planner import Plan, plan
 from tests.fakes.fake_catalog import FakeCatalog
@@ -102,7 +103,7 @@ def test_order_by_alias_of_arithmetic_expression_rewrites_the_key() -> None:
     assert tree.op == "Project"
     assert [column.name for column in result.output_schema] == ["p"]
     assert sort_keys("SELECT precio * 2 AS p FROM items ORDER BY p", catalog) == [
-        str(BinaryExpr(ColumnRef("precio"), "*", Literal(2)))
+        format_expr(BinaryExpr(ColumnRef("precio"), "*", Literal(2)))
     ]
 
 
@@ -132,23 +133,21 @@ def test_order_by_alias_of_aggregate_key_is_the_aggregate_column() -> None:
         "SELECT categoria, COUNT(*) AS n FROM items GROUP BY categoria ORDER BY n",
         make_items(),
     )
-    assert keys == ["ColumnRef(name='count_1')"]
+    assert keys == ["count_1"]
 
 
 def test_order_by_aggregate_without_alias_still_resolves() -> None:
     catalog = make_items()
     sql = "SELECT categoria, COUNT(*) AS n FROM items GROUP BY categoria ORDER BY COUNT(*)"
     assert run(sql, catalog).rows == (("a", 2), ("b", 3))
-    assert sort_keys(sql, catalog) == ["ColumnRef(name='count_1')"]
+    assert sort_keys(sql, catalog) == ["count_1"]
 
 
 def test_order_by_alias_shadows_base_column() -> None:
     catalog = make_items()
     result = run("SELECT categoria AS id FROM items ORDER BY id", catalog)
     assert result.rows == (("a",), ("a",), ("b",), ("b",), ("b",))
-    assert sort_keys("SELECT categoria AS id FROM items ORDER BY id", catalog) == [
-        "ColumnRef(name='categoria')"
-    ]
+    assert sort_keys("SELECT categoria AS id FROM items ORDER BY id", catalog) == ["categoria"]
 
 
 def test_order_by_alias_shadows_base_column_desc() -> None:
@@ -160,9 +159,7 @@ def test_order_by_non_projected_column_still_works() -> None:
     catalog = make_items()
     result = run("SELECT categoria FROM items ORDER BY precio", catalog)
     assert result.rows == (("b",), ("a",), ("a",), ("b",), ("b",))
-    assert sort_keys("SELECT categoria FROM items ORDER BY precio", catalog) == [
-        "ColumnRef(name='precio')"
-    ]
+    assert sort_keys("SELECT categoria FROM items ORDER BY precio", catalog) == ["precio"]
 
 
 def test_order_by_two_aliases_with_mixed_direction() -> None:
@@ -186,7 +183,8 @@ def test_explain_order_by_alias_keeps_sort_below_project() -> None:
     lines = [row[0] for row in result.rows]
     assert lines[0].startswith("-> Project")
     assert lines[1].startswith("  -> Sort")
-    assert "DistanceExpr" in lines[1]
+    # El detalle se lee como SQL, no como el repr del AST.
+    assert "distancia(" in lines[1]
 
 
 def test_order_by_unknown_identifier_still_raises() -> None:

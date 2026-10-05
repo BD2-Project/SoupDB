@@ -229,15 +229,36 @@ class _Parser:
         self._expect_keyword("TABLE")
         table = self._expect_kind(TokenKind.IDENTIFIER).value
         self._expect_kind(TokenKind.LPAREN)
-        columns = [self._parse_column_def()]
-        while self._match_comma():
-            columns.append(self._parse_column_def())
+        primary_key: str | None = None
+        columns = []
+        while True:
+            column, is_primary = self._parse_column_def_with_constraints()
+            if is_primary:
+                if primary_key is not None:
+                    raise QueryParseError(f"table {table!r} declares more than one PRIMARY KEY")
+                primary_key = column.name
+            columns.append(column)
+            if not self._match_comma():
+                break
         self._expect_kind(TokenKind.RPAREN)
         engine = "HEAP"
         if self._match_keyword("ENGINE"):
             engine = self._expect_ident_or_keyword()
         self._error_if_not_eof()
-        return CreateTableStatement(table=table, columns=tuple(columns), engine=engine)
+        return CreateTableStatement(
+            table=table,
+            columns=tuple(columns),
+            engine=engine,
+            primary_key=primary_key,
+        )
+
+    def _parse_column_def_with_constraints(self) -> tuple[ColumnDef, bool]:
+        """Una definición de columna y si lleva ``PRIMARY KEY``."""
+        column = self._parse_column_def()
+        if not self._match_keyword("PRIMARY"):
+            return column, False
+        self._expect_keyword("KEY")
+        return column, True
 
     def _parse_create_index(self) -> CreateIndexStatement:
         index_name = self._expect_kind(TokenKind.IDENTIFIER).value
@@ -606,20 +627,26 @@ class _Parser:
             raise QueryParseError(f"{exc} at position {token.position}") from exc
 
     def _parse_polygon_expr(self) -> PolygonExpr:
+        """``POLYGON((lat, lon), (lat, lon), ...)``.
+
+        Los vértices llevan el mismo orden que el literal ``POINT``: latitud
+        primero. Tener dos órdenes en la misma consulta sería un error silencioso
+        garantizado.
+        """
         self._advance()
         self._expect_kind(TokenKind.LPAREN)
         vertices: list[Expr] = []
         self._expect_kind(TokenKind.LPAREN)
-        x = self._parse_expression()
-        self._expect_kind(TokenKind.COMMA)
         y = self._parse_expression()
+        self._expect_kind(TokenKind.COMMA)
+        x = self._parse_expression()
         self._expect_kind(TokenKind.RPAREN)
         vertices.append(PointExpr(x=x, y=y))
         while self._match_comma():
             self._expect_kind(TokenKind.LPAREN)
-            x = self._parse_expression()
-            self._expect_kind(TokenKind.COMMA)
             y = self._parse_expression()
+            self._expect_kind(TokenKind.COMMA)
+            x = self._parse_expression()
             self._expect_kind(TokenKind.RPAREN)
             vertices.append(PointExpr(x=x, y=y))
         self._expect_kind(TokenKind.RPAREN)

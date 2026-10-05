@@ -29,6 +29,7 @@ Fijadas por el enunciado (§2.2.1 y §2.2.3) y verificadas por los tests de
 |---|---|
 | Nombre de la función | `distancia(...)`, con `distance(...)` como alias |
 | Literal de punto | `POINT(latitud, longitud)` |
+| Vértices de polígono | `POLYGON((latitud, longitud), ...)`, el mismo orden |
 | Representación interna | `Point(x=longitud, y=latitud)` |
 | Métrica por defecto | euclidiana, en grados de coordenada |
 | Métrica geodésica | `'haversine'`, en **metros** |

@@ -41,6 +41,15 @@ def execute(plan: Plan, catalog: Any) -> ResultSet:
         return _execute_delete(statement, catalog)
     if isinstance(statement, CreateTableStatement):
         catalog.create_table(statement.table, statement.columns, statement.engine)
+        if statement.primary_key is not None:
+            # La clave primaria se materializa como índice: sin esto, declararla
+            # no cambiaría nada y una búsqueda por clave seguiría siendo un scan.
+            catalog.create_index(
+                f"{statement.table}_pk",
+                statement.table,
+                statement.primary_key,
+                "BTREE",
+            )
         return ResultSet(columns=())
     if isinstance(statement, CreateIndexStatement):
         catalog.create_index(
