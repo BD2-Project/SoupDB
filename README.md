@@ -71,9 +71,25 @@ uv run --group docs mkdocs build
 # Informe técnico
 typst compile paper/main.typ paper/soupdb.pdf
 
-# Despliegue local (gestor + postgres)
+# Levantar el gestor sin docker (escucha en 55432)
+uv run python -m engine
+
+# Despliegue local (gestor + postgres con PostGIS)
 docker compose up
 ```
+
+El gestor queda escuchando el protocolo binario en el puerto `55432`, que es al
+que se conectan el driver `rsoup` y el cliente `SoupChef`.
+
+Si el puerto ya está ocupado en tu máquina:
+
+```bash
+DRIVER_PORT=55435 POSTGRES_PORT=55434 docker compose up
+```
+
+Configuración por variables de entorno: `SOUPDB_DATA` (directorio de datos),
+`DRIVER_HOST`, `DRIVER_PORT`, `PAGE_SIZE`, `BUFFER_POOL_SIZE`,
+`MAX_CONNECTIONS` y `LOCK_TIMEOUT_MS`.
 
 ## Gestión de paquete y contenedor
 
