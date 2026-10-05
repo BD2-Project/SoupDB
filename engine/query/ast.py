@@ -242,11 +242,17 @@ class ExplainStatement(Statement):
     ``sql`` keeps the raw inner text, ``statement`` its parsed AST when
     available, and ``analyze`` whether the plan must be executed to gather
     real runtime metrics (``EXPLAIN ANALYZE``).
+
+    ``json_format`` lo pide ``EXPLAIN (FORMAT JSON)``: devuelve el árbol
+    serializado en una sola fila en vez del dibujo de texto. Es lo que necesita
+    el panel de plan del frontend, que no puede reconstruir un árbol a partir
+    de líneas indentadas.
     """
 
     sql: str
     statement: Statement | None = None
     analyze: bool = False
+    json_format: bool = False
 
 
 @dataclass(frozen=True)

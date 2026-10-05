@@ -5,6 +5,7 @@ statements are executed directly against the catalog (duck-typed, see the
 planner contract) and report the affected-row count.
 """
 
+import json
 from typing import Any
 
 from engine.common.errors import QueryExecutionError
@@ -195,9 +196,13 @@ def _execute_explain(plan: Plan, catalog: Any) -> ResultSet:
         node = _explain_analyze(statement, plan, catalog)
     else:
         node = _explain_describe(plan)
+    columns = (ColumnDef("QUERY PLAN", ColumnType.TEXT),)
+    if statement.json_format:
+        # Una sola fila con el árbol completo: el panel de plan del frontend no
+        # puede reconstruirlo a partir de las líneas indentadas del dibujo.
+        return ResultSet(columns=columns, rows=((json.dumps(node.to_json()),),))
     lines: list[str] = []
     _render_plan(node, 0, lines)
-    columns = (ColumnDef("QUERY PLAN", ColumnType.TEXT),)
     return ResultSet(columns=columns, rows=tuple((line,) for line in lines))
 
 

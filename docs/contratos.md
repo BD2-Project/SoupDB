@@ -43,3 +43,23 @@ La unidad importa: el ejemplo del enunciado es
 así que haversine devuelve metros. Si devolviera kilómetros ese mismo predicado
 seleccionaría un radio de 5000 km y devolvería la tabla entera **sin fallar**,
 que es el peor tipo de error: silencioso.
+
+
+## Plan de ejecución estructurado
+
+`EXPLAIN [ANALYZE] (FORMAT JSON) <sentencia>` devuelve el árbol del plan
+serializado en **una sola fila** de la columna `QUERY PLAN`, con la forma del
+contrato:
+
+```json
+{ "op": "Sort", "detail": {"keys": ["id"]}, "rows": 2, "elapsed_ms": 0.03,
+  "disk_reads": 0, "disk_writes": 0, "children": [] }
+```
+
+`op` es string libre a propósito: operadores nuevos (`InvertedIndexScan` en la
+Parte 3, `HNSWSearch` en la Parte 4) aparecen en el panel sin tocar el
+renderizador.
+
+Sin `(FORMAT JSON)` el resultado sigue siendo el dibujo de texto indentado, que
+es lo útil desde una consola. El panel de plan del frontend necesita el árbol:
+no puede reconstruirlo a partir de las líneas.
