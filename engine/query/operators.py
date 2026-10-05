@@ -475,7 +475,6 @@ class SpatialKnnScan(_VolcanoBase):
         return self._plan("SpatialKnnScan", detail)
 
 
-
 class SpatialPolygonScan(_VolcanoBase):
     """Polygon intersection query through a spatial index (leaf operator).
 
@@ -532,7 +531,6 @@ class SpatialPolygonScan(_VolcanoBase):
             "polygon": str(self._polygon.vertices),
         }
         return self._plan("SpatialPolygonScan", detail)
-
 
 
 class Filter(_VolcanoBase):

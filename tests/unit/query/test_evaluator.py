@@ -79,10 +79,11 @@ def test_evaluate_compare_strings() -> None:
     assert evaluate(CompareExpr(Literal("b"), "=", Literal("a")), ROW, SCHEMA) is False
 
 
-def test_evaluate_compare_ints_and_floats_raises() -> None:
+def test_evaluate_compare_ints_and_floats() -> None:
+    # INT y FLOAT son comparables: un radio entero contra una distancia flotante
+    # es la forma natural de escribir el predicado.
     expr = CompareExpr(Literal(1), "=", Literal(1.0))
-    with pytest.raises(QueryExecutionError):
-        evaluate(expr, ROW, SCHEMA)
+    assert evaluate(expr, ROW, SCHEMA) is True
 
 
 def test_evaluate_compare_int_and_str_raises() -> None:
@@ -141,8 +142,13 @@ def test_evaluate_between_strings() -> None:
     assert evaluate(expr, ROW, SCHEMA) is True
 
 
-def test_evaluate_between_mixed_types_raises() -> None:
+def test_evaluate_between_mixes_ints_and_floats() -> None:
     expr = BetweenExpr(Literal(5), Literal(1.0), Literal(10))
+    assert evaluate(expr, ROW, SCHEMA) is True
+
+
+def test_evaluate_between_bool_and_number_raises() -> None:
+    expr = BetweenExpr(Literal(5), Literal(True), Literal(10))
     with pytest.raises(QueryExecutionError):
         evaluate(expr, ROW, SCHEMA)
 
@@ -357,25 +363,23 @@ def test_distance_expr_haversine_metric() -> None:
     a = PointExpr(Literal(-56.1645), Literal(-34.9011))
     b = PointExpr(Literal(-58.3816), Literal(-34.6037))
     assert evaluate(DistanceExpr(a, b, "haversine"), POINT_ROW, POINT_SCHEMA) == pytest.approx(
-        205.23235938356873
+        205_232.35938356873
     )
     assert evaluate(DistanceExpr(a, a, "haversine"), POINT_ROW, POINT_SCHEMA) == 0.0
 
 
 def test_distance_expr_default_metric_equals_explicit_euclidean() -> None:
     pt = PointExpr(Literal(1), Literal(1))
-    assert evaluate(
-        DistanceExpr(ColumnRef("ubicacion"), pt), POINT_ROW, POINT_SCHEMA
-    ) == evaluate(
+    assert evaluate(DistanceExpr(ColumnRef("ubicacion"), pt), POINT_ROW, POINT_SCHEMA) == evaluate(
         DistanceExpr(ColumnRef("ubicacion"), pt, "euclidean"), POINT_ROW, POINT_SCHEMA
     )
 
 
 def test_distance_expr_metric_name_is_normalized_at_evaluation() -> None:
     pt = PointExpr(Literal(1), Literal(1))
-    assert evaluate(
-        DistanceExpr(pt, pt, "Haversine"), POINT_ROW, POINT_SCHEMA
-    ) == evaluate(DistanceExpr(pt, pt, "haversine"), POINT_ROW, POINT_SCHEMA)
+    assert evaluate(DistanceExpr(pt, pt, "Haversine"), POINT_ROW, POINT_SCHEMA) == evaluate(
+        DistanceExpr(pt, pt, "haversine"), POINT_ROW, POINT_SCHEMA
+    )
 
 
 def test_distance_expr_unknown_metric_fails_at_evaluation() -> None:

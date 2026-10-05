@@ -1,4 +1,8 @@
-"""Tests for the SQL parser: POINT(x, y) and distance(a, b) expressions."""
+"""Tests for the SQL parser: POINT(lat, lon) and distance(a, b) expressions.
+
+El literal se escribe `POINT(latitud, longitud)` como fija el enunciado (2.2.3);
+el AST guarda `PointExpr(x=longitud, y=latitud)`, que es el orden interno.
+"""
 
 import pytest
 
@@ -24,7 +28,7 @@ def test_parse_where_distance_point() -> None:
     assert stmt.where == CompareExpr(
         DistanceExpr(
             ColumnRef("ubicacion"),
-            PointExpr(Literal(1), Literal(2)),
+            PointExpr(Literal(2), Literal(1)),
         ),
         "<",
         Literal(5.0),
@@ -59,7 +63,7 @@ def test_parse_distance_with_decimal_coordinates() -> None:
     assert stmt.where == CompareExpr(
         DistanceExpr(
             ColumnRef("ubicacion"),
-            PointExpr(Literal(1.5), Literal(-2.25)),
+            PointExpr(Literal(-2.25), Literal(1.5)),
         ),
         "<=",
         Literal(10.0),
@@ -69,7 +73,7 @@ def test_parse_distance_with_decimal_coordinates() -> None:
 def test_parse_point_in_insert_values() -> None:
     stmt = parse("INSERT INTO t (nombre, ubicacion) VALUES ('A', POINT(3, 4))")
     assert isinstance(stmt, InsertStatement)
-    assert stmt.values == ((Literal("A"), PointExpr(Literal(3), Literal(4))),)
+    assert stmt.values == ((Literal("A"), PointExpr(Literal(4), Literal(3))),)
 
 
 def test_parse_create_table_with_point_column() -> None:
@@ -92,18 +96,16 @@ def test_parse_distance_without_metric_defaults_to_euclidean() -> None:
     assert isinstance(stmt, SelectStatement)
     assert isinstance(stmt.where, CompareExpr)
     assert stmt.where.left == DistanceExpr(
-        ColumnRef("ubicacion"), PointExpr(Literal(1), Literal(2))
+        ColumnRef("ubicacion"), PointExpr(Literal(2), Literal(1))
     )
     assert stmt.where.left.metric == "euclidean"
 
 
 def test_parse_distance_with_haversine_metric() -> None:
-    stmt = parse(
-        "SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2), 'haversine') < 100.0"
-    )
+    stmt = parse("SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2), 'haversine') < 100.0")
     assert isinstance(stmt, SelectStatement)
     assert stmt.where == CompareExpr(
-        DistanceExpr(ColumnRef("ubicacion"), PointExpr(Literal(1), Literal(2)), "haversine"),
+        DistanceExpr(ColumnRef("ubicacion"), PointExpr(Literal(2), Literal(1)), "haversine"),
         "<",
         Literal(100.0),
     )

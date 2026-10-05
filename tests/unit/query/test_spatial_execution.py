@@ -2,9 +2,6 @@
 and ORDER BY distance ... LIMIT through the full parse -> plan -> execute path.
 """
 
-import pytest
-
-from engine.common.errors import QueryExecutionError
 from engine.common.schema import ColumnDef, ColumnType
 from engine.query.executor import execute
 from engine.query.parser import parse
@@ -37,7 +34,8 @@ def test_insert_point_value_roundtrips() -> None:
     from engine.common.record import decode_row
 
     decoded = [decode_row(record.data, LUGARES) for record in rows]
-    assert decoded[-1] == ("D", (1.0, 2.0))
+    # POINT(1, 2) es latitud 1 y longitud 2: se guarda como Point(x=2, y=1).
+    assert decoded[-1] == ("D", (2.0, 1.0))
 
 
 def test_where_distance_filters_by_radius() -> None:
@@ -49,10 +47,14 @@ def test_where_distance_filters_by_radius() -> None:
     assert result.rows == (("A",), ("B",))
 
 
-def test_where_distance_strict_types_require_float_literal() -> None:
+def test_where_distance_accepts_int_literal() -> None:
+    # El radio se escribe `< 6`, no `< 6.0`: el literal entero se promueve.
     catalog = make_catalog()
-    with pytest.raises(QueryExecutionError, match="cannot mix"):
-        run("SELECT nombre FROM lugares WHERE distance(ubicacion, POINT(0, 0)) < 6", catalog)
+    entero = run("SELECT nombre FROM lugares WHERE distance(ubicacion, POINT(0, 0)) < 6", catalog)
+    flotante = run(
+        "SELECT nombre FROM lugares WHERE distance(ubicacion, POINT(0, 0)) < 6.0", catalog
+    )
+    assert entero.rows == flotante.rows
 
 
 def test_order_by_distance_limit_returns_knn() -> None:

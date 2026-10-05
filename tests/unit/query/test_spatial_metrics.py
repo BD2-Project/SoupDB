@@ -12,7 +12,7 @@ import pytest
 
 from engine.indexes.rtree.point import Point
 from engine.query.spatial_metrics import (
-    EARTH_RADIUS_KM,
+    EARTH_RADIUS_M,
     EUCLIDEAN,
     HAVERSINE,
     METRIC_NAMES,
@@ -35,17 +35,14 @@ def antipode(point: tuple[float, float]) -> tuple[float, float]:
     return (lon - 360.0 if lon > 180.0 else lon, -point[1])
 
 
-def spherical_law_of_cosines(
-    a: tuple[float, float], b: tuple[float, float]
-) -> float:
+def spherical_law_of_cosines(a: tuple[float, float], b: tuple[float, float]) -> float:
     """Independent geodesic oracle: cos(d/R) = sin(f1)sin(f2)+cos(f1)cos(f2)cos(l2-l1)."""
     lon1, lat1 = math.radians(a[0]), math.radians(a[1])
     lon2, lat2 = math.radians(b[0]), math.radians(b[1])
-    cos_central = (
-        math.sin(lat1) * math.sin(lat2)
-        + math.cos(lat1) * math.cos(lat2) * math.cos(lon2 - lon1)
+    cos_central = math.sin(lat1) * math.sin(lat2) + math.cos(lat1) * math.cos(lat2) * math.cos(
+        lon2 - lon1
     )
-    return EARTH_RADIUS_KM * math.acos(min(1.0, max(-1.0, cos_central)))
+    return EARTH_RADIUS_M * math.acos(min(1.0, max(-1.0, cos_central)))
 
 
 def test_metric_names_are_the_documented_pair() -> None:
@@ -53,7 +50,7 @@ def test_metric_names_are_the_documented_pair() -> None:
 
 
 def test_earth_radius_matches_the_iugg_mean_radius() -> None:
-    assert EARTH_RADIUS_KM == 6371.0088
+    assert EARTH_RADIUS_M == 6_371_008.8
 
 
 # --- euclidean -------------------------------------------------------------
@@ -77,9 +74,7 @@ def test_euclidean_is_symmetric() -> None:
 
 def test_euclidean_accepts_any_finite_plane_coordinates() -> None:
     # La euclidiana es una métrica de plano: no exige rango geográfico.
-    assert euclidean_distance((0.0, 0.0), (900.0, 250.0)) == pytest.approx(
-        math.hypot(900.0, 250.0)
-    )
+    assert euclidean_distance((0.0, 0.0), (900.0, 250.0)) == pytest.approx(math.hypot(900.0, 250.0))
 
 
 # --- haversine -------------------------------------------------------------
@@ -93,27 +88,27 @@ def test_haversine_is_zero_for_the_same_point() -> None:
 def test_haversine_antipodal_pair_is_half_the_circumference() -> None:
     # Exacto, no aproximado: el par antípodal da pi * R bit a bit, así que el
     # borde se puede comparar con ese valor sin sorpresas de redondeo.
-    assert haversine_distance((0.0, 0.0), (180.0, 0.0)) == math.pi * EARTH_RADIUS_KM
-    assert haversine_distance((0.0, 0.0), (-180.0, 0.0)) == math.pi * EARTH_RADIUS_KM
+    assert haversine_distance((0.0, 0.0), (180.0, 0.0)) == math.pi * EARTH_RADIUS_M
+    assert haversine_distance((0.0, 0.0), (-180.0, 0.0)) == math.pi * EARTH_RADIUS_M
     assert haversine_distance(MONTEVIDEO, antipode(MONTEVIDEO)) == pytest.approx(
-        math.pi * EARTH_RADIUS_KM
+        math.pi * EARTH_RADIUS_M
     )
-    assert math.pi * EARTH_RADIUS_KM == pytest.approx(20015.114442035923)
+    assert math.pi * EARTH_RADIUS_M == pytest.approx(20_015_114.442035925)
 
 
 def test_haversine_one_degree_of_latitude_is_the_meridian_arc() -> None:
     assert haversine_distance((0.0, 0.0), (0.0, 1.0)) == pytest.approx(
-        EARTH_RADIUS_KM * math.pi / 180
+        EARTH_RADIUS_M * math.pi / 180
     )
-    assert haversine_distance((0.0, 0.0), (0.0, 1.0)) == pytest.approx(111.1950802335329)
+    assert haversine_distance((0.0, 0.0), (0.0, 1.0)) == pytest.approx(111_195.0802335329)
 
 
 def test_haversine_known_city_pair_value() -> None:
     # Montevideo -> Buenos Aires, ~205 km on the real Earth.
     assert haversine_distance(MONTEVIDEO, BUENOS_AIRES) == pytest.approx(
-        205.23235938356873, rel=1e-9
+        205_232.35938356873, rel=1e-9
     )
-    assert haversine_distance(MADRID, LISBOA) == pytest.approx(502.44791631964506, rel=1e-9)
+    assert haversine_distance(MADRID, LISBOA) == pytest.approx(502_447.91631964506, rel=1e-9)
 
 
 def test_haversine_is_symmetric() -> None:
@@ -122,8 +117,8 @@ def test_haversine_is_symmetric() -> None:
 
 def test_haversine_takes_the_short_way_across_the_antimeridian() -> None:
     across = haversine_distance((179.0, 0.0), (-179.0, 0.0))
-    assert across == pytest.approx(EARTH_RADIUS_KM * math.radians(2.0))
-    assert across < haversine_distance((179.0, 0.0), (179.0, 0.0)) + 1000.0
+    assert across == pytest.approx(EARTH_RADIUS_M * math.radians(2.0))
+    assert across < haversine_distance((179.0, 0.0), (179.0, 0.0)) + 1_000_000.0
 
 
 def test_haversine_grows_with_latitude_gap() -> None:

@@ -445,7 +445,9 @@ class _Parser:
 
     @staticmethod
     def _is_boolean_expression(expr: Expr) -> bool:
-        if isinstance(expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr, IntersectsExpr)):
+        if isinstance(
+            expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr, IntersectsExpr)
+        ):
             return True
         if isinstance(expr, Literal) and isinstance(expr.value, bool):
             return True
@@ -559,13 +561,18 @@ class _Parser:
         return FunctionExpr(name=name, arg=arg, distinct=distinct)
 
     def _parse_point_expr(self) -> PointExpr:
+        """``POINT(latitud, longitud)``, el orden que fija el enunciado (2.2.3).
+
+        El intercambio ocurre acá y en ningún otro lado: hacia adentro el motor
+        trabaja siempre con ``Point(x=longitud, y=latitud)``.
+        """
         self._advance()
         self._expect_kind(TokenKind.LPAREN)
-        x = self._parse_expression()
+        latitude = self._parse_expression()
         self._expect_kind(TokenKind.COMMA)
-        y = self._parse_expression()
+        longitude = self._parse_expression()
         self._expect_kind(TokenKind.RPAREN)
-        return PointExpr(x=x, y=y)
+        return PointExpr(x=longitude, y=latitude)
 
     def _parse_distance_expr(self) -> DistanceExpr:
         self._advance()

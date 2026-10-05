@@ -19,8 +19,11 @@ their results as well.
 import re
 from collections.abc import Iterable
 
+from engine.algorithms.spatial.geometry import Polygon2D
+from engine.algorithms.spatial.predicates import point_in_polygon
 from engine.common.errors import QueryExecutionError
 from engine.common.schema import ColumnDef
+from engine.indexes.rtree import Point
 from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
@@ -38,9 +41,6 @@ from engine.query.ast import (
     PolygonExpr,
 )
 from engine.query.spatial_metrics import distance
-from engine.indexes.rtree import Point
-from engine.algorithms.spatial.geometry import Polygon2D
-from engine.algorithms.spatial.predicates import point_in_polygon
 
 _COMPARISONS = {"=", "<>", "!=", "<", "<=", ">", ">="}
 _AGGREGATES = {"COUNT", "SUM", "AVG", "MIN", "MAX"}
@@ -145,9 +145,7 @@ def evaluate(expr: Expr, row: Row, schema: Schema) -> object:
                 return point_in_polygon(pt, left)
             except Exception as exc:
                 raise QueryExecutionError(str(exc)) from exc
-        raise QueryExecutionError(
-            "intersects requires (POINT, POLYGON) or (POLYGON, POINT)"
-        )
+        raise QueryExecutionError("intersects requires (POINT, POLYGON) or (POLYGON, POINT)")
 
     if isinstance(expr, FunctionExpr):
         raise QueryExecutionError(f"aggregate {expr.name} is not allowed in a scalar expression")
@@ -190,11 +188,21 @@ def _column_value(name: str, row: Row, schema: Schema) -> object:
     raise QueryExecutionError(f"unknown column {name!r}")
 
 
+def _is_number(value: object) -> bool:
+    """INT y FLOAT son comparables entre sí; BOOL no, pese a heredar de int."""
+    return type(value) is int or type(value) is float
+
+
 def _require_same_type(left: object, right: object) -> None:
-    if type(left) is not type(right):
-        raise QueryExecutionError(
-            f"cannot mix {type(left).__name__} and {type(right).__name__} values"
-        )
+    if type(left) is type(right):
+        return
+
+    # Un radio se escribe `< 5000`, no `< 5000.0`, y `distance(...)` siempre
+    # devuelve float: sin esta promoción el ejemplo del enunciado falla.
+    if _is_number(left) and _is_number(right):
+        return
+
+    raise QueryExecutionError(f"cannot mix {type(left).__name__} and {type(right).__name__} values")
 
 
 def _require_bool(value: object) -> bool:

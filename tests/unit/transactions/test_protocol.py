@@ -142,3 +142,28 @@ def test_error_code_mapping() -> None:
 def test_encode_unsupported_value_raises() -> None:
     with pytest.raises(ProtocolError):
         proto._encode_value(bytearray(), object())  # type: ignore[arg-type]
+
+
+def test_resultset_round_trip_with_point_column() -> None:
+    """Una columna POINT viaja por el cable sin perder coordenadas.
+
+    Sin esto el panel de mapa del frontend no puede dibujar nada: el motor
+    resuelve la consulta espacial pero el cliente nunca recibe la geometría.
+    """
+    columns = (
+        ColumnDef("id", ColumnType.INT),
+        ColumnDef("ubicacion", ColumnType.POINT),
+    )
+    rows = ((1, (-77.0428, -12.0464)), (2, (0.0, 0.0)))
+    result = ResultSet(columns=columns, rows=rows, affected=0)
+
+    decoded = proto.decode_resultset(proto.encode_resultset(result))
+
+    assert decoded.columns == columns
+    assert decoded.rows == rows
+
+
+def test_point_value_tag_is_distinct_from_float() -> None:
+    # Un punto no debe confundirse con dos flotantes sueltos al decodificar.
+    assert proto.TAG_POINT != proto.TAG_FLOAT
+    assert proto.TYPE_POINT != proto.TYPE_FLOAT

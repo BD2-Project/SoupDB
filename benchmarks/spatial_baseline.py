@@ -19,7 +19,7 @@ sin índice **y** entre métrica euclidiana y haversine:
 
 Las funciones se importan de :mod:`engine.query.spatial_metrics` a propósito: el
 oráculo y el motor deben aplicar la misma convención (lon en x, lat en y, radio
-terrestre :data:`~engine.query.spatial_metrics.EARTH_RADIUS_KM`) para que una
+terrestre :data:`~engine.query.spatial_metrics.EARTH_RADIUS_M`) para que una
 diferencia de resultados entre R-Tree y baseline sea un fallo del índice y no un
 desacuerdo de fórmula. Como el módulo es puro, importarlo no arrastra el motor.
 El radio de ``radius_search`` y la distancia de ``knn`` están en la unidad de la
@@ -44,7 +44,7 @@ from engine.indexes.rtree import RTree
 from engine.indexes.rtree.mbr import MBR
 from engine.indexes.rtree.point import Point
 from engine.query.spatial_metrics import (
-    EARTH_RADIUS_KM,
+    EARTH_RADIUS_M,
     EUCLIDEAN,
     euclidean_distance,
     haversine_distance,
@@ -81,7 +81,7 @@ def metric_functions() -> tuple[DistanceFn, ...]:
 
 
 __all__ = [
-    "EARTH_RADIUS_KM",
+    "EARTH_RADIUS_M",
     "EUCLIDEAN_DISTANCE",
     "HAVERSINE_DISTANCE",
     "METRIC_DISTANCES",

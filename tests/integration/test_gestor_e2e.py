@@ -224,6 +224,7 @@ def test_sql_transaction_group_is_invisible_until_end_over_tcp(server) -> None:
 
 def test_sql_transaction_group_survives_restart_over_tcp(database) -> None:
     """El commit por END TRANSACTION queda persistido como el del protocolo."""
+
     def make_server():
         handler = ConnectionHandler(
             database,
