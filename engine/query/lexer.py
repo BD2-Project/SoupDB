@@ -62,6 +62,10 @@ _KEYWORDS = {
     "INTERSECTS",
 }
 
+# El enunciado escribe la función de distancia en español. Se normaliza al nombre
+# interno para que parser, planner y ejecutor vean un único token.
+_FUNCTION_ALIASES = {"DISTANCIA": "DISTANCE"}
+
 _OPERATORS = {">=", "<=", "<>", "!=", ">", "<", "=", "+", "-", "/", "%"}
 _DIGITS = set("0123456789")
 _WHITESPACE = {" ", "\t", "\r", "\n"}
@@ -100,6 +104,13 @@ def _scan_string(sql: str, i: int) -> tuple[str, int]:
         chars.append(char)
         i += 1
     raise QueryParseError(f"unterminated string literal at position {i}")
+
+
+def _opens_call(sql: str, index: int) -> bool:
+    """`True` si tras la palabra, saltando espacios, viene un paréntesis."""
+    while index < len(sql) and sql[index].isspace():
+        index += 1
+    return index < len(sql) and sql[index] == "("
 
 
 def _scan_identifier(sql: str, i: int) -> tuple[str, int]:
@@ -174,6 +185,10 @@ def tokenize(sql: str) -> list[Token]:
             start = i
             word, i = _scan_identifier(sql, i)
             upper = word.upper()
+            # El alias solo aplica a la llamada a función: así `distancia` sigue
+            # sirviendo como nombre de columna o de alias de proyección.
+            if upper in _FUNCTION_ALIASES and _opens_call(sql, i):
+                upper = _FUNCTION_ALIASES[upper]
             if upper == "NULL":
                 tokens.append(Token(TokenKind.NULL, upper, start))
                 continue
