@@ -251,15 +251,20 @@ class ExplainStatement(Statement):
 
 @dataclass(frozen=True)
 class CreateTableStatement(Statement):
-    """``CREATE TABLE name (col type, ...) [ENGINE strategy]``.
+    """``CREATE TABLE name (col type [PRIMARY KEY], ...) [ENGINE strategy]``.
 
     ``engine`` selects the storage strategy: "HEAP" or "SEQUENTIAL", defaulting
     to "HEAP". The planner validates the value before execution.
+
+    ``primary_key`` nombra la columna declarada como clave primaria, si la hay.
+    No es una anotación decorativa: el ejecutor crea sobre ella un índice B+,
+    que es lo que hace que una búsqueda por clave no recorra la tabla entera.
     """
 
     table: str
     columns: tuple[ColumnDef, ...]
     engine: str = "HEAP"
+    primary_key: str | None = None
 
 
 @dataclass(frozen=True)

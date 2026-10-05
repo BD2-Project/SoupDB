@@ -224,6 +224,8 @@ def _plan_create(statement: CreateTableStatement, catalog: Any) -> Plan:
         if column.name in seen:
             raise QueryExecutionError(f"duplicate column {column.name!r}")
         seen.add(column.name)
+    if statement.primary_key is not None and statement.primary_key not in seen:
+        raise QueryExecutionError(f"unknown column {statement.primary_key!r} in PRIMARY KEY")
     return Plan(statement=statement)
 
 
