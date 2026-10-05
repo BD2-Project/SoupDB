@@ -25,3 +25,23 @@ class RecordNotFound(SoupDBError):
 
 class TransactionError(SoupDBError):
     """Invalid transaction state or concurrency control failure."""
+
+
+class LockNotGranted(SoupDBError):
+    """A lock could not be granted within the configured timeout."""
+
+
+class DeadlockDetected(SoupDBError):
+    """A deadlock cycle was detected; the victim must abort."""
+
+
+class ProtocolError(SoupDBError):
+    """Malformed or unsupported wire protocol frame."""
+
+
+class QueryParseError(SoupDBError):
+    """Invalid SQL syntax found while tokenizing or parsing."""
+
+
+class QueryExecutionError(SoupDBError):
+    """Invalid values found while evaluating an executed query."""
