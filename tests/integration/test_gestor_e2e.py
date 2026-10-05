@@ -280,3 +280,36 @@ def test_sql_transaction_control_errors_over_tcp(server) -> None:
         assert proto.decode_error(payload)[0] == proto.ERR_PARSE
     finally:
         conn.close()
+
+
+def test_spatial_queries_over_tcp(server, database) -> None:
+    """Las consultas espaciales viajan por el cable con POINT decodificado."""
+    execute_sql("CREATE TABLE lugares (id INT, nombre TEXT, ubicacion POINT)", database)
+    execute_sql(
+        "INSERT INTO lugares (id, nombre, ubicacion) VALUES (1, 'Lima', POINT(-12.04, -77.03))",
+        database,
+    )
+    execute_sql(
+        "INSERT INTO lugares (id, nombre, ubicacion) VALUES (2, 'Cusco', POINT(-13.52, -71.97))",
+        database,
+    )
+
+    conn = connect(server)
+    try:
+        opcode, payload = request(
+            conn,
+            proto.OP_QUERY,
+            proto.encode_query(
+                "SELECT nombre, ubicacion FROM lugares "
+                "ORDER BY distance(ubicacion, POINT(-12.04, -77.03)) LIMIT 2"
+            ),
+        )
+        assert opcode == proto.OP_RESULT
+        result = proto.decode_resultset(payload)
+        assert result.columns[1].type_name.value == "POINT"
+        assert len(result.rows) == 2
+        # Value POINT decodificado como tupla (x=longitud, y=latitud).
+        assert result.rows[0][1] == (-77.03, -12.04)
+        assert result.rows[1][1] == (-71.97, -13.52)
+    finally:
+        conn.close()
