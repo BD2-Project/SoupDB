@@ -99,8 +99,7 @@ def test_where_haversine_threshold_at_the_antipodal_pair(tmp_path: Path) -> None
     execute_sql("INSERT INTO extremos VALUES ('antipodo', POINT(180, 0))", catalog)
     half_circumference = math.pi * EARTH_RADIUS_KM
     inside = execute_sql(
-        "SELECT nombre FROM extremos "
-        "WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 20015.0",
+        "SELECT nombre FROM extremos WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 20015.0",
         catalog,
     )
     assert nombres(inside) == ("origen",)
@@ -172,11 +171,14 @@ def test_default_metric_matches_explicit_euclidean(tmp_path: Path) -> None:
         "SELECT nombre, distance(ubicacion, POINT(0, 0), 'euclidean') FROM ciudades",
         "SELECT nombre, distance(ubicacion, POINT(0, 0), 'EUCLIDEAN') FROM ciudades",
     ):
-        assert execute_sql(clause + " ORDER BY nombre", catalog).rows == execute_sql(
-            "SELECT nombre, distance(ubicacion, POINT(0, 0), 'euclidean') "
-            "FROM ciudades ORDER BY nombre",
-            catalog,
-        ).rows
+        assert (
+            execute_sql(clause + " ORDER BY nombre", catalog).rows
+            == execute_sql(
+                "SELECT nombre, distance(ubicacion, POINT(0, 0), 'euclidean') "
+                "FROM ciudades ORDER BY nombre",
+                catalog,
+            ).rows
+        )
     catalog.close()
 
 
@@ -326,8 +328,7 @@ def test_unknown_metric_is_a_parse_error(tmp_path: Path) -> None:
     catalog = make_catalog(tmp_path)
     with pytest.raises(QueryParseError, match="unknown distance metric"):
         execute_sql(
-            "SELECT nombre FROM ciudades "
-            "WHERE distance(ubicacion, POINT(0, 0), 'manhattan') < 5.0",
+            "SELECT nombre FROM ciudades WHERE distance(ubicacion, POINT(0, 0), 'manhattan') < 5.0",
             catalog,
         )
     catalog.close()
@@ -337,8 +338,7 @@ def test_unknown_metric_error_lists_the_valid_names(tmp_path: Path) -> None:
     catalog = make_catalog(tmp_path)
     with pytest.raises(QueryParseError) as excinfo:
         execute_sql(
-            "SELECT nombre FROM ciudades "
-            "WHERE distance(ubicacion, POINT(0, 0), 'sinhattan') < 5.0",
+            "SELECT nombre FROM ciudades WHERE distance(ubicacion, POINT(0, 0), 'sinhattan') < 5.0",
             catalog,
         )
     message = str(excinfo.value)
@@ -388,8 +388,7 @@ def test_non_point_operand_still_fails_with_the_same_message(tmp_path: Path) -> 
         QueryExecutionError, match=r"distance operands must be POINT values, got str"
     ):
         execute_sql(
-            "SELECT nombre FROM ciudades "
-            "WHERE distance(nombre, POINT(0, 0), 'haversine') < 5.0",
+            "SELECT nombre FROM ciudades WHERE distance(nombre, POINT(0, 0), 'haversine') < 5.0",
             catalog,
         )
     catalog.close()
@@ -399,8 +398,7 @@ def test_int_literal_radius_still_fails_with_strict_typing(tmp_path: Path) -> No
     catalog = make_catalog(tmp_path)
     with pytest.raises(QueryExecutionError, match="cannot mix float and int values"):
         execute_sql(
-            "SELECT nombre FROM ciudades "
-            "WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 100",
+            "SELECT nombre FROM ciudades WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 100",
             catalog,
         )
     catalog.close()
@@ -440,8 +438,7 @@ def test_stored_point_out_of_range_fails_only_for_haversine(tmp_path: Path) -> N
     assert nombres(en_grados) == ("fuera",)
     with pytest.raises(QueryExecutionError, match=r"longitude in \[-180, 180\]"):
         execute_sql(
-            "SELECT nombre FROM raros "
-            "WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 1000.0",
+            "SELECT nombre FROM raros WHERE distance(ubicacion, POINT(0, 0), 'haversine') < 1000.0",
             catalog,
         )
     catalog.close()

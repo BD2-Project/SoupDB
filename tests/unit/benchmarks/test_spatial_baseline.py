@@ -289,9 +289,7 @@ def test_haversine_radius_in_kilometres() -> None:
 
 
 def test_haversine_radius_zero_matches_only_the_same_point() -> None:
-    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 0, HAVERSINE_DISTANCE) == [
-        MONTEVIDEO
-    ]
+    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 0, HAVERSINE_DISTANCE) == [MONTEVIDEO]
     assert CITY_SCAN.radius_search(Point(-56.1645, -34.9010), 0, HAVERSINE_DISTANCE) == []
 
 
@@ -306,9 +304,9 @@ def test_haversine_antipodal_pair_at_half_circumference() -> None:
         RID(1, 0),
         RID(2, 0),
     ]
-    assert antipodal.radius_search(
-        Point(0, 0), half_circumference - 0.001, HAVERSINE_DISTANCE
-    ) == [RID(0, 0)]
+    assert antipodal.radius_search(Point(0, 0), half_circumference - 0.001, HAVERSINE_DISTANCE) == [
+        RID(0, 0)
+    ]
     assert antipodal.radius_search(Point(0, 0), half_circumference, HAVERSINE_DISTANCE) == [
         RID(0, 0),
         RID(1, 0),
@@ -381,9 +379,7 @@ def test_haversine_matches_brute_force_oracle() -> None:
     scan = SequentialSpatialScan(entries)
 
     for _ in range(20):
-        center = Point(
-            round(rng.uniform(-180.0, 180.0), 4), round(rng.uniform(-90.0, 90.0), 4)
-        )
+        center = Point(round(rng.uniform(-180.0, 180.0), 4), round(rng.uniform(-90.0, 90.0), 4))
         radius = rng.choice([0, 1, 100, 1000, 5000, 10000, 20015])
         k = rng.randint(1, len(entries) + 3)
 

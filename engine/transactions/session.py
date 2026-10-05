@@ -328,4 +328,3 @@ class _LockingFileOrganization(FileOrganization):
 
     def lock_shared(self) -> None:
         self._session._lock(("table", self._table), LockMode.SHARED)
-

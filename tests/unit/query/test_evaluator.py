@@ -364,18 +364,16 @@ def test_distance_expr_haversine_metric() -> None:
 
 def test_distance_expr_default_metric_equals_explicit_euclidean() -> None:
     pt = PointExpr(Literal(1), Literal(1))
-    assert evaluate(
-        DistanceExpr(ColumnRef("ubicacion"), pt), POINT_ROW, POINT_SCHEMA
-    ) == evaluate(
+    assert evaluate(DistanceExpr(ColumnRef("ubicacion"), pt), POINT_ROW, POINT_SCHEMA) == evaluate(
         DistanceExpr(ColumnRef("ubicacion"), pt, "euclidean"), POINT_ROW, POINT_SCHEMA
     )
 
 
 def test_distance_expr_metric_name_is_normalized_at_evaluation() -> None:
     pt = PointExpr(Literal(1), Literal(1))
-    assert evaluate(
-        DistanceExpr(pt, pt, "Haversine"), POINT_ROW, POINT_SCHEMA
-    ) == evaluate(DistanceExpr(pt, pt, "haversine"), POINT_ROW, POINT_SCHEMA)
+    assert evaluate(DistanceExpr(pt, pt, "Haversine"), POINT_ROW, POINT_SCHEMA) == evaluate(
+        DistanceExpr(pt, pt, "haversine"), POINT_ROW, POINT_SCHEMA
+    )
 
 
 def test_distance_expr_unknown_metric_fails_at_evaluation() -> None:

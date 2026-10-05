@@ -445,7 +445,9 @@ class _Parser:
 
     @staticmethod
     def _is_boolean_expression(expr: Expr) -> bool:
-        if isinstance(expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr, IntersectsExpr)):
+        if isinstance(
+            expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr, IntersectsExpr)
+        ):
             return True
         if isinstance(expr, Literal) and isinstance(expr.value, bool):
             return True

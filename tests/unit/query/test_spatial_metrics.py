@@ -35,15 +35,12 @@ def antipode(point: tuple[float, float]) -> tuple[float, float]:
     return (lon - 360.0 if lon > 180.0 else lon, -point[1])
 
 
-def spherical_law_of_cosines(
-    a: tuple[float, float], b: tuple[float, float]
-) -> float:
+def spherical_law_of_cosines(a: tuple[float, float], b: tuple[float, float]) -> float:
     """Independent geodesic oracle: cos(d/R) = sin(f1)sin(f2)+cos(f1)cos(f2)cos(l2-l1)."""
     lon1, lat1 = math.radians(a[0]), math.radians(a[1])
     lon2, lat2 = math.radians(b[0]), math.radians(b[1])
-    cos_central = (
-        math.sin(lat1) * math.sin(lat2)
-        + math.cos(lat1) * math.cos(lat2) * math.cos(lon2 - lon1)
+    cos_central = math.sin(lat1) * math.sin(lat2) + math.cos(lat1) * math.cos(lat2) * math.cos(
+        lon2 - lon1
     )
     return EARTH_RADIUS_KM * math.acos(min(1.0, max(-1.0, cos_central)))
 
@@ -77,9 +74,7 @@ def test_euclidean_is_symmetric() -> None:
 
 def test_euclidean_accepts_any_finite_plane_coordinates() -> None:
     # La euclidiana es una métrica de plano: no exige rango geográfico.
-    assert euclidean_distance((0.0, 0.0), (900.0, 250.0)) == pytest.approx(
-        math.hypot(900.0, 250.0)
-    )
+    assert euclidean_distance((0.0, 0.0), (900.0, 250.0)) == pytest.approx(math.hypot(900.0, 250.0))
 
 
 # --- haversine -------------------------------------------------------------

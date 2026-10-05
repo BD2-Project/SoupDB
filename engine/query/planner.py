@@ -49,8 +49,6 @@ from engine.query.ast import (
     InExpr,
     InsertStatement,
     IntersectsExpr,
-    IsNullExpr,
-    JoinClause,
     LikeExpr,
     LimitClause,
     Literal,
@@ -62,7 +60,6 @@ from engine.query.ast import (
     SelectColumn,
     SelectStatement,
     Statement,
-    UpdateStatement,
 )
 from engine.query.evaluator import Schema
 from engine.query.operators import (
@@ -543,7 +540,6 @@ def _spatial_radius_scan(
     )
 
 
-
 def _spatial_polygon_scan(
     catalog: Any,
     statement: SelectStatement,
@@ -557,8 +553,8 @@ def _spatial_polygon_scan(
         return None
     left, right = where.left, where.right
 
-    from engine.indexes.rtree.point import Point
     from engine.algorithms.spatial.geometry import Polygon2D
+
     def try_build_polygon(other_expr: Expr) -> Polygon2D | None:
         if not isinstance(other_expr, PolygonExpr):
             return None
@@ -572,8 +568,8 @@ def _spatial_polygon_scan(
                 return None
             verts.append((cx, cy))
         try:
-            from engine.indexes.rtree.point import Point
             from engine.algorithms.spatial.geometry import Polygon2D
+            from engine.indexes.rtree.point import Point
 
             return Polygon2D(tuple(Point(x, y) for x, y in verts))
         except Exception:
@@ -603,7 +599,6 @@ def _spatial_polygon_scan(
         column=column_ref.name,
         disk_manager=disk_manager,
     )
-
 
 
 def _spatial_index_for_column(

@@ -98,9 +98,7 @@ def test_parse_distance_without_metric_defaults_to_euclidean() -> None:
 
 
 def test_parse_distance_with_haversine_metric() -> None:
-    stmt = parse(
-        "SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2), 'haversine') < 100.0"
-    )
+    stmt = parse("SELECT * FROM t WHERE distance(ubicacion, POINT(1, 2), 'haversine') < 100.0")
     assert isinstance(stmt, SelectStatement)
     assert stmt.where == CompareExpr(
         DistanceExpr(ColumnRef("ubicacion"), PointExpr(Literal(1), Literal(2)), "haversine"),
