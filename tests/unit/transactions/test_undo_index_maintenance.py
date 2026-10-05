@@ -127,9 +127,10 @@ def test_rollback_of_an_insert_removes_the_spatial_entry() -> None:
     session = session_of(catalog)
     session.begin()
     session.execute("INSERT INTO lugares VALUES ('nuevo', POINT(1, 0))")
-    assert (1.0, 0.0) in indexed_points(catalog)
+    # POINT(1, 0) es latitud 1 y longitud 0: se indexa como Point(x=0, y=1).
+    assert (0.0, 1.0) in indexed_points(catalog)
     session.rollback()
-    assert (1.0, 0.0) not in indexed_points(catalog)
+    assert (0.0, 1.0) not in indexed_points(catalog)
     assert len(indexed_points(catalog)) == 2
     session.close()
 

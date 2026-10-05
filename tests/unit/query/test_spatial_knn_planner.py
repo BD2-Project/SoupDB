@@ -327,9 +327,11 @@ def test_matches_brute_force_oracle_on_tied_data() -> None:
     centers = ((0.0, 0.0), (1.0, 1.0), (-2.0, 0.5), (100.0, 100.0))
     for center in centers:
         for k in range(1, len(ROWS) + 2):
+            # El centro está en coordenadas internas (x, y); el literal SQL se
+            # escribe POINT(latitud, longitud), o sea al revés.
             sql = (
                 "SELECT nombre FROM lugares "
-                f"ORDER BY distance(ubicacion, POINT({center[0]}, {center[1]})) LIMIT {k}"
+                f"ORDER BY distance(ubicacion, POINT({center[1]}, {center[0]})) LIMIT {k}"
             )
             indexed = names(run(sql, make_catalog(index=True)))
             scanned = names(run(sql, make_catalog(index=False)))
@@ -352,7 +354,7 @@ def test_matches_brute_force_oracle_on_random_data() -> None:
         cy = round(rng.uniform(-50.0, 50.0), 3)
         k = rng.randint(1, 12)
         sql = (
-            f"SELECT nombre FROM lugares ORDER BY distance(ubicacion, POINT({cx}, {cy})) LIMIT {k}"
+            f"SELECT nombre FROM lugares ORDER BY distance(ubicacion, POINT({cy}, {cx})) LIMIT {k}"
         )
         expected = brute_force_knn(rows, (cx, cy), k)
         assert names(run(sql, make_catalog(index=True, rows=rows))) == expected

@@ -4,7 +4,7 @@ import random
 import pytest
 
 from benchmarks.spatial_baseline import (
-    EARTH_RADIUS_KM,
+    EARTH_RADIUS_M,
     EUCLIDEAN_DISTANCE,
     HAVERSINE_DISTANCE,
     METRIC_DISTANCES,
@@ -27,7 +27,7 @@ def haversine_oracle(a: Point, b: Point) -> float:
     phi1, phi2 = math.radians(a.y), math.radians(b.y)
     d_phi, d_lambda = phi2 - phi1, math.radians(b.x - a.x)
     h = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
-    return 2 * EARTH_RADIUS_KM * math.atan2(math.sqrt(h), math.sqrt(1 - h))
+    return 2 * EARTH_RADIUS_M * math.atan2(math.sqrt(h), math.sqrt(1 - h))
 
 
 class CountingDistance:
@@ -248,11 +248,11 @@ CITIES = {
 CITY_SCAN = SequentialSpatialScan((point, RID(i, 0)) for i, point in enumerate(CITIES.values()))
 MONTEVIDEO = CITY_SCAN.knn(Point(-56.1645, -34.9011), 1, HAVERSINE_DISTANCE)[0]
 
-#: Distancias de referencia desde Montevideo (km, radio medio 6371.0088).
-MVD_BUE_KM = 205.23235938356873
-MVD_SCL_KM = 1340.9793901132298
-MVD_LIS_KM = 9508.412014033962
-MVD_PAR_KM = 10960.801628543702
+#: Distancias de referencia desde Montevideo (metros, radio medio 6 371 008,8).
+MVD_BUE_M = 205_232.35938356873
+MVD_SCL_M = 1_340_979.3901132298
+MVD_LIS_M = 9_508_412.014033962
+MVD_PAR_M = 10_960_801.628543702
 
 
 def test_baseline_exposes_both_metrics() -> None:
@@ -273,19 +273,19 @@ def test_baseline_shares_the_euclidean_convention_with_the_engine() -> None:
             assert EUCLIDEAN_DISTANCE(a, b) == euclidean(a, b)
 
 
-def test_haversine_radius_in_kilometres() -> None:
-    inside = CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 300.0, HAVERSINE_DISTANCE)
+def test_haversine_radius_in_metres() -> None:
+    inside = CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 300_000.0, HAVERSINE_DISTANCE)
     assert inside == [MONTEVIDEO, RID(1, 0)]
-    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 1000.0, HAVERSINE_DISTANCE) == [
+    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 1_000_000.0, HAVERSINE_DISTANCE) == [
         MONTEVIDEO,
         RID(1, 0),
     ]
-    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 2000.0, HAVERSINE_DISTANCE) == [
+    assert CITY_SCAN.radius_search(Point(-56.1645, -34.9011), 2_000_000.0, HAVERSINE_DISTANCE) == [
         MONTEVIDEO,
         RID(1, 0),
         RID(2, 0),
     ]
-    assert CITY_SCAN.radius_search(Point(0, 60), 1.0, HAVERSINE_DISTANCE) == []
+    assert CITY_SCAN.radius_search(Point(0, 60), 1_000.0, HAVERSINE_DISTANCE) == []
 
 
 def test_haversine_radius_zero_matches_only_the_same_point() -> None:
@@ -297,7 +297,7 @@ def test_haversine_antipodal_pair_at_half_circumference() -> None:
     antipodal = SequentialSpatialScan(
         [(Point(0, 0), RID(0, 0)), (Point(180, 0), RID(1, 0)), (Point(-180, 0), RID(2, 0))]
     )
-    half_circumference = math.pi * EARTH_RADIUS_KM
+    half_circumference = math.pi * EARTH_RADIUS_M
     # Los tres son antipodales del origen: los tres caen dentro del radio.
     assert antipodal.radius_search(Point(0, 0), half_circumference, HAVERSINE_DISTANCE) == [
         RID(0, 0),

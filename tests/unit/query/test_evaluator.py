@@ -363,7 +363,7 @@ def test_distance_expr_haversine_metric() -> None:
     a = PointExpr(Literal(-56.1645), Literal(-34.9011))
     b = PointExpr(Literal(-58.3816), Literal(-34.6037))
     assert evaluate(DistanceExpr(a, b, "haversine"), POINT_ROW, POINT_SCHEMA) == pytest.approx(
-        205.23235938356873
+        205_232.35938356873
     )
     assert evaluate(DistanceExpr(a, a, "haversine"), POINT_ROW, POINT_SCHEMA) == 0.0
 

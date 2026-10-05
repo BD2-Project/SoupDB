@@ -34,7 +34,8 @@ def test_insert_point_value_roundtrips() -> None:
     from engine.common.record import decode_row
 
     decoded = [decode_row(record.data, LUGARES) for record in rows]
-    assert decoded[-1] == ("D", (1.0, 2.0))
+    # POINT(1, 2) es latitud 1 y longitud 2: se guarda como Point(x=2, y=1).
+    assert decoded[-1] == ("D", (2.0, 1.0))
 
 
 def test_where_distance_filters_by_radius() -> None:
