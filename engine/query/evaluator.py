@@ -188,11 +188,23 @@ def _column_value(name: str, row: Row, schema: Schema) -> object:
     raise QueryExecutionError(f"unknown column {name!r}")
 
 
+def _is_number(value: object) -> bool:
+    """INT y FLOAT son comparables entre sí; BOOL no, pese a heredar de int."""
+    return type(value) is int or type(value) is float
+
+
 def _require_same_type(left: object, right: object) -> None:
-    if type(left) is not type(right):
-        raise QueryExecutionError(
-            f"cannot mix {type(left).__name__} and {type(right).__name__} values"
-        )
+    if type(left) is type(right):
+        return
+
+    # Un radio se escribe `< 5000`, no `< 5000.0`, y `distance(...)` siempre
+    # devuelve float: sin esta promoción el ejemplo del enunciado falla.
+    if _is_number(left) and _is_number(right):
+        return
+
+    raise QueryExecutionError(
+        f"cannot mix {type(left).__name__} and {type(right).__name__} values"
+    )
 
 
 def _require_bool(value: object) -> bool:
