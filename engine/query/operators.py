@@ -36,6 +36,7 @@ from engine.query.ast import (
     SelectColumn,
 )
 from engine.query.evaluator import Schema, evaluate, evaluate_aggregate
+from engine.query.format_expr import format_expr
 from engine.query.spatial_metrics import EUCLIDEAN
 from engine.storage.base import FileOrganization
 from engine.storage.disk_manager import DiskManager
@@ -559,7 +560,7 @@ class Filter(_VolcanoBase):
                 return record
 
     def explain(self) -> PlanNode:
-        return self._plan("Filter", {"predicate": str(self._predicate)})
+        return self._plan("Filter", {"predicate": format_expr(self._predicate)})
 
 
 _BOOL_EXPRS = (BetweenExpr, CompareExpr, InExpr, LikeExpr, LogicalExpr, NotExpr)
@@ -769,7 +770,7 @@ class Sort(_VolcanoBase):
         super().close()
 
     def explain(self) -> PlanNode:
-        keys = [str(item.expr) for item in self._order_by]
+        keys = [format_expr(item.expr) for item in self._order_by]
         return self._plan("Sort", {"keys": keys})
 
 
@@ -1044,7 +1045,7 @@ class Aggregate(_VolcanoBase):
 
     def explain(self) -> PlanNode:
         detail = {
-            "group_by": [str(expr) for expr in self._group_by],
+            "group_by": [format_expr(expr) for expr in self._group_by],
             "aggregates": [expr.name for expr in self._aggregates],
         }
         return self._plan("Aggregate", detail)
