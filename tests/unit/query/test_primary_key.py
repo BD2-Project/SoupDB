@@ -81,3 +81,31 @@ def test_the_evaluation_script_runs(tmp_path) -> None:
         "EXPLAIN ANALYZE SELECT * FROM alumnos WHERE nota >= 14 ORDER BY id", catalog
     ).rows
     catalog.close()
+
+
+def test_polygon_vertices_use_the_same_order_as_point(tmp_path) -> None:
+    """Los vértices van `(latitud, longitud)`, igual que el literal POINT.
+
+    Tener dos órdenes distintos en la misma consulta sería un error silencioso:
+    ninguna de las dos formas falla, el polígono simplemente cae en otro lugar.
+    """
+    catalog = Catalog(tmp_path)
+    execute_sql("CREATE TABLE lugares (nombre TEXT, ubicacion POINT)", catalog)
+    # Lima: latitud -12.05, longitud -77.04.
+    execute_sql("INSERT INTO lugares VALUES ('Lima', POINT(-12.05, -77.04))", catalog)
+
+    dentro = execute_sql(
+        "SELECT nombre FROM lugares WHERE intersects(ubicacion, "
+        "POLYGON((-12.1, -77.1), (-12.1, -77.0), (-12.0, -77.0), (-12.0, -77.1)))",
+        catalog,
+    )
+    assert dentro.rows == (("Lima",),)
+
+    # El mismo polígono con las coordenadas intercambiadas no contiene el punto.
+    fuera = execute_sql(
+        "SELECT nombre FROM lugares WHERE intersects(ubicacion, "
+        "POLYGON((-77.1, -12.1), (-77.0, -12.1), (-77.0, -12.0), (-77.1, -12.0)))",
+        catalog,
+    )
+    assert fuera.rows == ()
+    catalog.close()

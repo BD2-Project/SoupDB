@@ -627,20 +627,26 @@ class _Parser:
             raise QueryParseError(f"{exc} at position {token.position}") from exc
 
     def _parse_polygon_expr(self) -> PolygonExpr:
+        """``POLYGON((lat, lon), (lat, lon), ...)``.
+
+        Los vértices llevan el mismo orden que el literal ``POINT``: latitud
+        primero. Tener dos órdenes en la misma consulta sería un error silencioso
+        garantizado.
+        """
         self._advance()
         self._expect_kind(TokenKind.LPAREN)
         vertices: list[Expr] = []
         self._expect_kind(TokenKind.LPAREN)
-        x = self._parse_expression()
-        self._expect_kind(TokenKind.COMMA)
         y = self._parse_expression()
+        self._expect_kind(TokenKind.COMMA)
+        x = self._parse_expression()
         self._expect_kind(TokenKind.RPAREN)
         vertices.append(PointExpr(x=x, y=y))
         while self._match_comma():
             self._expect_kind(TokenKind.LPAREN)
-            x = self._parse_expression()
-            self._expect_kind(TokenKind.COMMA)
             y = self._parse_expression()
+            self._expect_kind(TokenKind.COMMA)
+            x = self._parse_expression()
             self._expect_kind(TokenKind.RPAREN)
             vertices.append(PointExpr(x=x, y=y))
         self._expect_kind(TokenKind.RPAREN)
