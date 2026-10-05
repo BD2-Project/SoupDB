@@ -202,9 +202,7 @@ def _require_same_type(left: object, right: object) -> None:
     if _is_number(left) and _is_number(right):
         return
 
-    raise QueryExecutionError(
-        f"cannot mix {type(left).__name__} and {type(right).__name__} values"
-    )
+    raise QueryExecutionError(f"cannot mix {type(left).__name__} and {type(right).__name__} values")
 
 
 def _require_bool(value: object) -> bool:
