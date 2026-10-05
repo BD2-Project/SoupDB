@@ -33,6 +33,7 @@ from engine.indexes.rtree import RTree
 from engine.storage.base import FileOrganization
 from engine.storage.file_manager import FileManager
 from engine.storage.heap_file import HeapFile
+from engine.storage.io_counters import AggregateIOCounters
 from engine.storage.sequential_file import SequentialFile
 
 SYS_TABLES_SCHEMA = (
@@ -116,6 +117,17 @@ class Catalog:
         self._tables: dict[str, _Table] = {}
         self._seed_sys_metadata()
         self._load()
+        self._io = AggregateIOCounters(lambda: self._files.disk_managers)
+
+    @property
+    def disk_manager(self) -> AggregateIOCounters:
+        """Contadores de E/S sumados sobre todos los archivos abiertos.
+
+        El planner los consulta para calcular, por operador, cuántas páginas se
+        tocaron. Sin esto el plan reporta cero en todos los nodos, que es
+        justamente la métrica que el curso evalúa.
+        """
+        return self._io
 
     def close(self) -> None:
         """Flush all backing files."""

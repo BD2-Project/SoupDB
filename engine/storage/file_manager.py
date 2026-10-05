@@ -30,6 +30,11 @@ class FileManager:
     def page_size(self) -> int:
         return self._page_size
 
+    @property
+    def disk_managers(self) -> tuple[DiskManager, ...]:
+        """Los DiskManager abiertos, para sumar sus contadores de E/S."""
+        return tuple(disk for disk, _buffers in self._storages.values())
+
     def storage(self, file_id: str) -> tuple[DiskManager, BufferManager]:
         """Return (DiskManager, BufferManager) for a logical file, cached per name."""
         cached = self._storages.get(file_id)
