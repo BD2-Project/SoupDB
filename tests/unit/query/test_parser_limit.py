@@ -24,9 +24,7 @@ def test_select_limit_after_order_by() -> None:
 
 
 def test_select_limit_after_where_and_group_by() -> None:
-    stmt = parse(
-        "SELECT venue, COUNT(*) FROM papers WHERE anio > 2010 GROUP BY venue LIMIT 5"
-    )
+    stmt = parse("SELECT venue, COUNT(*) FROM papers WHERE anio > 2010 GROUP BY venue LIMIT 5")
     assert stmt.limit == LimitClause(limit=Literal(5), offset=None)
 
 

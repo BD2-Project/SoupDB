@@ -2,7 +2,14 @@
 
 import pytest
 
-from engine.query.ast import ColumnRef, CompareExpr, JoinClause, Literal, LogicalExpr, SelectStatement
+from engine.query.ast import (
+    ColumnRef,
+    CompareExpr,
+    JoinClause,
+    Literal,
+    LogicalExpr,
+    SelectStatement,
+)
 from engine.query.errors import QueryParseError
 from engine.query.parser import parse
 
@@ -30,9 +37,7 @@ def test_select_inner_join_keyword_is_optional() -> None:
 
 def test_select_multiple_chained_joins() -> None:
     stmt = parse(
-        "SELECT * FROM papers "
-        "JOIN authors ON author = paper "
-        "JOIN venues ON venues_id = author"
+        "SELECT * FROM papers JOIN authors ON author = paper JOIN venues ON venues_id = author"
     )
     assert stmt.joins == (
         JoinClause("authors", CompareExpr(ColumnRef("author"), "=", ColumnRef("paper"))),

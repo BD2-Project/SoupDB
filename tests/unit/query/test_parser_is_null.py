@@ -3,6 +3,7 @@
 import pytest
 
 from engine.query.ast import ColumnRef, IsNullExpr, LogicalExpr, SelectColumn, SelectStatement
+from engine.query.errors import QueryParseError
 from engine.query.parser import parse
 
 
@@ -35,11 +36,9 @@ def test_is_null_works_against_arithmetic_operand() -> None:
     stmt = parse("SELECT * FROM papers WHERE (anio + 1) IS NULL")
     from engine.query.ast import BinaryExpr, Literal
 
-    assert stmt.where == IsNullExpr(
-        BinaryExpr(ColumnRef("anio"), "+", Literal(1)), negated=False
-    )
+    assert stmt.where == IsNullExpr(BinaryExpr(ColumnRef("anio"), "+", Literal(1)), negated=False)
 
 
 def test_is_without_null_raises() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(QueryParseError):
         parse("SELECT * FROM papers WHERE anio IS mango")

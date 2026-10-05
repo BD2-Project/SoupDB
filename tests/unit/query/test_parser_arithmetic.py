@@ -13,9 +13,9 @@ from engine.query.ast import (
     CompareExpr,
     Literal,
     NotExpr,
-    SelectColumn,
     SelectStatement,
 )
+from engine.query.errors import QueryParseError
 from engine.query.parser import parse
 
 
@@ -107,5 +107,5 @@ def test_select_star_still_maps_to_empty_columns() -> None:
 
 
 def test_select_two_columns_with_star_between_raises() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(QueryParseError):
         parse("SELECT id, * FROM papers")

@@ -1,7 +1,5 @@
 """Tests for the SQL parser: NULL literal in expressions."""
 
-import pytest
-
 from engine.query.ast import (
     ColumnRef,
     CompareExpr,
