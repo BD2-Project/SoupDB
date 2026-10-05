@@ -16,6 +16,7 @@ class ColumnType(Enum):
     VARCHAR = "VARCHAR"
     TEXT = "TEXT"
     BOOL = "BOOL"
+    POINT = "POINT"
 
 
 @dataclass(frozen=True)

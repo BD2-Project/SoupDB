@@ -9,18 +9,24 @@ from typing import Any
 
 from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
+from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index
 from engine.query.ast import (
+    BeginTransactionStatement,
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
     DropIndexStatement,
     DropTableStatement,
+    EndTransactionStatement,
+    ExplainStatement,
     InsertStatement,
     SelectStatement,
+    Statement,
 )
 from engine.query.evaluator import Schema, evaluate
-from engine.query.planner import Plan
+from engine.query.operators import PlanNode
+from engine.query.planner import Plan, is_spatial_index
 from engine.query.resultset import ResultSet
 
 
@@ -50,7 +56,33 @@ def execute(plan: Plan, catalog: Any) -> ResultSet:
     if isinstance(statement, DropIndexStatement):
         catalog.drop_index(statement.index_name)
         return ResultSet(columns=())
+    if isinstance(statement, ExplainStatement):
+        return _execute_explain(plan, catalog)
+    if isinstance(statement, (BeginTransactionStatement, EndTransactionStatement)):
+        raise _transaction_control_error(statement)
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
+
+
+def _transaction_control_error(statement: Statement) -> QueryExecutionError:
+    """Refuse to run transaction control outside a transactional session.
+
+    Reaching this point means the statement bypassed
+    :meth:`engine.transactions.session.TransactionalSession.execute_statement`,
+    which is the only place that owns the thread-local transaction. A silent
+    no-op would be the worst outcome here: the caller would read ``BEGIN
+    TRANSACTION`` as "my statements are now atomic", while the engine had
+    already auto-committed each one individually, so a failure in the middle
+    would leave the group half applied. Failing loudly keeps the illusion of
+    atomicity from forming in the first place.
+    """
+    name = "BEGIN" if isinstance(statement, BeginTransactionStatement) else "END"
+    return QueryExecutionError(
+        f"{name} TRANSACTION cannot be executed here: transaction boundaries are "
+        "held by the transactional session, not by the statement executor. Send it "
+        "through TransactionalSession.execute() (engine.transactions.session) so the "
+        "transaction state is tracked; running it here would leave every statement "
+        "auto-committed"
+    )
 
 
 def _execute_select(plan: Plan) -> ResultSet:
@@ -83,6 +115,8 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
         rid = file_org.insert(Record(data=encode_row(tuple(values), schema)))
         for position, column in enumerate(schema):
             for index in _indexes_for_column(catalog, statement.table, column.name).values():
+                if _skip_index_key(index, values[position]):
+                    continue
                 index.insert(values[position], rid)
         affected += 1
     return ResultSet(columns=(), affected=affected)
@@ -102,6 +136,8 @@ def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
             continue
         for position, column in enumerate(schema):
             for index in _indexes_for_column(catalog, statement.table, column.name).values():
+                if _skip_index_key(index, row[position]):
+                    continue
                 index.remove(row[position], rid)
         affected += 1
     return ResultSet(columns=(), affected=affected)
@@ -115,8 +151,96 @@ def _indexes_for_column(catalog: Any, table: str, column: str) -> dict[str, Inde
         return {}
 
 
+def _skip_index_key(index: Index, value: object) -> bool:
+    """Whether a NULL value must stay out of ``index``.
+
+    A spatial index has no way to store a NULL coordinate: it is not a location,
+    so there is no point to insert, search or remove, and the structure rejects
+    the key outright. Keeping the row out of the index is what lets a NULL row
+    coexist with the index - the radius query simply has no candidate for it.
+    Scalar indexes keep their current behaviour untouched here.
+    """
+    return value is None and is_spatial_index(index)
+
+
 def _column_index(schema: Schema, name: str) -> int:
     for index, column in enumerate(schema):
         if column.name == name:
             return index
     raise QueryExecutionError(f"unknown column {name!r}")
+
+
+def _execute_explain(plan: Plan, catalog: Any) -> ResultSet:
+    """Describe an execution plan, optionally running it first.
+
+    Plain ``EXPLAIN`` renders the operator tree without executing it, so every
+    metric is zero. ``EXPLAIN ANALYZE`` drains the tree (or runs DML/DDL) and
+    reports the real rows, wall-clock time and disk I/O per node.
+    """
+    statement = plan.statement
+    if not isinstance(statement, ExplainStatement):
+        raise QueryExecutionError("explain executor requires an ExplainStatement")
+    if statement.statement is None:
+        raise QueryExecutionError("EXPLAIN requires an inner statement")
+    if statement.analyze:
+        node = _explain_analyze(statement, plan, catalog)
+    else:
+        node = _explain_describe(plan)
+    lines: list[str] = []
+    _render_plan(node, 0, lines)
+    columns = (ColumnDef("QUERY PLAN", ColumnType.TEXT),)
+    return ResultSet(columns=columns, rows=tuple((line,) for line in lines))
+
+
+def _explain_describe(plan: Plan) -> PlanNode:
+    """Render the operator tree without executing it (all metrics zero)."""
+    if plan.root is not None:
+        return plan.root.explain()
+    statement = plan.statement
+    if not isinstance(statement, ExplainStatement) or statement.statement is None:
+        return _statement_node(statement)
+    return _statement_node(statement.statement)
+
+
+def _explain_analyze(statement: ExplainStatement, plan: Plan, catalog: Any) -> PlanNode:
+    """Execute the inner statement, then render the plan with real metrics."""
+    inner = statement.statement
+    if inner is None:
+        raise QueryExecutionError("EXPLAIN requires an inner statement")
+    if plan.root is not None:
+        plan.root.open()
+        try:
+            try:
+                while plan.root.next() is not None:
+                    pass
+            finally:
+                node = plan.root.explain()
+        finally:
+            plan.root.close()
+        return node
+    result = execute(Plan(statement=inner), catalog)
+    node = _statement_node(inner)
+    node.rows = result.affected
+    node.elapsed_ms = 0.0
+    return node
+
+
+def _statement_node(statement: Statement) -> PlanNode:
+    """Leaf plan node describing a statement executed directly by the executor."""
+    op = type(statement).__name__.removesuffix("Statement")
+    detail: dict[str, Any] = {}
+    table = getattr(statement, "table", None)
+    if table is not None:
+        detail["table"] = table
+    return PlanNode(op=op, detail=detail, rows=0, elapsed_ms=0.0, disk_reads=0, disk_writes=0)
+
+
+def _render_plan(node: PlanNode, depth: int, lines: list[str]) -> None:
+    indent = "  " * depth
+    detail = f" {node.detail}" if node.detail else ""
+    lines.append(
+        f"{indent}-> {node.op} rows={node.rows} elapsed_ms={node.elapsed_ms} "
+        f"disk_reads={node.disk_reads} disk_writes={node.disk_writes}{detail}"
+    )
+    for child in node.children:
+        _render_plan(child, depth + 1, lines)

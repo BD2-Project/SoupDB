@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 
-from engine.indexes.rtree import MBR, Point
+from engine.indexes.rtree.mbr import MBR
+from engine.indexes.rtree.point import Point
 
 
 def _finite_number(value: object, *, name: str) -> float:

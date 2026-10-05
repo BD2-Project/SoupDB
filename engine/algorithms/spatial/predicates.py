@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from engine.indexes.rtree import Point
+from engine.indexes.rtree.point import Point
 
 from .geometry import Polygon2D
 from .validation import validate_cartesian_point

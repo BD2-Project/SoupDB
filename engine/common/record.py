@@ -1,10 +1,12 @@
 """Record serialization / deserialization.
 
 Rows are encoded to a packed byte blob and stored in :class:`Record.data`.
-Layout: fixed types use a fixed size (INT 4 bytes, FLOAT 8 bytes, BOOL 1 byte)
-and variable-length types (VARCHAR/TEXT) are stored as a ``uint32`` length
-prefix followed by the UTF-8 bytes. All integers are little-endian; no
-alignment. Empty rows encode to ``b""``.
+Each column starts with a flag byte: ``0x00`` marks NULL and then no column
+bytes follow. Otherwise the column payload follows the flag: INT 4 bytes,
+FLOAT 8 bytes, POINT 16 bytes (two little-endian doubles), BOOL 1 byte
+(``0x01`` True, ``0x02`` False), and VARCHAR/TEXT as a ``uint32`` length prefix
+followed by the UTF-8 bytes. All integers are little-endian; no alignment.
+Empty rows encode to ``b""``.
 """
 
 import struct
@@ -36,6 +38,10 @@ def encode_row(row: tuple[object, ...], columns: tuple[ColumnDef, ...]) -> bytes
 
 def encode_value(out: bytearray, value: object, column: ColumnDef) -> None:
     """Encode a single column value, appending its bytes to ``out``."""
+    if value is None:
+        out += b"\x00"
+        return
+
     if column.type_name is ColumnType.INT:
         if type(value) is not int:
             raise QueryExecutionError(
@@ -45,6 +51,7 @@ def encode_value(out: bytearray, value: object, column: ColumnDef) -> None:
             raise QueryExecutionError(
                 f"column {column.name!r} expects a signed 32-bit INT, got {value}"
             )
+        out += b"\x01"
         out += value.to_bytes(4, "little", signed=True)
         return
 
@@ -53,6 +60,7 @@ def encode_value(out: bytearray, value: object, column: ColumnDef) -> None:
             raise QueryExecutionError(
                 f"column {column.name!r} expects FLOAT, got {type(value).__name__}"
             )
+        out += b"\x01"
         out += struct.pack("<d", value)
         return
 
@@ -61,10 +69,21 @@ def encode_value(out: bytearray, value: object, column: ColumnDef) -> None:
             raise QueryExecutionError(
                 f"column {column.name!r} expects BOOL, got {type(value).__name__}"
             )
-        out += b"\x01" if value else b"\x00"
+        out += b"\x01" if value else b"\x02"
+        return
+
+    if column.type_name is ColumnType.POINT:
+        if not _is_point(value):
+            raise QueryExecutionError(
+                f"column {column.name!r} expects POINT, got {type(value).__name__}"
+            )
+        x, y = value
+        out += b"\x01"
+        out += struct.pack("<dd", float(x), float(y))
         return
 
     if column.type_name in (ColumnType.VARCHAR, ColumnType.TEXT):
+        out += b"\x01"
         encode_text(out, value, column)
         return
 
@@ -98,23 +117,40 @@ def decode_row(data: bytes, columns: tuple[ColumnDef, ...]) -> tuple[object, ...
 
 def decode_value(data: bytes, offset: int, column: ColumnDef) -> tuple[object, int]:
     """Decode one column value from ``data`` at ``offset``; returns value and new offset."""
+    flag, offset = _take_bytes(data, offset, 1)
+    if flag == b"\x00":
+        return None, offset
+
     if column.type_name is ColumnType.INT:
+        if flag != b"\x01":
+            raise QueryExecutionError(f"invalid INT flag byte {flag!r}")
         value, offset = _take_bytes(data, offset, 4)
         return int.from_bytes(value, "little", signed=True), offset
 
     if column.type_name is ColumnType.FLOAT:
+        if flag != b"\x01":
+            raise QueryExecutionError(f"invalid FLOAT flag byte {flag!r}")
         value, offset = _take_bytes(data, offset, 8)
         return struct.unpack("<d", value)[0], offset
 
     if column.type_name is ColumnType.BOOL:
-        value, offset = _take_bytes(data, offset, 1)
-        if value == b"\x00":
-            return False, offset
-        if value == b"\x01":
+        if flag == b"\x01":
             return True, offset
-        raise QueryExecutionError("invalid BOOL byte")
+        if flag == b"\x02":
+            return False, offset
+        raise QueryExecutionError(f"invalid BOOL byte {flag!r}")
+
+    if column.type_name is ColumnType.POINT:
+        if flag != b"\x01":
+            raise QueryExecutionError(f"invalid POINT flag byte {flag!r}")
+        raw_x, offset = _take_bytes(data, offset, 8)
+        raw_y, offset = _take_bytes(data, offset, 8)
+        x, y = struct.unpack("<dd", raw_x + raw_y)
+        return (x, y), offset
 
     if column.type_name in (ColumnType.VARCHAR, ColumnType.TEXT):
+        if flag != b"\x01":
+            raise QueryExecutionError(f"invalid text flag byte {flag!r}")
         return decode_text(data, offset)
 
     raise QueryExecutionError(f"unsupported column type {column.type_name!r}")
@@ -128,6 +164,12 @@ def decode_text(data: bytes, offset: int) -> tuple[object, int]:
         return raw.decode("utf-8"), offset
     except UnicodeDecodeError as exc:
         raise QueryExecutionError("invalid UTF-8 in text column") from exc
+
+
+def _is_point(value: object) -> bool:
+    if type(value) is not tuple or len(value) != 2:
+        return False
+    return all(type(coord) in (int, float) for coord in value)
 
 
 def _take_bytes(data: bytes, offset: int, size: int) -> tuple[bytes, int]:

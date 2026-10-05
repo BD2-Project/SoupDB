@@ -12,6 +12,10 @@ Frame layout (big-endian):
 Requests: PING 0x01, BEGIN 0x03, COMMIT 0x04, ROLLBACK 0x05, QUERY 0x06.
 Responses: PONG 0x02, OK 0x10, RESULT 0x11, ERROR 0x12.
 
+Tipos de columna: INT 0x01, FLOAT 0x02, VARCHAR 0x03, TEXT 0x04, BOOL 0x05,
+POINT 0x06. Tags de valor: NULL 0x00, INT 0x01, FLOAT 0x02, TEXT 0x03, BOOL 0x04,
+POINT 0x05 (dos doubles big-endian, x = longitud e y = latitud).
+
 Payload encodings are documented in ``docs/protocolo.md``; both codecs
 (Python here, Rust in ``rsoup/src/protocol.rs``) implement the same contract.
 """
@@ -60,6 +64,7 @@ TAG_INT = 0x01
 TAG_FLOAT = 0x02
 TAG_TEXT = 0x03
 TAG_BOOL = 0x04
+TAG_POINT = 0x05
 
 # Códigos de tipo de columna en RESULT
 TYPE_INT = 0x01
@@ -67,6 +72,7 @@ TYPE_FLOAT = 0x02
 TYPE_VARCHAR = 0x03
 TYPE_TEXT = 0x04
 TYPE_BOOL = 0x05
+TYPE_POINT = 0x06
 
 # Códigos de error en RESULT/ERROR
 ERR_GENERIC = 0x00
@@ -215,8 +221,23 @@ def _encode_value(out: bytearray, value: Any) -> None:
     elif isinstance(value, str):
         data = value.encode("utf-8")
         out += struct.pack(">BH", TAG_TEXT, len(data)) + data
+    elif _is_point(value):
+        # Dos doubles en el mismo orden que Point(x, y): x es longitud, y latitud.
+        out += struct.pack(">Bdd", TAG_POINT, float(value[0]), float(value[1]))
     else:
         raise ProtocolError(f"cannot encode value {value!r}")
+
+
+def _is_point(value: object) -> bool:
+    """Un POINT llega del motor como la tupla (x, y) que guarda el registro."""
+    return (
+        isinstance(value, tuple)
+        and len(value) == 2
+        and all(
+            isinstance(coordinate, (int, float)) and not isinstance(coordinate, bool)
+            for coordinate in value
+        )
+    )
 
 
 def _decode_value(payload: bytes, offset: int) -> tuple[object, int]:
@@ -236,6 +257,9 @@ def _decode_value(payload: bytes, offset: int) -> tuple[object, int]:
         return payload[offset : offset + length].decode("utf-8"), offset + length
     if tag == TAG_BOOL:
         return bool(payload[offset]), offset + 1
+    if tag == TAG_POINT:
+        x, y = struct.unpack_from(">dd", payload, offset)
+        return (x, y), offset + 16
     raise ProtocolError(f"unknown value tag {tag}")
 
 
@@ -246,6 +270,7 @@ def _type_code(type_name: ColumnType) -> int:
         ColumnType.VARCHAR: TYPE_VARCHAR,
         ColumnType.TEXT: TYPE_TEXT,
         ColumnType.BOOL: TYPE_BOOL,
+        ColumnType.POINT: TYPE_POINT,
     }[type_name]
 
 
@@ -256,6 +281,7 @@ def _column_type(code: int) -> ColumnType:
         TYPE_VARCHAR: ColumnType.VARCHAR,
         TYPE_TEXT: ColumnType.TEXT,
         TYPE_BOOL: ColumnType.BOOL,
+        TYPE_POINT: ColumnType.POINT,
     }[code]
 
 

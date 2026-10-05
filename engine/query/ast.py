@@ -41,6 +41,23 @@ class CompareExpr(Expr):
 
 
 @dataclass(frozen=True)
+class BinaryExpr(Expr):
+    """Arithmetic operation ``left OP right`` with OP in ``+ - * / %``."""
+
+    left: Expr
+    op: str
+    right: Expr
+
+
+@dataclass(frozen=True)
+class IsNullExpr(Expr):
+    """Null check ``value IS [NOT] NULL``."""
+
+    value: Expr
+    negated: bool = False
+
+
+@dataclass(frozen=True)
 class LogicalExpr(Expr):
     """Boolean combination ``left AND right`` or ``left OR right``."""
 
@@ -83,14 +100,58 @@ class LikeExpr(Expr):
 
 @dataclass(frozen=True)
 class FunctionExpr(Expr):
-    """Aggregate or function call such as ``COUNT(*)`` or ``SUM(anio)``.
-
-    ``arg`` is None when the function takes no argument (e.g. ``COUNT(*)``).
-    """
+    """``arg`` is None when the function takes no argument (e.g. ``COUNT(*)``)."""
 
     name: str
     arg: Expr | None
     distinct: bool = False
+
+
+@dataclass(frozen=True)
+class PointExpr(Expr):
+    """Spatial constructor ``POINT(x, y)``."""
+
+    x: Expr
+    y: Expr
+
+
+@dataclass(frozen=True)
+class DistanceExpr(Expr):
+    """``distance(left, right)`` or ``distance(left, right, 'metric')``.
+
+    ``metric`` names the distance metric as a string literal and defaults to
+    ``'euclidean'``: ``'euclidean'`` is the plane distance in coordinate units
+    and ``'haversine'`` the geodesic distance in kilometres (see
+    :mod:`engine.query.spatial_metrics`). The parser stores the canonical
+    lowercase name, so ``DistanceExpr`` with two arguments stays equal to the
+    same node built explicitly with ``metric='euclidean'``.
+    """
+
+    left: Expr
+    right: Expr
+    metric: str = "euclidean"
+
+
+@dataclass(frozen=True)
+class PolygonExpr(Expr):
+    """Spatial constructor ``POLYGON((x1, y1), (x2, y2), ..., (xn, yn))``.
+
+    Vertices are stored as expressions so they may be evaluated per row or be
+    literals.
+    """
+
+    vertices: tuple[Expr, ...]
+
+
+@dataclass(frozen=True)
+class IntersectsExpr(Expr):
+    """Spatial predicate ``intersects(geom_a, geom_b)``.
+
+    Both arguments are geometry expressions (e.g. POINT, POLYGON).
+    """
+
+    left: Expr
+    right: Expr
 
 
 @dataclass(frozen=True)
@@ -110,8 +171,32 @@ class OrderByItem:
 
 
 @dataclass(frozen=True)
+class HavingClause:
+    """Filter applied to grouped rows, ``HAVING expr``."""
+
+    expr: Expr
+
+
+@dataclass(frozen=True)
+class LimitClause:
+    """``LIMIT n`` with optional ``OFFSET m``."""
+
+    limit: Literal
+    offset: Literal | None = None
+
+
+@dataclass(frozen=True)
+class JoinClause:
+    """A JOIN against ``table`` on predicate ``on``."""
+
+    table: str
+    on: Expr
+
+
+@dataclass(frozen=True)
 class SelectStatement(Statement):
-    """A SELECT query with optional WHERE, GROUP BY and ORDER BY clauses."""
+    """A SELECT query with optional WHERE, GROUP BY, HAVING, ORDER BY,
+    LIMIT and JOIN clauses."""
 
     columns: tuple[SelectColumn, ...]
     table: str
@@ -119,6 +204,9 @@ class SelectStatement(Statement):
     group_by: tuple[Expr, ...] = ()
     order_by: tuple[OrderByItem, ...] = ()
     distinct: bool = False
+    having: HavingClause | None = None
+    limit: LimitClause | None = None
+    joins: tuple[JoinClause, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -136,6 +224,29 @@ class DeleteStatement(Statement):
 
     table: str
     where: Expr | None
+
+
+@dataclass(frozen=True)
+class UpdateStatement(Statement):
+    """``UPDATE table SET col = expr, ... [WHERE condition]``."""
+
+    table: str
+    assignments: tuple[tuple[str, Expr], ...]
+    where: Expr | None = None
+
+
+@dataclass(frozen=True)
+class ExplainStatement(Statement):
+    """``EXPLAIN <inner statement>``.
+
+    ``sql`` keeps the raw inner text, ``statement`` its parsed AST when
+    available, and ``analyze`` whether the plan must be executed to gather
+    real runtime metrics (``EXPLAIN ANALYZE``).
+    """
+
+    sql: str
+    statement: Statement | None = None
+    analyze: bool = False
 
 
 @dataclass(frozen=True)
@@ -176,3 +287,23 @@ class DropIndexStatement(Statement):
     """``DROP INDEX name`` removes an index."""
 
     index_name: str
+
+
+@dataclass(frozen=True)
+class BeginTransactionStatement(Statement):
+    """``BEGIN [TRANSACTION]``: opens a transaction on the current session thread.
+
+    ``TRANSACTION`` is optional, so both ``BEGIN`` and ``BEGIN TRANSACTION``
+    produce this node. The node carries no payload: the transaction itself
+    lives in the transactional session (thread-local), not in the AST.
+    """
+
+
+@dataclass(frozen=True)
+class EndTransactionStatement(Statement):
+    """``END [TRANSACTION]``: closes the active transaction with a commit.
+
+    ``TRANSACTION`` is optional, so both ``END`` and ``END TRANSACTION``
+    produce this node. ``END`` closes the transaction committing it, the same
+    semantics already supported by ``TransactionalSession.commit()``.
+    """

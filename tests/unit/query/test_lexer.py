@@ -35,6 +35,64 @@ def test_keywords_are_normalized_uppercase() -> None:
     assert toks[8] == (TokenKind.KEYWORD, "DESC")
 
 
+def test_update_and_set_keywords() -> None:
+    toks = token_values("UPDATE papers SET titulo = 'nuevo'")
+    assert toks[0] == (TokenKind.KEYWORD, "UPDATE")
+    assert toks[2] == (TokenKind.KEYWORD, "SET")
+
+
+def test_join_inner_on_keywords() -> None:
+    toks = token_values("SELECT * FROM a JOIN b INNER ON a = b")
+    assert (TokenKind.KEYWORD, "JOIN") in toks
+    assert (TokenKind.KEYWORD, "INNER") in toks
+    assert (TokenKind.KEYWORD, "ON") in toks
+
+
+def test_having_limit_offset_explain_keywords() -> None:
+    toks = token_values("EXPLAIN SELECT id FROM t HAVING count > 1 LIMIT 10 OFFSET 5")
+    assert toks[0] == (TokenKind.KEYWORD, "EXPLAIN")
+    assert (TokenKind.KEYWORD, "HAVING") in toks
+    assert (TokenKind.KEYWORD, "LIMIT") in toks
+    assert (TokenKind.KEYWORD, "OFFSET") in toks
+
+
+def test_point_and_distance_keywords() -> None:
+    toks = token_values("POINT(1, 2) distance(a, b)")
+    assert toks[0] == (TokenKind.KEYWORD, "POINT")
+    assert toks[6] == (TokenKind.KEYWORD, "DISTANCE")
+
+
+def test_is_and_null_keywords() -> None:
+    toks = token_values("SELECT * FROM t WHERE autor IS NULL")
+    assert (TokenKind.KEYWORD, "IS") in toks
+    assert (TokenKind.NULL, "NULL") in toks
+
+
+def test_begin_end_transaction_keywords() -> None:
+    toks = token_values("BEGIN TRANSACTION")
+    assert toks == [
+        (TokenKind.KEYWORD, "BEGIN"),
+        (TokenKind.KEYWORD, "TRANSACTION"),
+    ]
+    assert token_values("END") == [(TokenKind.KEYWORD, "END")]
+
+
+def test_join_keywords_normalized_uppercase() -> None:
+    toks = token_values("explain select * from a inner join b on a = b where x is null")
+    assert (TokenKind.KEYWORD, "EXPLAIN") in toks
+    assert (TokenKind.KEYWORD, "INNER") in toks
+    assert (TokenKind.KEYWORD, "JOIN") in toks
+    assert (TokenKind.KEYWORD, "IS") in toks
+    assert (TokenKind.NULL, "NULL") in toks
+
+
+def test_new_keywords_are_not_identifiers() -> None:
+    toks = token_values(
+        "update set join inner having limit offset is null explain begin end transaction"
+    )
+    assert all(kind is not TokenKind.IDENTIFIER for kind, _ in toks)
+
+
 def test_comparison_operators() -> None:
     toks = token_values("a <> b AND a <= 1 OR a >= 2 AND a != 3")
     ops = [v for k, v in toks if k is TokenKind.OPERATOR]
@@ -52,9 +110,34 @@ def test_negative_number_tokens() -> None:
     assert (TokenKind.NUMBER, "-1.5") in toks
 
 
-def test_bare_minus_still_raises() -> None:
-    with pytest.raises(QueryParseError):
-        tokenize("a = 5 -")
+def test_arithmetic_operators() -> None:
+    toks = token_values("a + b - c * d / e % f")
+    ops = [v for k, v in toks if k is TokenKind.OPERATOR]
+    assert ops == ["+", "-", "/", "%"]
+    assert (TokenKind.STAR, "*") in toks
+
+
+def test_arithmetic_and_comparison_mix() -> None:
+    toks = token_values("a + 1 >= b - 2 AND c <= 3")
+    ops = [v for k, v in toks if k is TokenKind.OPERATOR]
+    assert ops == ["+", ">=", "-", "<="]
+
+
+def test_minus_operator_between_numbers() -> None:
+    toks = token_values("5 - 1")
+    assert (TokenKind.NUMBER, "5") in toks
+    assert (TokenKind.OPERATOR, "-") in toks
+    assert (TokenKind.NUMBER, "1") in toks
+
+
+def test_trailing_minus_is_operator_not_error() -> None:
+    toks = token_values("a = 5 -")
+    assert toks == [
+        (TokenKind.IDENTIFIER, "a"),
+        (TokenKind.OPERATOR, "="),
+        (TokenKind.NUMBER, "5"),
+        (TokenKind.OPERATOR, "-"),
+    ]
 
 
 def test_string_literal_single_quotes() -> None:

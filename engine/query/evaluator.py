@@ -8,25 +8,39 @@ of :class:`engine.common.schema.ColumnDef` nodes (column ``i`` maps to
 
 Comparisons are strict: operands must share the exact same type
 (``type(a) is type(b)``); an int is never coerced to a float.
+
+``distance(a, b)`` and ``distance(a, b, 'metrica')`` delegate to
+:mod:`engine.query.spatial_metrics`: ``'euclidean'`` (default, plane distance in
+coordinate units) or ``'haversine'`` (geodesic distance in kilometres). Both
+metrics always return a float, so the strict comparison rule above applies to
+their results as well.
 """
 
 import re
 from collections.abc import Iterable
 
+from engine.algorithms.spatial.geometry import Polygon2D
+from engine.algorithms.spatial.predicates import point_in_polygon
 from engine.common.errors import QueryExecutionError
 from engine.common.schema import ColumnDef
+from engine.indexes.rtree import Point
 from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
     CompareExpr,
+    DistanceExpr,
     Expr,
     FunctionExpr,
     InExpr,
+    IntersectsExpr,
     LikeExpr,
     Literal,
     LogicalExpr,
     NotExpr,
+    PointExpr,
+    PolygonExpr,
 )
+from engine.query.spatial_metrics import distance
 
 _COMPARISONS = {"=", "<>", "!=", "<", "<=", ">", ">="}
 _AGGREGATES = {"COUNT", "SUM", "AVG", "MIN", "MAX"}
@@ -77,6 +91,62 @@ def evaluate(expr: Expr, row: Row, schema: Schema) -> object:
         pattern = evaluate(expr.pattern, row, schema)
         return _like(value, pattern)
 
+    if isinstance(expr, PointExpr):
+        x = evaluate(expr.x, row, schema)
+        y = evaluate(expr.y, row, schema)
+        if not _is_numeric(x):
+            raise QueryExecutionError(f"POINT requires numeric coordinates, got {type(x).__name__}")
+        if not _is_numeric(y):
+            raise QueryExecutionError(f"POINT requires numeric coordinates, got {type(y).__name__}")
+        return (float(x), float(y))
+
+    if isinstance(expr, DistanceExpr):
+        left = evaluate(expr.left, row, schema)
+        right = evaluate(expr.right, row, schema)
+        if left is None or right is None:
+            return None
+        if not _is_point_value(left):
+            raise QueryExecutionError(
+                f"distance operands must be POINT values, got {type(left).__name__}"
+            )
+        if not _is_point_value(right):
+            raise QueryExecutionError(
+                f"distance operands must be POINT values, got {type(right).__name__}"
+            )
+        try:
+            return distance(left, right, expr.metric)
+        except ValueError as exc:
+            raise QueryExecutionError(str(exc)) from exc
+
+    if isinstance(expr, PolygonExpr):
+        vertices = []
+        for v in expr.vertices:
+            val = evaluate(v, row, schema)
+            if not _is_point_value(val):
+                raise QueryExecutionError(
+                    f"POLYGON requires POINT vertices, got {type(val).__name__}"
+                )
+            vertices.append(Point(val[0], val[1]))
+        return Polygon2D(tuple(vertices))
+
+    if isinstance(expr, IntersectsExpr):
+        left = evaluate(expr.left, row, schema)
+        right = evaluate(expr.right, row, schema)
+        # intersects(point, polygon)
+        if _is_point_value(left) and isinstance(right, Polygon2D):
+            pt = Point(left[0], left[1])
+            try:
+                return point_in_polygon(pt, right)
+            except Exception as exc:
+                raise QueryExecutionError(str(exc)) from exc
+        if _is_point_value(right) and isinstance(left, Polygon2D):
+            pt = Point(right[0], right[1])
+            try:
+                return point_in_polygon(pt, left)
+            except Exception as exc:
+                raise QueryExecutionError(str(exc)) from exc
+        raise QueryExecutionError("intersects requires (POINT, POLYGON) or (POLYGON, POINT)")
+
     if isinstance(expr, FunctionExpr):
         raise QueryExecutionError(f"aggregate {expr.name} is not allowed in a scalar expression")
 
@@ -118,11 +188,21 @@ def _column_value(name: str, row: Row, schema: Schema) -> object:
     raise QueryExecutionError(f"unknown column {name!r}")
 
 
+def _is_number(value: object) -> bool:
+    """INT y FLOAT son comparables entre sí; BOOL no, pese a heredar de int."""
+    return type(value) is int or type(value) is float
+
+
 def _require_same_type(left: object, right: object) -> None:
-    if type(left) is not type(right):
-        raise QueryExecutionError(
-            f"cannot mix {type(left).__name__} and {type(right).__name__} values"
-        )
+    if type(left) is type(right):
+        return
+
+    # Un radio se escribe `< 5000`, no `< 5000.0`, y `distance(...)` siempre
+    # devuelve float: sin esta promoción el ejemplo del enunciado falla.
+    if _is_number(left) and _is_number(right):
+        return
+
+    raise QueryExecutionError(f"cannot mix {type(left).__name__} and {type(right).__name__} values")
 
 
 def _require_bool(value: object) -> bool:
@@ -134,6 +214,8 @@ def _require_bool(value: object) -> bool:
 def _compare(left: object, op: str, right: object) -> bool:
     if op not in _COMPARISONS:
         raise QueryExecutionError(f"unsupported comparison operator {op!r}")
+    if left is None or right is None:
+        return False
     _require_same_type(left, right)
     if op == "=":
         return left == right
@@ -165,6 +247,12 @@ def _like(value: object, pattern: object) -> bool:
 
 def _is_numeric(value: object) -> bool:
     return type(value) is int or type(value) is float
+
+
+def _is_point_value(value: object) -> bool:
+    if type(value) is not tuple or len(value) != 2:
+        return False
+    return all(type(coord) is float for coord in value)
 
 
 def _sum(values: list[object]) -> int | float:

@@ -9,12 +9,14 @@ from engine.query.ast import (
     ColumnRef,
     ColumnType,
     CompareExpr,
+    DistanceExpr,
     FunctionExpr,
     InExpr,
     LikeExpr,
     Literal,
     LogicalExpr,
     NotExpr,
+    PointExpr,
 )
 from engine.query.evaluator import evaluate, evaluate_aggregate
 
@@ -77,10 +79,11 @@ def test_evaluate_compare_strings() -> None:
     assert evaluate(CompareExpr(Literal("b"), "=", Literal("a")), ROW, SCHEMA) is False
 
 
-def test_evaluate_compare_ints_and_floats_raises() -> None:
+def test_evaluate_compare_ints_and_floats() -> None:
+    # INT y FLOAT son comparables: un radio entero contra una distancia flotante
+    # es la forma natural de escribir el predicado.
     expr = CompareExpr(Literal(1), "=", Literal(1.0))
-    with pytest.raises(QueryExecutionError):
-        evaluate(expr, ROW, SCHEMA)
+    assert evaluate(expr, ROW, SCHEMA) is True
 
 
 def test_evaluate_compare_int_and_str_raises() -> None:
@@ -139,8 +142,13 @@ def test_evaluate_between_strings() -> None:
     assert evaluate(expr, ROW, SCHEMA) is True
 
 
-def test_evaluate_between_mixed_types_raises() -> None:
+def test_evaluate_between_mixes_ints_and_floats() -> None:
     expr = BetweenExpr(Literal(5), Literal(1.0), Literal(10))
+    assert evaluate(expr, ROW, SCHEMA) is True
+
+
+def test_evaluate_between_bool_and_number_raises() -> None:
+    expr = BetweenExpr(Literal(5), Literal(True), Literal(10))
     with pytest.raises(QueryExecutionError):
         evaluate(expr, ROW, SCHEMA)
 
@@ -295,3 +303,102 @@ def test_aggregate_unknown_function_raises() -> None:
     expr = FunctionExpr("MEDIAN", ColumnRef("nota"))
     with pytest.raises(QueryExecutionError):
         evaluate_aggregate(expr, NOTAS, NOTAS_SCHEMA)
+
+
+POINT_SCHEMA = (
+    ColumnDef("id", ColumnType.INT),
+    ColumnDef("ubicacion", ColumnType.POINT),
+)
+POINT_ROW = (1, (2.0, 3.5))
+
+
+def test_point_expression_evaluates_to_float_tuple() -> None:
+    assert evaluate(PointExpr(Literal(1), Literal(2.5)), POINT_ROW, POINT_SCHEMA) == (1.0, 2.5)
+
+
+def test_point_expression_rejects_non_numeric_coordinates() -> None:
+    for bad in (Literal("a"), Literal(True), ColumnRef("ubicacion")):
+        with pytest.raises(QueryExecutionError, match="POINT"):
+            evaluate(PointExpr(bad, Literal(1)), POINT_ROW, POINT_SCHEMA)
+
+
+def test_distance_expression_euclidean() -> None:
+    a = PointExpr(Literal(0), Literal(0))
+    b = PointExpr(Literal(3), Literal(4))
+    assert evaluate(DistanceExpr(a, b), POINT_ROW, POINT_SCHEMA) == 5.0
+
+
+def test_distance_between_column_and_point() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    assert evaluate(
+        DistanceExpr(ColumnRef("ubicacion"), pt), POINT_ROW, POINT_SCHEMA
+    ) == pytest.approx(2.692582403567252)
+
+
+def test_distance_expr_rejects_non_point_operands() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    for case in (
+        DistanceExpr(ColumnRef("id"), pt),
+        DistanceExpr(pt, ColumnRef("id")),
+        DistanceExpr(ColumnRef("ubicacion"), Literal(1)),
+    ):
+        with pytest.raises(QueryExecutionError, match="distance"):
+            evaluate(case, POINT_ROW, POINT_SCHEMA)
+
+
+def test_distance_expr_rejects_non_point_operands_for_every_metric() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    for metric in ("euclidean", "haversine"):
+        for case in (
+            DistanceExpr(ColumnRef("id"), pt, metric),
+            DistanceExpr(pt, ColumnRef("id"), metric),
+        ):
+            with pytest.raises(
+                QueryExecutionError, match="distance operands must be POINT values, got int"
+            ):
+                evaluate(case, POINT_ROW, POINT_SCHEMA)
+
+
+def test_distance_expr_haversine_metric() -> None:
+    a = PointExpr(Literal(-56.1645), Literal(-34.9011))
+    b = PointExpr(Literal(-58.3816), Literal(-34.6037))
+    assert evaluate(DistanceExpr(a, b, "haversine"), POINT_ROW, POINT_SCHEMA) == pytest.approx(
+        205_232.35938356873
+    )
+    assert evaluate(DistanceExpr(a, a, "haversine"), POINT_ROW, POINT_SCHEMA) == 0.0
+
+
+def test_distance_expr_default_metric_equals_explicit_euclidean() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    assert evaluate(DistanceExpr(ColumnRef("ubicacion"), pt), POINT_ROW, POINT_SCHEMA) == evaluate(
+        DistanceExpr(ColumnRef("ubicacion"), pt, "euclidean"), POINT_ROW, POINT_SCHEMA
+    )
+
+
+def test_distance_expr_metric_name_is_normalized_at_evaluation() -> None:
+    pt = PointExpr(Literal(1), Literal(1))
+    assert evaluate(DistanceExpr(pt, pt, "Haversine"), POINT_ROW, POINT_SCHEMA) == evaluate(
+        DistanceExpr(pt, pt, "haversine"), POINT_ROW, POINT_SCHEMA
+    )
+
+
+def test_distance_expr_unknown_metric_fails_at_evaluation() -> None:
+    # Guarda para un AST construido a mano: el parser ya rechaza el SQL.
+    pt = PointExpr(Literal(1), Literal(1))
+    with pytest.raises(QueryExecutionError, match="unknown distance metric 'manhattan'"):
+        evaluate(DistanceExpr(pt, pt, "manhattan"), POINT_ROW, POINT_SCHEMA)
+
+
+def test_distance_expr_haversine_rejects_coordinates_out_of_range() -> None:
+    out_of_range = PointExpr(Literal(0), Literal(91))
+    inside = PointExpr(Literal(0), Literal(0))
+    with pytest.raises(QueryExecutionError, match=r"latitude in \[-90, 90\], got 91.0"):
+        evaluate(DistanceExpr(out_of_range, inside, "haversine"), POINT_ROW, POINT_SCHEMA)
+    with pytest.raises(QueryExecutionError, match=r"longitude in \[-180, 180\], got 400.0"):
+        evaluate(
+            DistanceExpr(PointExpr(Literal(400), Literal(0)), inside, "haversine"),
+            POINT_ROW,
+            POINT_SCHEMA,
+        )
+    # La euclidiana es métrica de plano y no valida el rango geográfico.
+    assert evaluate(DistanceExpr(out_of_range, inside), POINT_ROW, POINT_SCHEMA) == 91.0

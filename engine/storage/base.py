@@ -29,3 +29,17 @@ class FileOrganization(ABC):
     @abstractmethod
     def scan(self) -> Iterator[tuple[RID, Record]]:
         """Yield every (RID, record) pair currently stored."""
+
+    def lock_shared(self) -> None:  # noqa: B027  (un almacen sin bloqueos no tiene nada que tomar)
+        """Take a shared lock on the whole table before reading any of it.
+
+        ``scan`` takes that lock by itself, and ``insert``/``remove`` take it in
+        exclusive mode, but a reader that walks rows one RID at a time through
+        ``fetch`` would otherwise never lock the table and could read a row another
+        transaction has written but not committed. Readers using an index to find
+        the RIDs and ``fetch`` to read them call this first, so that reading by
+        index and reading by table obey the same locking protocol.
+
+        A file organization with no locking layer has nothing to take, so the
+        default does nothing.
+        """

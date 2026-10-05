@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from engine.indexes.rtree import MBR, Point
+from engine.indexes.rtree.mbr import MBR
+from engine.indexes.rtree.point import Point
 
 from .validation import validate_cartesian_point
 

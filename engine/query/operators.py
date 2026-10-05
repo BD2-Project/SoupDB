@@ -4,7 +4,7 @@ Frozen contract between query processing and the rest of the engine.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from functools import cmp_to_key
 from time import perf_counter
@@ -12,15 +12,18 @@ from typing import Any
 
 from engine.algorithms.external_hash import external_hash_group_by
 from engine.algorithms.external_sort import external_sort
+from engine.algorithms.spatial import SpatialMetric
 from engine.common.errors import QueryExecutionError
 from engine.common.record import Record, decode_row, encode_row
 from engine.common.rid import RID
 from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index, Key
+from engine.indexes.rtree import Point, Polygon2D, RTree, SpatialQueries
 from engine.query.ast import (
     BetweenExpr,
     ColumnRef,
     CompareExpr,
+    DistanceExpr,
     Expr,
     FunctionExpr,
     InExpr,
@@ -29,9 +32,11 @@ from engine.query.ast import (
     LogicalExpr,
     NotExpr,
     OrderByItem,
+    PointExpr,
     SelectColumn,
 )
 from engine.query.evaluator import Schema, evaluate, evaluate_aggregate
+from engine.query.spatial_metrics import EUCLIDEAN
 from engine.storage.base import FileOrganization
 from engine.storage.disk_manager import DiskManager
 
@@ -99,8 +104,8 @@ class _VolcanoBase(Operator):
         self._rows = 0
         self._started = False
         self._start = 0.0
-        self._reads0 = 0
-        self._writes0 = 0
+        self._reads0 = disk_manager.reads if disk_manager is not None else 0
+        self._writes0 = disk_manager.writes if disk_manager is not None else 0
         self.schema: Schema = ()
         """Schema of the records this operator emits."""
 
@@ -182,21 +187,22 @@ class IndexLookup(_VolcanoBase):
     def __init__(
         self,
         index: Index,
-        fetch: Callable[[RID], Record | None],
+        file_org: FileOrganization,
         key: object,
         schema: Schema,
         disk_manager: DiskManager | None = None,
     ) -> None:
         super().__init__((), disk_manager)
         self._index = index
-        self._fetch = fetch
+        self._file_org = file_org
         self._key = key
         self.schema = schema
 
     def open(self) -> None:
         super().open()
+        self._file_org.lock_shared()
         candidates = self._index.search(self._key)
-        self._buffer = iter((rid, self._fetch(rid)) for rid in candidates)
+        self._buffer = iter((rid, self._file_org.fetch(rid)) for rid in candidates)
 
     def next(self) -> Record | None:
         while True:
@@ -227,7 +233,7 @@ class IndexRangeScan(_VolcanoBase):
     def __init__(
         self,
         index: Index,
-        fetch: Callable[[RID], Record | None],
+        file_org: FileOrganization,
         lo: object,
         hi: object,
         schema: Schema,
@@ -235,17 +241,18 @@ class IndexRangeScan(_VolcanoBase):
     ) -> None:
         super().__init__((), disk_manager)
         self._index = index
-        self._fetch = fetch
+        self._file_org = file_org
         self._lo = lo
         self._hi = hi
         self.schema = schema
 
     def open(self) -> None:
         super().open()
+        self._file_org.lock_shared()
         if not self._index.supports_range:
             raise QueryExecutionError("range search requested but the index does not support it")
         candidates = self._index.range_search(self._lo, self._hi)
-        self._buffer = iter((rid, self._fetch(rid)) for rid in candidates)
+        self._buffer = iter((rid, self._file_org.fetch(rid)) for rid in candidates)
 
     def next(self) -> Record | None:
         while True:
@@ -265,6 +272,265 @@ class IndexRangeScan(_VolcanoBase):
     def explain(self) -> PlanNode:
         detail = {"lo": str(self._lo), "hi": str(self._hi)}
         return self._plan("IndexRangeScan", detail)
+
+
+class SpatialIndexScan(_VolcanoBase):
+    """Radius query through a spatial index (leaf operator).
+
+    The circle ``distance(point, center) < radius`` is contained in the
+    axis-aligned box ``center ± radius`` - ``|point.x - center.x| <= distance``
+    and likewise for ``y`` - so the box is a SUPERCONSET of the circle and
+    ``index.range_search`` returns every row that could match. The box is not a
+    circle, so the ``Filter`` the planner puts on top re-evaluates the exact
+    predicate: the rows emitted are the rows of the radius, and the rows the box
+    wrongly contains are discarded without ever being read from disk.
+
+    Only euclidean radii are served here, the one metric whose bound is planar
+    and independent of the row; a geodesic radius would need a latitude
+    dependent bound and stays on the full scan (see the planner).
+    """
+
+    def __init__(
+        self,
+        index: Index,
+        file_org: FileOrganization,
+        center: tuple[float, float],
+        radius: float,
+        schema: Schema,
+        index_name: str,
+        column: str,
+        metric: str = EUCLIDEAN,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((), disk_manager)
+        self._index = index
+        self._file_org = file_org
+        self._center = (float(center[0]), float(center[1]))
+        self._radius = float(radius)
+        self._index_name = index_name
+        self._column = column
+        self._metric = metric
+        self.schema = schema
+
+    def open(self) -> None:
+        super().open()
+        self._file_org.lock_shared()
+        if not self._index.supports_range:
+            raise QueryExecutionError("spatial search requested but the index does not support it")
+        radius = self._radius
+        center_x, center_y = self._center
+        candidates = self._index.range_search(
+            (center_x - radius, center_y - radius),
+            (center_x + radius, center_y + radius),
+        )
+        self._buffer = iter((rid, self._file_org.fetch(rid)) for rid in candidates)
+
+    def next(self) -> Record | None:
+        while True:
+            try:
+                _, record = next(self._buffer)
+            except StopIteration:
+                return None
+            if record is None:
+                continue
+            self._rows += 1
+            return record
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        detail = {
+            "index": self._index_name,
+            "column": self._column,
+            "center": self._center,
+            "radius": self._radius,
+            "metric": self._metric,
+        }
+        return self._plan("SpatialIndexScan", detail)
+
+
+class SpatialKnnScan(_VolcanoBase):
+    """Nearest-neighbour rows taken from a spatial index (leaf operator).
+
+    Serves ``ORDER BY distance(column, POINT(x, y)) LIMIT k`` when the column
+    carries a spatial index and the metric is euclidean, the one metric whose
+    distance bound over an R-Tree node is planar and independent of the row.
+
+    The index is asked two questions: ``knn_hits`` gives the distance ``d_k`` of
+    the k-th nearest row, and ``radius_search(d_k)`` - inclusive, ``distance <=
+    radius`` - returns every row at that distance or closer. ``k`` already
+    includes the OFFSET, because the rows after the skipped ones are candidates
+    too.
+
+    The index is used only when the k nearest rows are UNAMBIGUOUS: exactly k rows
+    within ``d_k`` and all of them at pairwise different distances. Only then is
+    the answer independent of the order the rows come in, and the ``Sort`` +
+    ``Limit`` planned on top produce the very same result as on a full scan.
+
+    In every other case the operator falls back to the full scan, and the reason
+    is that the tie cannot be resolved here:
+
+    - two rows at the same distance tie, and SQL leaves the tie to the input
+      order. Here that order is the table's own scan order, which the query layer
+      cannot reproduce: heap files scan page by page, but a sequential file walks
+      its chain of pages in clustering-key order (``SequentialFile.scan``), so the
+      same table in the same order can report its rows in two different
+      sequences. The index breaks ties by ``(distance, x, y, page, slot)``, a
+      third rule, and reusing its k rows verbatim answers a different question
+      than the scan does.
+    - fewer than k rows come back. A NULL coordinate is not a location, so those
+      rows are not in the index by design, and the k the index can offer is then
+      the k of the rows it can locate.
+
+    A RID that no longer resolves to a live row also falls back: an index entry
+    pointing nowhere would be silently dropped instead of read.
+
+    Both fallbacks read the table, so an ambiguous index costs a scan and never a
+    wrong answer: ``EXPLAIN`` shows the planned path, and the ambiguity is only
+    knowable from the data.
+    """
+
+    def __init__(
+        self,
+        index: Index,
+        file_org: FileOrganization,
+        center: tuple[float, float],
+        k: int,
+        schema: Schema,
+        index_name: str,
+        column: str,
+        metric: SpatialMetric,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((), disk_manager)
+        self._index = index
+        self._file_org = file_org
+        self._file_org = file_org
+        self._center = (float(center[0]), float(center[1]))
+        self._k = k
+        self._index_name = index_name
+        self._column = column
+        self._metric = metric
+        self.schema = schema
+
+    def _indexed_rows(self) -> list[tuple[RID, Record]] | None:
+        """The k nearest rows read from the index, or None to scan the table."""
+        if not isinstance(self._index, RTree):
+            raise QueryExecutionError(
+                "nearest-neighbour search requested but the index is not an R-Tree"
+            )
+        queries = SpatialQueries(self._index)
+        center = Point(self._center[0], self._center[1])
+        hits = queries.knn_hits(center, self._k, self._metric)
+        if len(hits) < self._k:
+            return None
+        candidates = queries.radius_search(center, hits[-1].distance, self._metric)
+        if len(candidates) != self._k:
+            # Otra fila está tan cerca como la k-ésima: el resultado depende del
+            # orden en que lleguen las filas y ese orden es el del escaneo.
+            return None
+        distances = {hit.distance for hit in hits}
+        if len(distances) != self._k:
+            return None
+        rows = [(rid, self._file_org.fetch(rid)) for rid in candidates]
+        if any(record is None for _, record in rows):
+            # El índice menciona una fila que ya no existe: no es de fiar.
+            return None
+        return rows
+
+    def open(self) -> None:
+        super().open()
+        self._file_org.lock_shared()
+        rows = self._indexed_rows()
+        if rows is None:
+            self._buffer = self._file_org.scan()
+        else:
+            self._buffer = iter(rows)
+
+    def next(self) -> Record | None:
+        while True:
+            try:
+                _, record = next(self._buffer)
+            except StopIteration:
+                return None
+            if record is None:
+                continue
+            self._rows += 1
+            return record
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        detail = {
+            "index": self._index_name,
+            "column": self._column,
+            "center": self._center,
+            "k": self._k,
+            "metric": self._metric.name,
+        }
+        return self._plan("SpatialKnnScan", detail)
+
+
+class SpatialPolygonScan(_VolcanoBase):
+    """Polygon intersection query through a spatial index (leaf operator).
+
+    Uses the index's ``polygon_search`` to fetch exactly those rows whose point
+    lies inside the polygon. For a spatial index (RTree), this is a two-phase
+    query: candidates from polygon MBR, then exact point-in-polygon tests; the
+    operator reads only the rows that pass the exact test.
+    """
+
+    def __init__(
+        self,
+        index: Index,
+        file_org: FileOrganization,
+        polygon: Polygon2D,
+        schema: Schema,
+        index_name: str,
+        column: str,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        super().__init__((), disk_manager)
+        self._index = index
+        self._file_org = file_org
+        self._polygon = polygon
+        self._index_name = index_name
+        self._column = column
+        self.schema = schema
+
+    def open(self) -> None:
+        super().open()
+        self._file_org.lock_shared()
+        queries = SpatialQueries(self._index)
+        candidates = queries.polygon_search(self._polygon)
+        self._buffer = iter((rid, self._file_org.fetch(rid)) for rid in candidates)
+
+    def next(self) -> Record | None:
+        while True:
+            try:
+                _, record = next(self._buffer)
+            except StopIteration:
+                return None
+            if record is None:
+                continue
+            self._rows += 1
+            return record
+
+    def close(self) -> None:
+        self._buffer = None
+        super().close()
+
+    def explain(self) -> PlanNode:
+        detail = {
+            "index": self._index_name,
+            "column": self._column,
+            "polygon": str(self._polygon.vertices),
+        }
+        return self._plan("SpatialPolygonScan", detail)
 
 
 class Filter(_VolcanoBase):
@@ -321,6 +587,10 @@ def _infer_type(expr: Expr, schema: Schema) -> ColumnDef:
     if isinstance(expr, _BOOL_EXPRS):
         return ColumnDef("", ColumnType.BOOL)
     if isinstance(expr, FunctionExpr):
+        return ColumnDef("", ColumnType.FLOAT)
+    if isinstance(expr, PointExpr):
+        return ColumnDef("", ColumnType.POINT)
+    if isinstance(expr, DistanceExpr):
         return ColumnDef("", ColumnType.FLOAT)
     return ColumnDef("", ColumnType.TEXT)
 
@@ -501,6 +771,54 @@ class Sort(_VolcanoBase):
     def explain(self) -> PlanNode:
         keys = [str(item.expr) for item in self._order_by]
         return self._plan("Sort", {"keys": keys})
+
+
+class Limit(_VolcanoBase):
+    """Emits at most ``limit`` rows of the input stream after skipping ``offset``.
+
+    Streaming: rows are pulled from the child on demand, so OFFSET does not
+    materialize the skipped prefix and LIMIT stops pulling as soon as the
+    quota is met.
+    """
+
+    def __init__(
+        self,
+        child: Operator,
+        limit: int,
+        offset: int = 0,
+        disk_manager: DiskManager | None = None,
+    ) -> None:
+        if limit < 0:
+            raise QueryExecutionError("LIMIT must be non-negative")
+        if offset < 0:
+            raise QueryExecutionError("OFFSET must be non-negative")
+        super().__init__((child,), disk_manager)
+        self._child = child
+        self._limit = limit
+        self._offset = offset
+        self.schema = child.schema
+
+    def open(self) -> None:
+        super().open()
+        self._emitted = 0
+        self._skipped = 0
+
+    def next(self) -> Record | None:
+        while self._skipped < self._offset:
+            if self._child.next() is None:
+                return None
+            self._skipped += 1
+        if self._emitted >= self._limit:
+            return None
+        record = self._child.next()
+        if record is None:
+            return None
+        self._emitted += 1
+        self._rows += 1
+        return record
+
+    def explain(self) -> PlanNode:
+        return self._plan("Limit", {"limit": self._limit, "offset": self._offset})
 
 
 def _find_column(name: str, schema: Schema) -> ColumnDef:
