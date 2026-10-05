@@ -60,9 +60,9 @@ rows_count u32 BE
   por celda: value_tag u8 | valor
 ```
 
-Tags de valor: `NULL=0x00` (sin bytes), `INT=0x01` (i32 BE), `FLOAT=0x02` (f64 BE), `TEXT=0x03` (len u16 BE + UTF-8), `BOOL=0x04` (1 byte 0/1).
+Tags de valor: `NULL=0x00` (sin bytes), `INT=0x01` (i32 BE), `FLOAT=0x02` (f64 BE), `TEXT=0x03` (len u16 BE + UTF-8), `BOOL=0x04` (1 byte 0/1), `POINT=0x05` (dos doubles big-endian, x = longitud e y = latitud).
 
-Códigos de tipo de columna: `INT=0x01`, `FLOAT=0x02`, `VARCHAR=0x03`, `TEXT=0x04`, `BOOL=0x05`.
+Códigos de tipo de columna: `INT=0x01`, `FLOAT=0x02`, `VARCHAR=0x03`, `TEXT=0x04`, `BOOL=0x05`, `POINT=0x06`.
 
 ## Comportamiento
 
