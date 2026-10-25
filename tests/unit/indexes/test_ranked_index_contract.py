@@ -15,6 +15,7 @@ import pytest
 
 from engine.common.rid import RID
 from engine.indexes.base import RankedIndex
+from engine.indexes.vector.brute_force import BruteForceIndex
 from tests.fakes.fake_ranked_index import FakeRankedIndex, text_scorer, vector_scorer
 
 N_ITEMS = 60
@@ -53,6 +54,13 @@ def _fake_build(scorer):
     return build
 
 
+def _brute_build(path: Path, items: list[tuple[Any, RID]]) -> RankedIndex:
+    index = BruteForceIndex.open(path / "bf.db", dim=DIM, page_size=512, buffer_capacity=2)
+    for vector, rid in items:
+        index.insert(vector, rid)
+    return index
+
+
 CASES: dict[str, Callable[[], Case]] = {
     "fake_vector": lambda: Case(
         build=_fake_build(vector_scorer),
@@ -67,6 +75,13 @@ CASES: dict[str, Callable[[], Case]] = {
         items=_texts(),
         query="vector index",
         opts={"method": "bm25"},
+    ),
+    "brute_force": lambda: Case(
+        build=_brute_build,
+        reopen=lambda path: BruteForceIndex.open(path / "bf.db", page_size=512),
+        items=_vectors(),
+        query=[0.1] * DIM,
+        opts={"metric": "cosine"},
     ),
 }
 
