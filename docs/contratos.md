@@ -7,6 +7,7 @@ Los contratos son la **Verdad Absoluta** y viven únicamente en el código fuent
 | `RID(page_id, slot)` | `engine/common/rid.py` |
 | Excepciones propias | `engine/common/errors.py` |
 | `Index` (ABC) | `engine/indexes/base.py` |
+| `RankedIndex` (ABC) | `engine/indexes/base.py` |
 | `FileOrganization` (ABC) | `engine/storage/base.py` |
 | `ConcurrencyStrategy` (ABC) | `engine/transactions/base.py` |
 | Operadores Volcano | `engine/query/operators.py` |
@@ -20,6 +21,7 @@ Reglas del contrato:
 - El esquema soporta `VARCHAR(n)` y `TEXT` desde el día uno (longitud variable).
 - El control de concurrencia se consume a través de `ConcurrencyStrategy` (nunca de una implementación concreta); las estrategias son intercambiables. Ver [Transacciones](transacciones.md).
 - El **R-Tree** (`engine/indexes/rtree/`) es una implementación de `Index` con `supports_range=True`: `search` por punto y `range_search` por caja espacial o rango 1D (las claves escalares se mapean al eje X para cumplir la conformance suite). Ver [R-Tree](rtree.md).
+- `RankedIndex.top_k(query, k, **opts) -> list[tuple[RID, float]]` es el contrato de los índices que rankean (invertido, IVF, HNSW). El score es siempre "mayor es mejor" y la lista sale en orden descendente. `query` es texto (`method="tf_idf" | "bm25"`) en el invertido y un vector (`metric="euclidean" | "cosine" | "inner_product"`, más `nprobe` en IVF o `ef` en HNSW) en los vectoriales. Una opción desconocida se rechaza. Toda implementación pasa `tests/unit/indexes/test_ranked_index_contract.py`, cuyo oráculo es `tests/fakes/fake_ranked_index.py`. Ver [Índices vectoriales](vectores.md).
 ## Convenciones de consultas espaciales
 
 Fijadas por el enunciado (§2.2.1 y §2.2.3) y verificadas por los tests de

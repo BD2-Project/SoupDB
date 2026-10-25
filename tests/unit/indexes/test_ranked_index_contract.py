@@ -16,6 +16,7 @@ import pytest
 from engine.common.rid import RID
 from engine.indexes.base import RankedIndex
 from engine.indexes.vector.brute_force import BruteForceIndex
+from engine.indexes.vector.hnsw import HNSWIndex
 from engine.indexes.vector.ivf import IVFIndex
 from tests.fakes.fake_ranked_index import FakeRankedIndex, text_scorer, vector_scorer
 
@@ -66,6 +67,13 @@ def _ivf_build(path: Path, items: list[tuple[Any, RID]]) -> RankedIndex:
     return IVFIndex.build(path / "ivf.db", items, dim=DIM, nlist=4, page_size=512)
 
 
+def _hnsw_build(path: Path, items: list[tuple[Any, RID]]) -> RankedIndex:
+    index = HNSWIndex(path / "hnsw", dim=DIM, m=4, ef_construction=16, page_size=512)
+    for vector, rid in items:
+        index.insert(vector, rid)
+    return index
+
+
 CASES: dict[str, Callable[[], Case]] = {
     "fake_vector": lambda: Case(
         build=_fake_build(vector_scorer),
@@ -95,6 +103,13 @@ CASES: dict[str, Callable[[], Case]] = {
         items=_vectors(),
         query=[0.1] * DIM,
         opts={"metric": "euclidean", "nprobe": 4},
+    ),
+    "hnsw": lambda: Case(
+        build=_hnsw_build,
+        reopen=lambda path: HNSWIndex(path / "hnsw", page_size=512),
+        items=_vectors(),
+        query=[0.1] * DIM,
+        opts={"metric": "inner_product", "ef": 200},
     ),
 }
 

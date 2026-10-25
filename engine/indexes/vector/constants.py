@@ -20,3 +20,15 @@ IVF_KMEANS_ITERATIONS = 20
 
 #: Tope de la muestra con la que se entrena K-Means; acota la memoria del entrenamiento.
 IVF_TRAIN_SAMPLE = 10_000
+
+#: Vecinos por nodo en las capas superiores de HNSW; la capa 0 guarda el doble.
+HNSW_M = 16
+
+#: Tamaño de la lista de candidatos al insertar.
+HNSW_EF_CONSTRUCTION = 100
+
+#: Tamaño de la lista de candidatos al consultar.
+HNSW_EF_SEARCH = 64
+
+#: Tope de niveles del grafo; con M=16 un nivel 16 es astronómicamente improbable.
+HNSW_MAX_LEVEL = 16
