@@ -16,6 +16,7 @@ import pytest
 from engine.common.rid import RID
 from engine.indexes.base import RankedIndex
 from engine.indexes.vector.brute_force import BruteForceIndex
+from engine.indexes.vector.ivf import IVFIndex
 from tests.fakes.fake_ranked_index import FakeRankedIndex, text_scorer, vector_scorer
 
 N_ITEMS = 60
@@ -61,6 +62,10 @@ def _brute_build(path: Path, items: list[tuple[Any, RID]]) -> RankedIndex:
     return index
 
 
+def _ivf_build(path: Path, items: list[tuple[Any, RID]]) -> RankedIndex:
+    return IVFIndex.build(path / "ivf.db", items, dim=DIM, nlist=4, page_size=512)
+
+
 CASES: dict[str, Callable[[], Case]] = {
     "fake_vector": lambda: Case(
         build=_fake_build(vector_scorer),
@@ -82,6 +87,14 @@ CASES: dict[str, Callable[[], Case]] = {
         items=_vectors(),
         query=[0.1] * DIM,
         opts={"metric": "cosine"},
+    ),
+    # nprobe = nlist y ef >= N: los aproximados se vuelven exactos y el contrato aplica igual.
+    "ivf": lambda: Case(
+        build=_ivf_build,
+        reopen=lambda path: IVFIndex.open(path / "ivf.db", page_size=512),
+        items=_vectors(),
+        query=[0.1] * DIM,
+        opts={"metric": "euclidean", "nprobe": 4},
     ),
 }
 
