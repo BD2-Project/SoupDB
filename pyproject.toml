@@ -32,6 +32,12 @@ docs = [
   "mkdocstrings[python]>=0.26",
   "pymdown-extensions>=10.0",
 ]
+multimedia = [
+  "numpy>=2.4.6",
+  "opencv-python-headless>=5.0.0.93",
+  "scikit-learn>=1.9.1",
+  "threadpoolctl>=3.7.0",
+]
 
 [build-system]
 requires = ["hatchling"]
