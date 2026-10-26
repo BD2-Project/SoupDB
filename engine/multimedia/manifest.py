@@ -13,6 +13,7 @@ Uso: python -m engine.multimedia.manifest {image,audio} RAIZ SALIDA.jsonl [--lim
 
 import argparse
 import json
+import sys
 from collections.abc import Iterable, Iterator
 from itertools import islice
 from pathlib import Path
@@ -40,11 +41,22 @@ def image_rows(root: str | Path) -> Iterator[dict]:
         yield {"id": i, "type": "image", "path": path}
 
 
-def audio_rows(root: str | Path, duration: float = SEGMENT_SECONDS) -> Iterator[dict]:
+def audio_rows(
+    root: str | Path, duration: float = SEGMENT_SECONDS, skip_unreadable: bool = False
+) -> Iterator[dict]:
     # Hay que decodificar cada pista para saber cuántos segmentos tiene; una a la vez.
     next_id = 0
     for path in list_media_files(root, AUDIO_EXTENSIONS):
-        for segment, samples in iter_audio_segments(Path(root) / path, duration):
+        try:
+            segments = list(iter_audio_segments(Path(root) / path, duration))
+        except Exception as error:
+            # Colecciones reales (FMA) traen algún MP3 roto. Saltarlo es determinista:
+            # mismos archivos, mismas pistas saltadas, mismos IDs.
+            if not skip_unreadable:
+                raise
+            print(f"skipping unreadable audio {path}: {error}", file=sys.stderr)
+            continue
+        for segment, samples in segments:
             start = segment * duration
             yield {
                 "id": next_id,
@@ -80,12 +92,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("output", type=Path)
     parser.add_argument("--limit", type=int, default=None, help="máximo de objetos (1k, 10k...)")
     parser.add_argument("--duration", type=float, default=SEGMENT_SECONDS)
+    parser.add_argument("--skip-unreadable", action="store_true", help="saltar audios rotos")
     args = parser.parse_args(argv)
 
     if args.type == "image":
         rows = image_rows(args.root)
     else:
-        rows = audio_rows(args.root, args.duration)
+        rows = audio_rows(args.root, args.duration, args.skip_unreadable)
     count = write_manifest(args.output, rows, args.limit)
     print(f"{count} objetos -> {args.output}")
 
