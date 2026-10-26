@@ -11,14 +11,24 @@ from engine.multimedia import audio_features
 from engine.multimedia.audio_features import (
     N_MFCC,
     SAMPLE_RATE,
+    count_audio_segments,
     extract_audio_vector,
     extract_mfcc,
+    extract_mfcc_cached,
+    iter_audio_segments,
+    load_audio,
+    mfcc_from_signal,
+    segment_id,
     train_audio_codebook,
 )
 from engine.multimedia.codebook import assign_words, count_words
 from engine.multimedia.vector_file import VectorRecord, iter_vectors, write_vectors
 
 K = 8
+
+
+class SimulatedCrash(Exception):
+    """Corte simulado de una ejecución larga (como un Ctrl+C a mitad)."""
 
 
 def _write_tone(path, frequency, seconds=1.0, sample_rate=SAMPLE_RATE, channels=1):
@@ -148,3 +158,108 @@ def test_audio_training_extracts_each_file_twice_without_keeping_descriptors(mon
     assert calls == [*audios, *audios]
     assert centroids.shape == (K, N_MFCC)
     assert idf.shape == (K,)
+
+
+@pytest.fixture
+def track_18s(tmp_path):
+    return _write_tone(tmp_path / "track.wav", 440, seconds=18.0)
+
+
+def test_18_second_track_gives_four_segments_of_5_seconds(track_18s):
+    segments = list(iter_audio_segments(track_18s, duration=5.0))
+
+    assert [index for index, _ in segments] == [0, 1, 2, 3]
+    # 0-5 s, 5-10 s, 10-15 s y 15-18 s: el último, más corto, no se descarta.
+    assert [len(samples) / SAMPLE_RATE for _, samples in segments] == [5.0, 5.0, 5.0, 3.0]
+    assert np.array_equal(np.concatenate([s for _, s in segments]), load_audio(track_18s))
+    assert count_audio_segments(track_18s, duration=5.0) == 4
+
+
+def test_segment_ids_are_stable():
+    assert segment_id("rock/canción.mp3", 0) == "rock/canción.mp3#segment=000000"
+    assert segment_id("rock/canción.mp3", 1) == "rock/canción.mp3#segment=000001"
+    assert segment_id("rock/canción.mp3", 1) == segment_id("rock/canción.mp3", 1)
+
+
+def test_full_file_mfcc_uses_the_same_formula_as_segments(track_18s):
+    assert np.array_equal(extract_mfcc(track_18s), mfcc_from_signal(load_audio(track_18s)))
+
+
+def test_every_segment_mfcc_has_n_mfcc_columns_and_no_nan(tmp_path, track_18s):
+    for index, samples in iter_audio_segments(track_18s):
+        cached = extract_mfcc_cached(track_18s, index, tmp_path / "cache")
+
+        assert cached.shape[1] == N_MFCC
+        assert len(cached) > 0
+        assert np.isfinite(cached).all()
+        assert np.array_equal(cached, mfcc_from_signal(samples))
+
+
+def _spy_audio(monkeypatch):
+    loads, mfccs = [], []
+    real_load, real_mfcc = audio_features.load_audio, audio_features.mfcc_from_signal
+
+    def load(path):
+        loads.append(path)
+        return real_load(path)
+
+    def mfcc(signal, n_mfcc=N_MFCC):
+        mfccs.append(len(signal))
+        return real_mfcc(signal, n_mfcc)
+
+    monkeypatch.setattr(audio_features, "load_audio", load)
+    monkeypatch.setattr(audio_features, "mfcc_from_signal", mfcc)
+    return loads, mfccs
+
+
+def test_cached_mfcc_is_not_recomputed(monkeypatch, tmp_path, track_18s):
+    cache = tmp_path / "cache"
+    loads, mfccs = _spy_audio(monkeypatch)
+
+    first = extract_mfcc_cached(track_18s, 0, cache)
+    # El primer fallo decodifica la pista una vez y guarda sus 4 segmentos.
+    assert loads == [track_18s]
+    assert len(mfccs) == 4
+
+    again = extract_mfcc_cached(track_18s, 0, cache)
+    others = [extract_mfcc_cached(track_18s, i, cache) for i in (1, 2, 3)]
+
+    assert loads == [track_18s]
+    assert len(mfccs) == 4
+    assert np.array_equal(first, again)
+    assert all(m.shape[1] == N_MFCC for m in others)
+
+
+def test_segment_out_of_range_raises(tmp_path, track_18s):
+    with pytest.raises(IndexError):
+        extract_mfcc_cached(track_18s, 4, tmp_path / "cache")
+
+
+def test_interrupted_audio_run_resumes_from_cache(monkeypatch, tmp_path):
+    tracks = [_write_tone(tmp_path / f"t{i}.wav", 220 * (i + 1), seconds=12.0) for i in range(3)]
+    work = [(track, segment) for track in tracks for segment in range(3)]
+    cache = tmp_path / "cache"
+
+    real_load = audio_features.load_audio
+    loaded = []
+
+    def crashes_on_second_track(path):
+        if path == tracks[1]:
+            raise SimulatedCrash
+        loaded.append(path)
+        return real_load(path)
+
+    monkeypatch.setattr(audio_features, "load_audio", crashes_on_second_track)
+    with pytest.raises(SimulatedCrash):
+        for track, segment in work:
+            extract_mfcc_cached(track, segment, cache)
+    assert loaded == [tracks[0]]
+
+    # 2ª ejecución: la 1ª pista sale entera de la caché; solo se decodifican las demás.
+    monkeypatch.setattr(audio_features, "load_audio", real_load)
+    loads, _ = _spy_audio(monkeypatch)
+    results = [extract_mfcc_cached(track, segment, cache) for track, segment in work]
+
+    assert loads == tracks[1:]
+    expected = [mfcc_from_signal(s) for t in tracks for _, s in iter_audio_segments(t)]
+    assert all(np.array_equal(r, e) for r, e in zip(results, expected, strict=True))
