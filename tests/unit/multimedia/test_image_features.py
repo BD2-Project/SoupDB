@@ -17,8 +17,11 @@ from engine.multimedia.codebook import (
     train_codebook,
 )
 from engine.multimedia.image_features import (
+    MAX_IMAGE_SIDE,
     extract_image_vector,
     extract_sift,
+    extract_sift_cached,
+    resize_to_max_side,
     train_image_codebook,
 )
 from engine.multimedia.vector_file import VectorRecord, iter_vectors, write_vectors
@@ -26,9 +29,13 @@ from engine.multimedia.vector_file import VectorRecord, iter_vectors, write_vect
 K = 8
 
 
-def _textured_image(path, seed):
+class SimulatedCrash(Exception):
+    """Corte simulado de una ejecución larga (como un Ctrl+C a mitad)."""
+
+
+def _textured_image(path, seed, shape=(128, 128)):
     # Ruido suavizado: tiene esquinas y manchas de sobra para que SIFT encuentre keypoints.
-    noise = np.random.default_rng(seed).integers(0, 256, (128, 128), dtype=np.uint8)
+    noise = np.random.default_rng(seed).integers(0, 256, shape, dtype=np.uint8)
     cv2.imwrite(str(path), cv2.GaussianBlur(noise, (5, 5), 0))
     return path
 
@@ -177,3 +184,105 @@ def test_image_training_extracts_each_file_twice_without_keeping_descriptors(mon
     assert calls == [*images, *images]
     assert centroids.shape == (K, 128)
     assert idf.shape == (K,)
+
+
+@pytest.mark.parametrize(
+    ("shape", "expected"),
+    [((1500, 3000, 3), (512, 1024, 3)), ((2000, 1333, 3), (1024, 682, 3))],
+    ids=["landscape", "portrait"],
+)
+def test_large_image_is_reduced_keeping_aspect_ratio(shape, expected):
+    image = np.zeros(shape, dtype=np.uint8)
+
+    resized = resize_to_max_side(image)
+
+    assert resized.shape == expected
+    assert max(resized.shape[:2]) == MAX_IMAGE_SIDE
+    assert resized.shape[1] / resized.shape[0] == pytest.approx(shape[1] / shape[0], rel=1e-2)
+
+
+def test_small_image_is_not_enlarged():
+    image = np.zeros((300, 200, 3), dtype=np.uint8)
+
+    assert resize_to_max_side(image) is image
+    assert resize_to_max_side(np.zeros((1024, 1024, 3), dtype=np.uint8)).shape == (1024, 1024, 3)
+
+
+def test_large_image_is_resized_before_sift(monkeypatch, tmp_path):
+    large = _textured_image(tmp_path / "large.png", seed=7, shape=(1536, 2048))
+    seen = []
+
+    def spy(image, max_side=MAX_IMAGE_SIDE):
+        resized = resize_to_max_side(image, max_side)
+        seen.append(resized.shape)
+        return resized
+
+    monkeypatch.setattr(image_features, "resize_to_max_side", spy)
+    descriptors = extract_sift(large)
+
+    assert seen == [(768, 1024, 3)]
+    assert descriptors.ndim == 2
+    assert len(descriptors) > 0
+    assert descriptors.shape[1] == 128
+
+
+def _count_sift_calls(monkeypatch):
+    calls = []
+    real = image_features.extract_sift
+
+    def spy(path, max_side=MAX_IMAGE_SIDE):
+        calls.append(path)
+        return real(path, max_side)
+
+    monkeypatch.setattr(image_features, "extract_sift", spy)
+    return calls
+
+
+def test_cached_sift_is_computed_once_and_equals_direct_extraction(monkeypatch, tmp_path, images):
+    cache = tmp_path / "cache"
+    calls = _count_sift_calls(monkeypatch)
+
+    first = extract_sift_cached(images[0], cache)
+    second = extract_sift_cached(images[0], cache)
+
+    assert calls == [images[0]]
+    assert np.array_equal(first, second)
+    assert np.array_equal(first, extract_sift(images[0]))
+    assert first.shape[1] == 128
+
+
+def test_other_max_side_is_another_cache_entry(monkeypatch, tmp_path, images):
+    cache = tmp_path / "cache"
+    calls = _count_sift_calls(monkeypatch)
+
+    extract_sift_cached(images[0], cache)
+    extract_sift_cached(images[0], cache, max_side=64)
+
+    assert calls == [images[0], images[0]]
+
+
+def test_interrupted_image_run_resumes_from_cache(monkeypatch, tmp_path):
+    paths = [_textured_image(tmp_path / f"img{i}.png", seed=i) for i in range(6)]
+    cache = tmp_path / "cache"
+    real = image_features.extract_sift
+    calls = []
+
+    def crashes_on_fourth(path, max_side=MAX_IMAGE_SIDE):
+        if len(calls) == 3:
+            raise SimulatedCrash
+        calls.append(path)
+        return real(path, max_side)
+
+    monkeypatch.setattr(image_features, "extract_sift", crashes_on_fourth)
+    with pytest.raises(SimulatedCrash):
+        for path in paths:
+            extract_sift_cached(path, cache)
+    assert calls == paths[:3]
+
+    # 2ª ejecución: los 3 primeros salen de la caché y solo se extraen los que faltan.
+    monkeypatch.setattr(image_features, "extract_sift", real)
+    resumed = _count_sift_calls(monkeypatch)
+    results = [extract_sift_cached(path, cache) for path in paths]
+
+    assert resumed == paths[3:]
+    assert all(np.array_equal(r, real(p)) for r, p in zip(results, paths, strict=True))
