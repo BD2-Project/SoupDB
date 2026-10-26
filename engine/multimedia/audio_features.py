@@ -10,6 +10,7 @@ from engine.multimedia.codebook import (
     assign_words,
     compute_idf,
     count_words,
+    sample_descriptors,
     tfidf_vector,
     train_codebook,
 )
@@ -30,10 +31,14 @@ def extract_mfcc(path: str | Path, n_mfcc: int = N_MFCC) -> np.ndarray:
 
 
 def train_audio_codebook(
-    paths: Sequence[str | Path], k: int, seed: int = 0
+    paths: Sequence[str | Path], k: int, seed: int = 0, max_descriptors: int | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
     descriptors = [extract_mfcc(path) for path in paths]
-    centroids = train_codebook(np.vstack(descriptors), k, seed)
+    if max_descriptors is None:
+        training = np.vstack(descriptors)
+    else:
+        training = sample_descriptors(descriptors, max_descriptors, seed)
+    centroids = train_codebook(training, k, seed)
     histograms = [count_words(assign_words(d, centroids), k) for d in descriptors]
     idf = compute_idf(np.array(histograms))
     return centroids, idf

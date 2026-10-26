@@ -4,11 +4,26 @@ No depende del tipo de medio: recibe descriptores (una fila por descriptor), asÃ
 que imagen (SIFT) y audio (MFCC) comparten estas mismas funciones.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 from sklearn.cluster import KMeans
 from threadpoolctl import threadpool_limits
+
+
+def sample_descriptors(
+    descriptor_sets: Sequence[np.ndarray], max_descriptors: int, seed: int = 0
+) -> np.ndarray:
+    # Solo acota lo que recibe K-Means; histogramas e IDF siguen usando todos los descriptores.
+    if max_descriptors <= 0:
+        raise ValueError(f"max_descriptors must be positive, got {max_descriptors}")
+    descriptors = np.vstack(descriptor_sets)
+    if len(descriptors) <= max_descriptors:
+        return descriptors
+    rng = np.random.default_rng(seed)
+    chosen = rng.choice(len(descriptors), size=max_descriptors, replace=False)
+    return descriptors[chosen]
 
 
 def train_codebook(descriptors: np.ndarray, k: int, seed: int = 0) -> np.ndarray:

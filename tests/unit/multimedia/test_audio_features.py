@@ -117,3 +117,10 @@ def test_audio_vectors_round_trip_through_vectores_bin(tmp_path, audios, model):
 
     assert [(r.id, r.path) for r in read] == [(r.id, r.path) for r in records]
     assert [list(r.vector) for r in read] == [np.float32(r.vector).tolist() for r in records]
+
+
+def test_sampled_codebook_keeps_shapes(audios):
+    centroids, idf = train_audio_codebook(audios, K, seed=0, max_descriptors=60)
+
+    assert centroids.shape == (K, N_MFCC)
+    assert len(extract_audio_vector(audios[0], centroids, idf)) == K

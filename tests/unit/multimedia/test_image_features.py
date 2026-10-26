@@ -134,3 +134,22 @@ def test_image_vectors_round_trip_through_vectores_bin(tmp_path, images, model):
 
     assert [(r.id, r.path) for r in read] == [(r.id, r.path) for r in records]
     assert [list(r.vector) for r in read] == [np.float32(r.vector).tolist() for r in records]
+
+
+def test_sampled_codebook_keeps_shapes(images):
+    centroids, idf = train_image_codebook(images, K, seed=0, max_descriptors=100)
+
+    assert centroids.shape == (K, 128)
+    assert len(extract_image_vector(images[0], centroids, idf)) == K
+
+
+def test_sampled_codebook_computes_idf_over_every_image(tmp_path, images):
+    # La imagen en blanco no aporta descriptores a la muestra, pero sí cuenta en N.
+    blank = tmp_path / "blank.png"
+    cv2.imwrite(str(blank), np.full((64, 64), 127, dtype=np.uint8))
+    paths = [*images, blank]
+
+    centroids, idf = train_image_codebook(paths, K, seed=0, max_descriptors=100)
+
+    histograms = [count_words(assign_words(extract_sift(p), centroids), K) for p in paths]
+    assert np.array_equal(idf, compute_idf(np.array(histograms)))
