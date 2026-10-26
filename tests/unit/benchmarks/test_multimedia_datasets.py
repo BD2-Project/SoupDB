@@ -34,8 +34,8 @@ def _coco(root, n=7):
     return root
 
 
-def _fma(root, tracks=2, seconds=17.0):
-    # Como FMA: carpetas 000/, 001/ con pistas NNNNNN.mp3 (aquí .wav). 17 s -> 4 segmentos.
+def _fma(root, tracks=2, seconds=18.0):
+    # Como FMA: carpetas 000/, 001/ con pistas NNNNNN.mp3 (aquí .wav). 18 s -> 4 segmentos.
     rng = np.random.default_rng(0)
     for i in range(tracks):
         path = root / f"{i:03d}" / f"{i:06d}.wav"
@@ -87,7 +87,7 @@ def test_same_files_give_the_same_manifests(tmp_path):
 def test_too_few_objects_stop_without_leaving_manifests(tmp_path):
     with pytest.raises(SystemExit, match="se necesitan 6"):
         prepare_images(_coco(tmp_path / "coco", n=5), tmp_path / "m", SIZES)
-    # 2 pistas de 17 s = 8 segmentos < 10.
+    # 2 pistas de 18 s = 8 segmentos < 10.
     with pytest.raises(SystemExit, match="solo hay 8"):
         prepare_audio(_fma(tmp_path / "fma"), tmp_path / "m", (2, 10))
     assert list((tmp_path / "m").glob("*")) == []

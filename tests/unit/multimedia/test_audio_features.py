@@ -1,5 +1,6 @@
 import gc
 import math
+import warnings
 import weakref
 
 import numpy as np
@@ -9,8 +10,10 @@ import soundfile as sf
 from engine.indexes.vector.metrics import euclidean_distance
 from engine.multimedia import audio_features
 from engine.multimedia.audio_features import (
+    MIN_SEGMENT_RATIO,
     N_MFCC,
     SAMPLE_RATE,
+    SEGMENT_SECONDS,
     count_audio_segments,
     extract_audio_vector,
     extract_mfcc,
@@ -236,7 +239,7 @@ def test_segment_out_of_range_raises(tmp_path, track_18s):
 
 
 def test_interrupted_audio_run_resumes_from_cache(monkeypatch, tmp_path):
-    tracks = [_write_tone(tmp_path / f"t{i}.wav", 220 * (i + 1), seconds=12.0) for i in range(3)]
+    tracks = [_write_tone(tmp_path / f"t{i}.wav", 220 * (i + 1), seconds=13.0) for i in range(3)]
     work = [(track, segment) for track in tracks for segment in range(3)]
     cache = tmp_path / "cache"
 
@@ -263,3 +266,63 @@ def test_interrupted_audio_run_resumes_from_cache(monkeypatch, tmp_path):
     assert loads == tracks[1:]
     expected = [mfcc_from_signal(s) for t in tracks for _, s in iter_audio_segments(t)]
     assert all(np.array_equal(r, e) for r, e in zip(results, expected, strict=True))
+
+
+SEGMENT = round(SEGMENT_SECONDS * SAMPLE_RATE)  # 110250 muestras
+
+
+def _write_samples(path, n):
+    # Exactamente n muestras a 22050 Hz: librosa no remuestrea y la longitud no cambia.
+    rng = np.random.default_rng(n)
+    sf.write(path, 0.3 * rng.standard_normal(n), SAMPLE_RATE)
+    return path
+
+
+def _lengths(path):
+    return [len(samples) for _, samples in iter_audio_segments(path)]
+
+
+def test_tiny_decoding_tail_is_not_a_segment(tmp_path):
+    # 15 s + 60 muestras: la cola de 60 muestras no se convierte en objeto.
+    track = _write_samples(tmp_path / "tail.wav", 3 * SEGMENT + 60)
+
+    assert _lengths(track) == [SEGMENT] * 3
+    assert count_audio_segments(track) == 3
+    with pytest.raises(IndexError):
+        extract_mfcc_cached(track, 3, tmp_path / "cache")
+    # Ya no hay segmentos más cortos que n_fft: librosa no tiene nada de qué avisar.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        for index in range(3):
+            assert extract_mfcc_cached(track, index, tmp_path / "cache").shape[1] == N_MFCC
+
+
+def test_tail_of_a_tenth_of_a_second_is_dropped(tmp_path):
+    track = _write_tone(tmp_path / "t.wav", 440, seconds=15.1)
+
+    assert _lengths(track) == [SEGMENT] * 3
+
+
+def test_last_segment_of_exactly_half_is_kept(tmp_path):
+    half = round(MIN_SEGMENT_RATIO * SEGMENT)  # 2,5 s
+    kept = _write_samples(tmp_path / "kept.wav", 2 * SEGMENT + half)
+    dropped = _write_samples(tmp_path / "dropped.wav", 2 * SEGMENT + half - 1)
+
+    assert _lengths(kept) == [SEGMENT, SEGMENT, half]
+    assert _lengths(dropped) == [SEGMENT, SEGMENT]
+
+
+@pytest.mark.parametrize(
+    "n",
+    [0, 60, SEGMENT // 2 - 1, SEGMENT // 2 + 1, SEGMENT, 3 * SEGMENT + 60, 3 * SEGMENT + 66150],
+    ids=["empty", "60", "under-half", "over-half", "one", "tail-60", "18s"],
+)
+def test_count_matches_iteration(tmp_path, n):
+    track = _write_samples(tmp_path / "t.wav", n)
+
+    lengths = _lengths(track)
+
+    assert count_audio_segments(track) == len(lengths)
+    # Todos completos menos, como mucho, el último, que dura al menos la mitad.
+    assert all(length == SEGMENT for length in lengths[:-1])
+    assert all(length >= MIN_SEGMENT_RATIO * SEGMENT for length in lengths)
