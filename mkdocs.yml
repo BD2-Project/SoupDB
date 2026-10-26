@@ -45,6 +45,7 @@ nav:
   - Inicio: index.md
   - Contratos: contratos.md
   - Índices vectoriales: vectores.md
+  - Datasets multimedia: datasets_multimedia.md
   - Protocolo: protocolo.md
   - Driver: driver.md
   - Transacciones: transacciones.md

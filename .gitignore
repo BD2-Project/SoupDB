@@ -263,3 +263,7 @@ Thumbs.db
 !.vscode/tasks.json
 !.vscode/launch.json
 .idea/
+
+# Datos multimedia generados (manifests, caché de descriptores, codebooks, vectores.bin).
+# Se regeneran con benchmarks/scripts/{prepare_multimedia_datasets,build_multimedia_vectors}.py
+benchmarks/data/
