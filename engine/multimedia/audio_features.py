@@ -33,13 +33,11 @@ def extract_mfcc(path: str | Path, n_mfcc: int = N_MFCC) -> np.ndarray:
 def train_audio_codebook(
     paths: Sequence[str | Path], k: int, seed: int = 0, max_descriptors: int | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
-    descriptors = [extract_mfcc(path) for path in paths]
-    if max_descriptors is None:
-        training = np.vstack(descriptors)
-    else:
-        training = sample_descriptors(descriptors, max_descriptors, seed)
+    # 1ª pasada: cada archivo se extrae, alimenta la muestra y se libera.
+    training = sample_descriptors((extract_mfcc(path) for path in paths), max_descriptors, seed)
     centroids = train_codebook(training, k, seed)
-    histograms = [count_words(assign_words(d, centroids), k) for d in descriptors]
+    # 2ª pasada: se vuelve a extraer cada archivo para su histograma completo.
+    histograms = [count_words(assign_words(extract_mfcc(path), centroids), k) for path in paths]
     idf = compute_idf(np.array(histograms))
     return centroids, idf
 
