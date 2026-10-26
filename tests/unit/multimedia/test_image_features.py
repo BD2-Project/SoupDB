@@ -1,10 +1,13 @@
+import gc
 import math
+import weakref
 
 import cv2
 import numpy as np
 import pytest
 
 from engine.indexes.vector.metrics import euclidean_distance
+from engine.multimedia import image_features
 from engine.multimedia.codebook import (
     assign_words,
     compute_idf,
@@ -153,3 +156,24 @@ def test_sampled_codebook_computes_idf_over_every_image(tmp_path, images):
 
     histograms = [count_words(assign_words(extract_sift(p), centroids), K) for p in paths]
     assert np.array_equal(idf, compute_idf(np.array(histograms)))
+
+
+def test_image_training_extracts_each_file_twice_without_keeping_descriptors(monkeypatch, images):
+    calls = []
+    refs = []
+
+    def spy(path):
+        gc.collect()
+        # Al extraer un archivo, como mucho siguen vivos los descriptores del anterior.
+        assert all(ref() is None for ref in refs[:-1])
+        calls.append(path)
+        descriptors = extract_sift(path)
+        refs.append(weakref.ref(descriptors))
+        return descriptors
+
+    monkeypatch.setattr(image_features, "extract_sift", spy)
+    centroids, idf = image_features.train_image_codebook(images, K, seed=0, max_descriptors=100)
+
+    assert calls == [*images, *images]
+    assert centroids.shape == (K, 128)
+    assert idf.shape == (K,)

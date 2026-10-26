@@ -1,10 +1,13 @@
+import gc
 import math
+import weakref
 
 import numpy as np
 import pytest
 import soundfile as sf
 
 from engine.indexes.vector.metrics import euclidean_distance
+from engine.multimedia import audio_features
 from engine.multimedia.audio_features import (
     N_MFCC,
     SAMPLE_RATE,
@@ -124,3 +127,24 @@ def test_sampled_codebook_keeps_shapes(audios):
 
     assert centroids.shape == (K, N_MFCC)
     assert len(extract_audio_vector(audios[0], centroids, idf)) == K
+
+
+def test_audio_training_extracts_each_file_twice_without_keeping_descriptors(monkeypatch, audios):
+    calls = []
+    refs = []
+
+    def spy(path):
+        gc.collect()
+        # Al extraer un archivo, como mucho siguen vivos los descriptores del anterior.
+        assert all(ref() is None for ref in refs[:-1])
+        calls.append(path)
+        descriptors = extract_mfcc(path)
+        refs.append(weakref.ref(descriptors))
+        return descriptors
+
+    monkeypatch.setattr(audio_features, "extract_mfcc", spy)
+    centroids, idf = audio_features.train_audio_codebook(audios, K, seed=0, max_descriptors=60)
+
+    assert calls == [*audios, *audios]
+    assert centroids.shape == (K, N_MFCC)
+    assert idf.shape == (K,)
