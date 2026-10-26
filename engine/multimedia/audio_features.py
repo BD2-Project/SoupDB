@@ -24,6 +24,8 @@ from engine.multimedia.descriptor_cache import cache_path, load_array, save_arra
 SAMPLE_RATE = 22050
 N_MFCC = 20
 SEGMENT_SECONDS = 5.0
+# El último segmento se conserva si dura al menos esta fracción de SEGMENT_SECONDS.
+MIN_SEGMENT_RATIO = 0.5
 
 
 def load_audio(path: str | Path) -> np.ndarray:
@@ -54,9 +56,14 @@ def _split(signal: np.ndarray, duration: float) -> list[np.ndarray]:
     if duration <= 0:
         raise ValueError(f"duration must be positive, got {duration}")
     size = round(duration * SAMPLE_RATE)
-    # Pista de 18 s con duration=5: [0-5), [5-10), [10-15), [15-18]. El último se queda
-    # aunque sea más corto. Son vistas sobre la señal: no se copian muestras.
-    return [signal[start : start + size] for start in range(0, len(signal), size)]
+    # Pista de 18 s con duration=5: [0-5), [5-10), [10-15), [15-18]. Son vistas sobre la
+    # señal: no se copian muestras ni se rellena nada.
+    segments = [signal[start : start + size] for start in range(0, len(signal), size)]
+    # Solo el último puede ser más corto. Se queda si dura al menos la mitad (3 s sí);
+    # una cola de decodificación (0,1 s, 60 muestras) no es un objeto del dataset.
+    if segments and len(segments[-1]) < MIN_SEGMENT_RATIO * size:
+        segments.pop()
+    return segments
 
 
 def iter_audio_segments(

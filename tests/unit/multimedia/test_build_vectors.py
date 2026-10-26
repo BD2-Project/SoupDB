@@ -36,9 +36,9 @@ def _image_root(root):
 
 
 def _audio_root(root):
-    # 12 s -> 3 segmentos, 7 s -> 2 segmentos. El ruido da frames variados para K-Means.
+    # 13 s -> 3 segmentos (5+5+3), 8 s -> 2 (5+3). El ruido da frames variados para K-Means.
     rng = np.random.default_rng(0)
-    for name, frequency, seconds in [("jazz/a.wav", 330, 12.0), ("rock/b.wav", 880, 7.0)]:
+    for name, frequency, seconds in [("jazz/a.wav", 330, 13.0), ("rock/b.wav", 880, 8.0)]:
         t = np.arange(int(seconds * SAMPLE_RATE)) / SAMPLE_RATE
         signal = 0.4 * np.sin(2 * np.pi * frequency * t) + 0.1 * rng.standard_normal(len(t))
         (root / name).parent.mkdir(parents=True, exist_ok=True)
