@@ -33,9 +33,11 @@ docs = [
   "pymdown-extensions>=10.0",
 ]
 multimedia = [
+  "librosa>=0.11.0",
   "numpy>=2.4.6",
   "opencv-python-headless>=5.0.0.93",
   "scikit-learn>=1.9.1",
+  "soundfile>=0.14.0",
   "threadpoolctl>=3.7.0",
 ]
 
