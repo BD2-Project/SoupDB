@@ -6,6 +6,8 @@ planner contract) and report the affected-row count.
 """
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from engine.common.errors import QueryExecutionError
@@ -26,7 +28,7 @@ from engine.query.ast import (
     Statement,
 )
 from engine.query.evaluator import Schema, evaluate
-from engine.query.operators import PlanNode
+from engine.query.operators import Operator, PlanNode
 from engine.query.planner import Plan, is_spatial_index
 from engine.query.resultset import ResultSet
 
@@ -95,20 +97,37 @@ def _transaction_control_error(statement: Statement) -> QueryExecutionError:
     )
 
 
+@contextmanager
+def _opened_root(root: Operator) -> Iterator[None]:
+    """Close the operator even when open() fails partway through.
+
+    Cleanup errors on a failed query must not mask the original failure.
+    On a successful query, a close() error remains visible to the caller.
+    """
+    try:
+        root.open()
+        yield
+    except BaseException:
+        try:
+            root.close()
+        except Exception:
+            pass  # Preserve the original open/next/decode error.
+        raise
+    else:
+        root.close()
+
+
 def _execute_select(plan: Plan) -> ResultSet:
     root = plan.root
     if root is None:
         raise QueryExecutionError("select plan has no operator tree")
-    root.open()
-    try:
+    with _opened_root(root):
         rows = []
         while True:
             record = root.next()
             if record is None:
                 break
             rows.append(decode_row(record.data, root.schema))
-    finally:
-        root.close()
     return ResultSet(columns=plan.output_schema, rows=tuple(rows))
 
 
@@ -222,15 +241,12 @@ def _explain_analyze(statement: ExplainStatement, plan: Plan, catalog: Any) -> P
     if inner is None:
         raise QueryExecutionError("EXPLAIN requires an inner statement")
     if plan.root is not None:
-        plan.root.open()
-        try:
+        with _opened_root(plan.root):
             try:
                 while plan.root.next() is not None:
                     pass
             finally:
                 node = plan.root.explain()
-        finally:
-            plan.root.close()
         return node
     result = execute(Plan(statement=inner), catalog)
     node = _statement_node(inner)
