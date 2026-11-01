@@ -9,6 +9,7 @@ que es ilegible para quien mira la consulta, no el código.
 from engine.query.ast import (
     BetweenExpr,
     BinaryExpr,
+    BoundScoreExpr,
     ColumnRef,
     CompareExpr,
     DistanceExpr,
@@ -20,9 +21,12 @@ from engine.query.ast import (
     LikeExpr,
     Literal,
     LogicalExpr,
+    MatchExpr,
     NotExpr,
     PointExpr,
     PolygonExpr,
+    ScoreExpr,
+    StarExpr,
 )
 
 
@@ -42,6 +46,12 @@ def format_expr(expr: Expr) -> str:
         return _literal(expr.value)
     if isinstance(expr, ColumnRef):
         return expr.name
+    if isinstance(expr, StarExpr):
+        return "*"
+    if isinstance(expr, MatchExpr):
+        return f"MATCH({format_expr(expr.column)}, {format_expr(expr.query)})"
+    if isinstance(expr, (ScoreExpr, BoundScoreExpr)):
+        return "SIMILARITY_SCORE()" if expr.kind == "vector" else "SCORE()"
     if isinstance(expr, (CompareExpr, BinaryExpr)):
         return f"{format_expr(expr.left)} {expr.op} {format_expr(expr.right)}"
     if isinstance(expr, LogicalExpr):

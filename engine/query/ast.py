@@ -119,6 +119,18 @@ class ScoreExpr(Expr):
 
 
 @dataclass(frozen=True)
+class BoundScoreExpr(Expr):
+    """Internal score reference resolved to a temporary FLOAT column slot.
+
+    Not a user-addressable column or a ranking operation. The planner
+    resolves ``ScoreExpr`` into this node before evaluating a row.
+    """
+
+    position: int
+    kind: str
+
+
+@dataclass(frozen=True)
 class FunctionExpr(Expr):
     """``arg`` is None when the function takes no argument (e.g. ``COUNT(*)``)."""
 

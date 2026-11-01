@@ -21,6 +21,7 @@ from engine.indexes.base import Index, Key
 from engine.indexes.rtree import Point, Polygon2D, RTree, SpatialQueries
 from engine.query.ast import (
     BetweenExpr,
+    BoundScoreExpr,
     ColumnRef,
     CompareExpr,
     DistanceExpr,
@@ -585,6 +586,8 @@ def _infer_type(expr: Expr, schema: Schema) -> ColumnDef:
         raise QueryExecutionError(f"unknown column {expr.name!r}")
     if isinstance(expr, Literal):
         return ColumnDef("", _literal_type(expr.value))
+    if isinstance(expr, BoundScoreExpr):
+        return ColumnDef("", ColumnType.FLOAT)
     if isinstance(expr, _BOOL_EXPRS):
         return ColumnDef("", ColumnType.BOOL)
     if isinstance(expr, FunctionExpr):

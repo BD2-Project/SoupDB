@@ -23,7 +23,7 @@ radius predicate it can answer, and never for a scalar ``=``/``BETWEEN``
 access path, because its key is a location and not a scalar value.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
 
 from engine.algorithms.spatial import euclidean_metric
@@ -34,6 +34,7 @@ from engine.indexes.rtree import RTree
 from engine.query.ast import (
     BeginTransactionStatement,
     BetweenExpr,
+    BoundScoreExpr,
     ColumnRef,
     CompareExpr,
     CreateIndexStatement,
@@ -53,12 +54,15 @@ from engine.query.ast import (
     LimitClause,
     Literal,
     LogicalExpr,
+    MatchExpr,
     NotExpr,
     OrderByItem,
     PointExpr,
     PolygonExpr,
+    ScoreExpr,
     SelectColumn,
     SelectStatement,
+    StarExpr,
     Statement,
 )
 from engine.query.evaluator import Schema
@@ -126,7 +130,29 @@ def plan(statement: Statement, catalog: Any) -> Plan:
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
 
 
+def _contains_unplanned_ranked_expr(value: object) -> bool:
+    """Find ranked nodes inside SELECT clauses, including nested expressions.
+
+    The old planner must not silently treat MATCH() as a regular predicate or
+    expose SCORE() without a ranked source. The C07 planner replaces this guard.
+    """
+    if isinstance(value, (MatchExpr, ScoreExpr, BoundScoreExpr, StarExpr)):
+        return True
+    if isinstance(value, (tuple, list)):
+        return any(_contains_unplanned_ranked_expr(item) for item in value)
+    if is_dataclass(value):
+        return any(
+            _contains_unplanned_ranked_expr(getattr(value, field.name)) for field in fields(value)
+        )
+    return False
+
+
 def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
+    if statement.search is not None or _contains_unplanned_ranked_expr(statement):
+        raise QueryExecutionError(
+            "ranked SQL search requires the ranked planner; "
+            "MATCH()/SCORE()/USING cannot execute yet"
+        )
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
     # Si el contrato del catálogo llega a exponer su DiskManager, los planes
