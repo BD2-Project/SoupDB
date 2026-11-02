@@ -23,17 +23,19 @@ radius predicate it can answer, and never for a scalar ``=``/``BETWEEN``
 access path, because its key is a location and not a scalar value.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
 
 from engine.algorithms.spatial import euclidean_metric
 from engine.common.errors import QueryExecutionError
+from engine.common.ranked_catalog import RankedMetadata, check_ranked_metadata
 from engine.common.schema import ColumnType
 from engine.indexes.base import Index
 from engine.indexes.rtree import RTree
 from engine.query.ast import (
     BeginTransactionStatement,
     BetweenExpr,
+    BoundScoreExpr,
     ColumnRef,
     CompareExpr,
     CreateIndexStatement,
@@ -53,15 +55,20 @@ from engine.query.ast import (
     LimitClause,
     Literal,
     LogicalExpr,
+    MatchExpr,
     NotExpr,
     OrderByItem,
     PointExpr,
     PolygonExpr,
+    ScoreExpr,
     SelectColumn,
     SelectStatement,
+    SimilarToExpr,
+    StarExpr,
     Statement,
 )
 from engine.query.evaluator import Schema
+from engine.query.index_maintenance import ranked_targets
 from engine.query.operators import (
     Aggregate,
     Distinct,
@@ -126,7 +133,41 @@ def plan(statement: Statement, catalog: Any) -> Plan:
     raise QueryExecutionError(f"unsupported statement {type(statement).__name__}")
 
 
+def _contains_unplanned_ranked_expr(value: object) -> bool:
+    """Find ranked nodes inside SELECT clauses, including nested expressions.
+
+    The old planner must not silently treat MATCH() as a regular predicate or
+    expose SCORE() without a ranked source. The C07 planner replaces this guard.
+    """
+    if isinstance(value, (MatchExpr, SimilarToExpr, ScoreExpr, BoundScoreExpr, StarExpr)):
+        return True
+    if isinstance(value, (tuple, list)):
+        return any(_contains_unplanned_ranked_expr(item) for item in value)
+    if is_dataclass(value):
+        return any(
+            _contains_unplanned_ranked_expr(getattr(value, field.name)) for field in fields(value)
+        )
+    return False
+
+
 def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
+    if statement.search is not None or _contains_unplanned_ranked_expr(statement):
+        # Only a catalog exposing ranked bindings may enter the specialized path.
+        # Unsupported syntax remains fail-closed, including old C05 guard tests.
+        if callable(getattr(catalog, "ranked_indexes_for", None)):
+            if statement.search is not None and statement.search.strategy in ("IVF", "HNSW"):
+                from engine.query.ranked_vector_planning import plan_vector_search
+
+                root = plan_vector_search(statement, catalog)
+            else:
+                from engine.query.ranked_planning import plan_text_search
+
+                root = plan_text_search(statement, catalog)
+            return Plan(statement=statement, root=root, output_schema=root.schema)
+        raise QueryExecutionError(
+            "ranked SQL search requires the ranked planner; "
+            "MATCH()/SCORE()/USING cannot execute yet"
+        )
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
     # Si el contrato del catálogo llega a exponer su DiskManager, los planes
@@ -193,8 +234,18 @@ def _plan_explain(statement: ExplainStatement, catalog: Any) -> Plan:
     return Plan(statement=statement, root=inner.root, output_schema=inner.output_schema)
 
 
+def _ensure_ranked_write_safe(catalog: Any, table: str) -> None:
+    """Permit ranked writes only with a reversible provider and an undo journal."""
+    targets = ranked_targets(catalog, table)
+    if targets and not getattr(catalog, "ranked_transactional", False):
+        raise QueryExecutionError(
+            "ranked DML is blocked without TransactionalSession with reversible undo"
+        )
+
+
 def _plan_insert(statement: InsertStatement, catalog: Any) -> Plan:
     schema = catalog.schema(statement.table)
+    _ensure_ranked_write_safe(catalog, statement.table)
     if statement.columns:
         expected = {column.name for column in schema}
         if len(statement.columns) != len(schema) or set(statement.columns) != expected:
@@ -208,6 +259,7 @@ def _plan_insert(statement: InsertStatement, catalog: Any) -> Plan:
 
 def _plan_delete(statement: DeleteStatement, catalog: Any) -> Plan:
     schema = catalog.schema(statement.table)
+    _ensure_ranked_write_safe(catalog, statement.table)
     catalog.file_org(statement.table)
     if statement.where is not None:
         _validate_columns(statement.where, schema)
@@ -230,6 +282,27 @@ def _plan_create(statement: CreateTableStatement, catalog: Any) -> Plan:
 
 
 def _plan_create_index(statement: CreateIndexStatement, catalog: Any) -> Plan:
+    if statement.index_type in ("INVERTED", "IVF", "HNSW"):
+        schema = catalog.schema(statement.table)
+        meta = RankedMetadata(
+            statement.index_name,
+            statement.table,
+            statement.column,
+            statement.index_type,
+            statement.metric,
+            statement.dimension,
+            statement.profile_id,
+        )
+        check_ranked_metadata(meta, schema)
+        if catalog.index_location(statement.index_name) is not None:
+            raise QueryExecutionError(f"index {statement.index_name!r} already exists")
+        if getattr(catalog, "ranked_factory", None) is None:
+            raise QueryExecutionError("ranked CREATE INDEX requires a configured index factory")
+        return Plan(statement=statement)
+    if any(
+        value is not None for value in (statement.metric, statement.dimension, statement.profile_id)
+    ):
+        raise QueryExecutionError("scalar/spatial CREATE INDEX cannot have vector options")
     if statement.index_type not in _INDEX_TYPES:
         raise QueryExecutionError(
             f"unsupported index type {statement.index_type!r}; use {', '.join(_INDEX_TYPES)}"

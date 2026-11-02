@@ -19,6 +19,11 @@ Motor de base de datos **multimodal** (relacional, espacial y vectorial) constru
 
 ## Arquitectura
 
+**SQL textual y multimedia:** el motor soporta la integración SQL con
+proveedores rankeados inyectados. Las pruebas actuales usan fakes; la
+integración con los índices reales sigue en desarrollo. Ver
+[consultas y límites](docs/sql_texto_multimedia.md).
+
 ```mermaid
 flowchart LR
     subgraph Chef["SoupChef (Cliente)"]

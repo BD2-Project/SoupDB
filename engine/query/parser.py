@@ -39,12 +39,17 @@ from engine.query.ast import (
     LimitClause,
     Literal,
     LogicalExpr,
+    MatchExpr,
     NotExpr,
     OrderByItem,
     PointExpr,
     PolygonExpr,
+    ScoreExpr,
+    SearchOptions,
     SelectColumn,
     SelectStatement,
+    SimilarToExpr,
+    StarExpr,
     Statement,
     UpdateStatement,
 )
@@ -89,6 +94,14 @@ class _Parser:
 
     def _match_keyword(self, keyword: str) -> bool:
         if self._check_keyword(keyword):
+            self._advance()
+            return True
+        return False
+
+    def _match_word(self, word: str) -> bool:
+        """Consume a contextual SQL word without globally reserving it."""
+        token = self._peek()
+        if token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD) and token.value.upper() == word:
             self._advance()
             return True
         return False
@@ -293,14 +306,60 @@ class _Parser:
         column = self._expect_kind(TokenKind.IDENTIFIER).value
         self._expect_kind(TokenKind.RPAREN)
         index_type = "BTREE"
+        metric = None
+        dimension = None
+        profile_id = None
         if self._match_keyword("TYPE"):
             index_type = self._expect_ident_or_keyword()
+            if self._match_word("USING"):
+                raise QueryParseError("CREATE INDEX cannot combine TYPE and USING")
+        elif self._match_word("USING"):
+            index_type = self._expect_ident_or_keyword()
+            if index_type not in ("INVERTED", "IVF", "HNSW"):
+                raise QueryParseError(f"unsupported specialized index {index_type!r}")
+            if self._match_word("WITH"):
+                seen: set[str] = set()
+                while True:
+                    key = self._expect_ident_or_keyword()
+                    if key not in ("METRIC", "DIMENSION", "PROFILE") or key in seen:
+                        raise QueryParseError(f"unsupported or repeated index option {key!r}")
+                    seen.add(key)
+                    eq = self._expect_kind(TokenKind.OPERATOR)
+                    if eq.value != "=":
+                        raise QueryParseError("index options require '='")
+                    if key == "METRIC":
+                        metric = self._expect_ident_or_keyword().lower()
+                        if metric not in ("euclidean", "cosine", "inner_product"):
+                            raise QueryParseError(f"unsupported metric {metric!r}")
+                    elif key == "DIMENSION":
+                        token = self._expect_kind(TokenKind.NUMBER)
+                        if not token.value.isdecimal() or int(token.value) <= 0:
+                            raise QueryParseError("DIMENSION must be a positive integer")
+                        dimension = int(token.value)
+                    else:
+                        token = self._expect_kind(TokenKind.STRING)
+                        if not token.value.strip():
+                            raise QueryParseError("PROFILE must be a non-empty string")
+                        profile_id = token.value
+                    if not self._match_comma():
+                        break
+            if index_type == "INVERTED" and any(
+                value is not None for value in (metric, dimension, profile_id)
+            ):
+                raise QueryParseError("INVERTED cannot use vector options")
+            if index_type in ("IVF", "HNSW") and (
+                metric is None or dimension is None or profile_id is None
+            ):
+                raise QueryParseError("IVF/HNSW require METRIC, DIMENSION and PROFILE")
         self._error_if_not_eof()
         return CreateIndexStatement(
             index_name=index_name,
             table=table,
             column=column,
             index_type=index_type,
+            metric=metric,
+            dimension=dimension,
+            profile_id=profile_id,
         )
 
     def _parse_drop_table(self) -> DropTableStatement:
@@ -367,6 +426,29 @@ class _Parser:
         where = None
         if self._match_keyword("WHERE"):
             where = self._parse_boolean_expression()
+        search: SearchOptions | None = None
+        if self._match_word("USING"):
+            token = self._peek()
+            strategy = self._expect_ident_or_keyword()
+            if strategy not in ("TF_IDF", "BM25", "IVF", "HNSW"):
+                raise QueryParseError(
+                    f"unsupported search strategy {strategy!r} at position {token.position}"
+                )
+            metric = None
+            if self._match_word("WITH"):
+                if not self._match_word("METRIC"):
+                    raise QueryParseError("WITH requires METRIC=metric")
+                eq = self._expect_kind(TokenKind.OPERATOR)
+                if eq.value != "=":
+                    raise QueryParseError("METRIC requires '='")
+                metric = self._expect_ident_or_keyword().lower()
+                if metric not in ("cosine", "euclidean", "inner_product"):
+                    raise QueryParseError(f"unsupported vector metric {metric!r}")
+                if strategy not in ("IVF", "HNSW"):
+                    raise QueryParseError("WITH METRIC is only valid for vector search")
+            elif strategy in ("IVF", "HNSW"):
+                raise QueryParseError("vector search requires WITH METRIC=metric")
+            search = SearchOptions(strategy=strategy, metric=metric)
         group_by: tuple[Expr, ...] = ()
         if self._match_keyword("GROUP"):
             self._expect_keyword("BY")
@@ -390,6 +472,7 @@ class _Parser:
             limit=limit,
             distinct=distinct,
             joins=joins,
+            search=search,
         )
 
     def _parse_joins(self) -> tuple[JoinClause, ...]:
@@ -432,10 +515,16 @@ class _Parser:
 
     def _parse_projection(self) -> tuple[SelectColumn, ...]:
         if self._match_kind(TokenKind.STAR):
+            if not self._match_comma():
+                return ()
+            # Preserve the existing prohibition on mixing * with ordinary
+            # columns: the Part 3 contract only introduces *, SCORE().
+            score_column = self._parse_select_column()
+            if not isinstance(score_column.expr, ScoreExpr):
+                raise QueryParseError("star can only be mixed with SCORE()")
             if self._check_kind(TokenKind.COMMA):
-                token = self._peek()
-                raise QueryParseError(f"star cannot mix with columns at position {token.position}")
-            return ()
+                raise QueryParseError("only SELECT *, SCORE() is supported")
+            return (SelectColumn(StarExpr()), score_column)
         columns = [self._parse_select_column()]
         while self._match_comma():
             columns.append(self._parse_select_column())
@@ -491,8 +580,11 @@ class _Parser:
 
     @staticmethod
     def _is_boolean_expression(expr: Expr) -> bool:
+        if isinstance(expr, SimilarToExpr):
+            return True
         if isinstance(
-            expr, (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr, IntersectsExpr)
+            expr,
+            (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr, IntersectsExpr, MatchExpr),
         ):
             return True
         if isinstance(expr, Literal) and isinstance(expr.value, bool):
@@ -606,6 +698,49 @@ class _Parser:
         self._expect_kind(TokenKind.RPAREN)
         return FunctionExpr(name=name, arg=arg, distinct=distinct)
 
+    def _parse_similar_to_expr(self) -> SimilarToExpr:
+        self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        reference = self._parse_expression()
+        if not isinstance(reference, Literal) or type(reference.value) is not str:
+            raise QueryParseError("SIMILAR_TO requires a string reference")
+        self._expect_kind(TokenKind.COMMA)
+        if not self._match_word("K"):
+            raise QueryParseError("SIMILAR_TO requires named k=integer")
+        eq = self._expect_kind(TokenKind.OPERATOR)
+        if eq.value != "=":
+            raise QueryParseError("SIMILAR_TO k requires '='")
+        token = self._expect_kind(TokenKind.NUMBER)
+        if not token.value.isdigit():
+            raise QueryParseError("SIMILAR_TO k must be a non-negative integer")
+        self._expect_kind(TokenKind.RPAREN)
+        return SimilarToExpr(source=reference, k=Literal(int(token.value)))
+
+    def _parse_similarity_score_expr(self) -> ScoreExpr:
+        self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        self._expect_kind(TokenKind.RPAREN)
+        return ScoreExpr(kind="vector")
+
+    def _parse_match_expr(self) -> MatchExpr:
+        token = self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        column = self._parse_expression()
+        self._expect_kind(TokenKind.COMMA)
+        query = self._parse_expression()
+        self._expect_kind(TokenKind.RPAREN)
+        if not isinstance(column, ColumnRef):
+            raise QueryParseError(f"MATCH requires a column reference at position {token.position}")
+        if not isinstance(query, Literal) or not isinstance(query.value, str):
+            raise QueryParseError(f"MATCH requires a string literal at position {token.position}")
+        return MatchExpr(column=column, query=query)
+
+    def _parse_score_expr(self) -> ScoreExpr:
+        self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        self._expect_kind(TokenKind.RPAREN)
+        return ScoreExpr(kind="text")
+
     def _parse_point_expr(self) -> PointExpr:
         """``POINT(latitud, longitud)``, el orden que fija el enunciado (2.2.3).
 
@@ -703,6 +838,34 @@ class _Parser:
 
         if self._match_kind(TokenKind.NULL):
             return Literal(None)
+
+        if (
+            token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD)
+            and token.value.upper() == "SIMILAR_TO"
+            and self._checks_lparen_next()
+        ):
+            return self._parse_similar_to_expr()
+
+        if (
+            token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD)
+            and token.value.upper() == "SIMILARITY_SCORE"
+            and self._checks_lparen_next()
+        ):
+            return self._parse_similarity_score_expr()
+
+        if (
+            token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD)
+            and token.value.upper() == "MATCH"
+            and self._checks_lparen_next()
+        ):
+            return self._parse_match_expr()
+
+        if (
+            token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD)
+            and token.value.upper() == "SCORE"
+            and self._checks_lparen_next()
+        ):
+            return self._parse_score_expr()
 
         if self._check_keyword_in(_AGGREGATES) and self._checks_lparen_next():
             return self._parse_function_call()

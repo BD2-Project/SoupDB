@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync
+      - run: uv sync --group multimedia
       - run: uv run pytest --cov=engine --cov-report=xml
       - uses: actions/upload-artifact@v4
         with:

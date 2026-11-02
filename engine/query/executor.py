@@ -6,9 +6,12 @@ planner contract) and report the affected-row count.
 """
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from engine.common.errors import QueryExecutionError
+from engine.common.ranked_catalog import RankedMetadata
 from engine.common.record import Record, decode_row, encode_row
 from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index
@@ -26,7 +29,8 @@ from engine.query.ast import (
     Statement,
 )
 from engine.query.evaluator import Schema, evaluate
-from engine.query.operators import PlanNode
+from engine.query.index_maintenance import maintain_ranked, ranked_targets
+from engine.query.operators import Operator, PlanNode
 from engine.query.planner import Plan, is_spatial_index
 from engine.query.resultset import ResultSet
 
@@ -53,6 +57,19 @@ def execute(plan: Plan, catalog: Any) -> ResultSet:
             )
         return ResultSet(columns=())
     if isinstance(statement, CreateIndexStatement):
+        if statement.index_type in ("INVERTED", "IVF", "HNSW"):
+            catalog.create_ranked_index(
+                RankedMetadata(
+                    statement.index_name,
+                    statement.table,
+                    statement.column,
+                    statement.index_type,
+                    statement.metric,
+                    statement.dimension,
+                    statement.profile_id,
+                )
+            )
+            return ResultSet(columns=())
         catalog.create_index(
             statement.index_name,
             statement.table,
@@ -95,26 +112,44 @@ def _transaction_control_error(statement: Statement) -> QueryExecutionError:
     )
 
 
+@contextmanager
+def _opened_root(root: Operator) -> Iterator[None]:
+    """Close the operator even when open() fails partway through.
+
+    Cleanup errors on a failed query must not mask the original failure.
+    On a successful query, a close() error remains visible to the caller.
+    """
+    try:
+        root.open()
+        yield
+    except BaseException:
+        try:
+            root.close()
+        except Exception:
+            pass  # Preserve the original open/next/decode error.
+        raise
+    else:
+        root.close()
+
+
 def _execute_select(plan: Plan) -> ResultSet:
     root = plan.root
     if root is None:
         raise QueryExecutionError("select plan has no operator tree")
-    root.open()
-    try:
+    with _opened_root(root):
         rows = []
         while True:
             record = root.next()
             if record is None:
                 break
             rows.append(decode_row(record.data, root.schema))
-    finally:
-        root.close()
     return ResultSet(columns=plan.output_schema, rows=tuple(rows))
 
 
 def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
+    ranked = ranked_targets(catalog, statement.table)
     columns = statement.columns or tuple(column.name for column in schema)
     positions = [_column_index(schema, name) for name in columns]
     affected = 0
@@ -128,6 +163,7 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
                 if _skip_index_key(index, values[position]):
                     continue
                 index.insert(values[position], rid)
+        maintain_ranked(ranked, schema, tuple(values), rid, insert=True)
         affected += 1
     return ResultSet(columns=(), affected=affected)
 
@@ -135,6 +171,7 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
 def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
+    ranked = ranked_targets(catalog, statement.table)
     rows_to_remove = []
     for rid, record in file_org.scan():
         row = decode_row(record.data, schema)
@@ -149,6 +186,7 @@ def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
                 if _skip_index_key(index, row[position]):
                     continue
                 index.remove(row[position], rid)
+        maintain_ranked(ranked, schema, row, rid, insert=False)
         affected += 1
     return ResultSet(columns=(), affected=affected)
 
@@ -222,15 +260,12 @@ def _explain_analyze(statement: ExplainStatement, plan: Plan, catalog: Any) -> P
     if inner is None:
         raise QueryExecutionError("EXPLAIN requires an inner statement")
     if plan.root is not None:
-        plan.root.open()
-        try:
+        with _opened_root(plan.root):
             try:
                 while plan.root.next() is not None:
                     pass
             finally:
                 node = plan.root.explain()
-        finally:
-            plan.root.close()
         return node
     result = execute(Plan(statement=inner), catalog)
     node = _statement_node(inner)

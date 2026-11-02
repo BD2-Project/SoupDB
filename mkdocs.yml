@@ -44,7 +44,9 @@ markdown_extensions:
 nav:
   - Inicio: index.md
   - Contratos: contratos.md
+  - SQL textual y multimedia: sql_texto_multimedia.md
   - Índices vectoriales: vectores.md
+  - Datasets multimedia: datasets_multimedia.md
   - Protocolo: protocolo.md
   - Driver: driver.md
   - Transacciones: transacciones.md

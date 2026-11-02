@@ -32,12 +32,10 @@ def test_run_measures_every_technique_and_metric(tmp_path) -> None:
     assert all(r.bytes_on_disk > 0 for r in results)
     assert len(summarize(results)) == 3 * 2 * 2 * 2
 
+    assert {r.media_type for r in results} == {"synthetic"}
     path = write_results(results, tmp_path)
-    assert (
-        path.read_text()
-        .splitlines()[0]
-        .startswith(
-            "technique,operation,dataset_size,run,elapsed_ms,disk_reads,disk_writes,bytes_on_disk"
-        )
+    assert path.read_text().splitlines()[0] == (
+        "media_type,dataset_size,technique,metric,operation,run,elapsed_ms,disk_reads,"
+        "disk_writes,bytes_on_disk,memory_bytes,recall_at_k,dim,queries,k,params"
     )
     assert time_vs_size_svg(results, "knn", "k-NN").startswith("<svg")

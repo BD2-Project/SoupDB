@@ -11,6 +11,7 @@ catalog uses, not against a stand-in that could hide a mismatch.
 """
 
 from engine.common.errors import QueryExecutionError
+from engine.common.ranked import RankedBinding, validate_ranked_binding
 from engine.common.record import Record, decode_row, encode_row
 from engine.indexes.base import Index
 from engine.indexes.rtree import RTree
@@ -32,6 +33,7 @@ class _Table:
         self.engine = engine
         self.file_org = FakeFileOrganization()
         self.indexes: dict[str, Index] = {}
+        self.ranked_indexes: dict[str, RankedBinding] = {}
 
 
 class FakeCatalog:
@@ -82,6 +84,28 @@ class FakeCatalog:
             if self._index_names[index_name][1] == column
         }
 
+    def ranked_indexes_for(self, name: str, column: str | None = None) -> dict[str, RankedBinding]:
+        """Return ranked bindings without exposing them as scalar indexes."""
+        table = self._tables.get(name)
+        if table is None:
+            raise QueryExecutionError(f"unknown table {name!r}")
+        return {
+            index_name: binding
+            for index_name, binding in table.ranked_indexes.items()
+            if column is None or binding.column == column
+        }
+
+    def add_ranked_index(self, binding: RankedBinding) -> None:
+        """Register ranked index metadata without building its index."""
+        table = self._tables.get(binding.table)
+        if table is None:
+            raise QueryExecutionError(f"unknown table {binding.table!r}")
+        validate_ranked_binding(binding, table.schema)
+        if binding.name in self._index_names:
+            raise QueryExecutionError(f"index {binding.name!r} already exists")
+        table.ranked_indexes[binding.name] = binding
+        self._index_names[binding.name] = (binding.table, binding.column)
+
     def add_index(
         self,
         name: str,
@@ -124,7 +148,7 @@ class FakeCatalog:
         table = self._tables.get(name)
         if table is None:
             raise QueryExecutionError(f"unknown table {name!r}")
-        for index_name in list(table.indexes):
+        for index_name in (*table.indexes, *table.ranked_indexes):
             self._index_names.pop(index_name, None)
         del self._tables[name]
 
@@ -134,6 +158,7 @@ class FakeCatalog:
             raise QueryExecutionError(f"unknown index {index_name!r}")
         table_name, _column = location
         self._tables[table_name].indexes.pop(index_name, None)
+        self._tables[table_name].ranked_indexes.pop(index_name, None)
 
     def insert(self, name: str, row: tuple[object, ...]) -> None:
         schema = self.schema(name)
