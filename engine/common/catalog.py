@@ -24,6 +24,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from engine.common.errors import QueryExecutionError
+from engine.common.ranked import RankedBinding, validate_ranked_binding
+from engine.common.ranked_catalog import (
+    RANKED_METADATA_FILE,
+    RANKED_SCHEMA,
+    RankedMetadata,
+    check_ranked_metadata,
+)
 from engine.common.record import Record, decode_row, encode_row
 from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index
@@ -115,8 +122,16 @@ class Catalog:
     ) -> None:
         self._files = FileManager(db_path, page_size=page_size, buffer_capacity=buffer_capacity)
         self._tables: dict[str, _Table] = {}
+        self._ranked_meta: dict[str, RankedMetadata] = {}
+        self._ranked_ready: dict[str, RankedBinding] = {}
         self._seed_sys_metadata()
         self._load()
+        for row in self._read_sys_rows(RANKED_METADATA_FILE, RANKED_SCHEMA):
+            meta = RankedMetadata.from_row(row)
+            check_ranked_metadata(meta, self.schema(meta.table))
+            if meta.name in self._ranked_meta:
+                raise QueryExecutionError(f"duplicate ranked metadata {meta.name!r}")
+            self._ranked_meta[meta.name] = meta
         self._io = AggregateIOCounters(lambda: self._files.disk_managers)
 
     @property
@@ -130,8 +145,12 @@ class Catalog:
         return self._io
 
     def close(self) -> None:
-        """Flush all backing files."""
-        self._files.close()
+        """Flush backing files and release loaded ranked index instances."""
+        try:
+            for binding in self._ranked_ready.values():
+                binding.index.close()
+        finally:
+            self._files.close()
 
     # --- Duck-typed catalog contract ------------------------------------
 
@@ -157,6 +176,50 @@ class Catalog:
             for index_name, entry in table.indexes.items()
             if entry.column == column
         }
+
+    def ranked_metadata_for(
+        self, name: str, column: str | None = None
+    ) -> dict[str, RankedMetadata]:
+        """All ranked registry entries, including providers unavailable after reopen."""
+        self._table(name)
+        return {
+            key: meta
+            for key, meta in self._ranked_meta.items()
+            if meta.table == name and (column is None or meta.column == column)
+        }
+
+    def ranked_indexes_for(self, name: str, column: str | None = None) -> dict[str, RankedBinding]:
+        """Only bindings with a valid live provider (not metadata-only entries)."""
+        self._table(name)
+        return {
+            key: binding
+            for key, binding in self._ranked_ready.items()
+            if binding.table == name and (column is None or binding.column == column)
+        }
+
+    def register_ranked_index(self, binding: RankedBinding) -> None:
+        """Publish and persist an already-built ranked index atomically at registry level."""
+        schema = self.schema(binding.table)
+        validate_ranked_binding(binding, schema)
+        if binding.name in self._index_names():
+            raise QueryExecutionError(f"index {binding.name!r} already exists")
+        meta = RankedMetadata(
+            binding.name,
+            binding.table,
+            binding.column,
+            binding.algorithm,
+            binding.metric,
+            binding.dimension,
+            binding.profile_id,
+            binding.item_count,
+            binding.exact,
+            binding.exhaustive,
+            binding.mutable,
+        )
+        check_ranked_metadata(meta, schema)
+        self._insert_sys_row(RANKED_METADATA_FILE, RANKED_SCHEMA, meta.to_row())
+        self._ranked_meta[meta.name] = meta
+        self._ranked_ready[meta.name] = binding
 
     def tables(self) -> list[str]:
         return list(self._tables)
@@ -234,6 +297,9 @@ class Catalog:
 
     def index_location(self, index_name: str) -> tuple[str, str] | None:
         """Owning ``(table, column)`` of an index by name, or None if missing."""
+        ranked = self._ranked_meta.get(index_name)
+        if ranked is not None:
+            return ranked.table, ranked.column
         for table in self._tables.values():
             entry = table.indexes.get(index_name)
             if entry is not None:
@@ -247,6 +313,8 @@ class Catalog:
                 f"table name {name!r} is reserved for system tables ({_RESERVED_PREFIX}*)"
             )
         table = self._table(name)
+        for meta in list(self.ranked_metadata_for(name).values()):
+            self._forget_ranked(meta.name)
         for entry in list(table.indexes.values()):
             self._files.drop(f"ix_{entry.index_name}")
             self._delete_sys_rows(
@@ -259,8 +327,18 @@ class Catalog:
         del self._tables[name]
         self._files.drop(f"t_{name}")
 
+    def _forget_ranked(self, index_name: str) -> None:
+        binding = self._ranked_ready.pop(index_name, None)
+        self._delete_sys_rows(RANKED_METADATA_FILE, RANKED_SCHEMA, lambda row: row[0] == index_name)
+        self._ranked_meta.pop(index_name, None)
+        if binding is not None:
+            binding.index.close()
+
     def drop_index(self, index_name: str) -> None:
         """Remove an index, its sys row and its backing file."""
+        if index_name in self._ranked_meta:
+            self._forget_ranked(index_name)
+            return
         for table in self._tables.values():
             entry = table.indexes.get(index_name)
             if entry is None:
@@ -343,7 +421,9 @@ class Catalog:
             )
 
     def _index_names(self) -> set[str]:
-        return {name for table in self._tables.values() for name in table.indexes}
+        return set(self._ranked_meta) | {
+            name for table in self._tables.values() for name in table.indexes
+        }
 
     def _open_file(
         self,
