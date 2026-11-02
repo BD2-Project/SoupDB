@@ -174,3 +174,29 @@ Reglas de la implementación actual:
   y las opciones de búsqueda.
 - El SQL todavía no crea ni persiste estos bindings; faltan C16–C20.
   La semántica de exhaustividad del índice textual real debe confirmarla Yeimi.
+
+## SQL multimedia con índices rankeados (C11–C14)
+
+Se admiten consultas `SIMILAR_TO('referencia', k=N) USING IVF|HNSW WITH METRIC=cosine|euclidean|inner_product` y la proyección `SIMILARITY_SCORE()`. El parámetro `k` es obligatorio y se interpreta como el tamaño del conjunto de vecinos del índice; `LIMIT/OFFSET` se aplica **después**, y no amplía `k`. `k=0` devuelve cero filas sin vectorización ni búsqueda. El score es el valor original del proveedor (`mayor = mejor`), sin nuevas conversiones.
+
+La consulta selecciona un índice vectorial cuando hay **exactamente un** binding de la tabla cuyo algoritmo y métrica coincidan. Si no existe ninguno o hay varios candidatos compatibles, la consulta falla explícitamente. Cada índice debe anunciar `dimension`, `profile_id` y `metric` y estar asociado a una columna de referencia TEXT/VARCHAR.
+
+El servidor recibe un `query_vectorizer` inyectado en el catálogo con método `vectorize(reference, *, profile_id) -> Sequence[float]`. Se invoca **durante la ejecución**, nunca al parsear ni en `EXPLAIN` sin ANALYZE. El vector debe coincidir en dimensión, tener números finitos y no contener booleanos. El perfil debe ser el mismo que se usó para construir el índice, no uno elegido por extensión de archivo. El fake sirve para integración SQL; **la extracción real imagen/audio depende de C15 y del perfil de Breysi**.
+
+Por seguridad, se rechazan de momento los filtros residuales (incluidos AND, OR y NOT con `SIMILAR_TO`), `DISTINCT`, agregados, GROUP BY, HAVING y JOIN. El ANN actual no ofrece una búsqueda filtrada con garantías; aplicar un filtro relacional después del top-k sin declararlo podría devolver menos vecinos y alterar la semántica. `ORDER BY` opera sobre los `k` resultados recuperados; si ordena por un campo distinto al score, reordena ese conjunto sin ampliar el universo. Los empates en el límite y el recall ANN dependen de las garantías del proveedor.
+
+Ejemplos de consulta:
+
+```sql
+SELECT * FROM imagenes
+WHERE SIMILAR_TO('foto_consulta.jpg', k=10)
+USING HNSW WITH METRIC=cosine;
+
+SELECT nombre, artista, SIMILARITY_SCORE() AS score
+FROM canciones
+WHERE SIMILAR_TO('audio_query.mp3', k=5)
+USING IVF WITH METRIC=euclidean
+ORDER BY score DESC;
+```
+
+Estas consultas funcionan con `RankedIndex` y `QueryVectorizer` inyectados (fakes); **no implica disponibilidad del registro de perfiles ni del índice multimedia real**.

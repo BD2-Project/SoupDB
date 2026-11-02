@@ -75,7 +75,9 @@ def _validate_scalar(expr: Expr, schema) -> None:
             )
 
 
-def _order_keys(statement: SelectStatement, schema) -> tuple[tuple[OrderByItem, ...], bool]:
+def _order_keys(
+    statement: SelectStatement, schema, *, kind: str = "text"
+) -> tuple[tuple[OrderByItem, ...], bool]:
     """Bind SCORE aliases and flag ordering that requires all candidates."""
     aliases = {col.alias: col.expr for col in statement.columns if col.alias}
     position = len(schema)
@@ -86,7 +88,7 @@ def _order_keys(statement: SelectStatement, schema) -> tuple[tuple[OrderByItem, 
         if isinstance(expr, ColumnRef) and expr.name in aliases:
             expr = aliases[expr.name]
         if isinstance(expr, ScoreExpr):
-            expr = bind_score(expr, position=position, kind="text")
+            expr = bind_score(expr, position=position, kind=kind)
         elif any(
             isinstance(node, (ScoreExpr, BoundScoreExpr, MatchExpr)) for node in _walk_nodes(expr)
         ):

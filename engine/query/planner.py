@@ -153,9 +153,14 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
         # Only a catalog exposing ranked bindings may enter the specialized path.
         # Unsupported syntax remains fail-closed, including old C05 guard tests.
         if callable(getattr(catalog, "ranked_indexes_for", None)):
-            from engine.query.ranked_planning import plan_text_search
+            if statement.search is not None and statement.search.strategy in ("IVF", "HNSW"):
+                from engine.query.ranked_vector_planning import plan_vector_search
 
-            root = plan_text_search(statement, catalog)
+                root = plan_vector_search(statement, catalog)
+            else:
+                from engine.query.ranked_planning import plan_text_search
+
+                root = plan_text_search(statement, catalog)
             return Plan(statement=statement, root=root, output_schema=root.schema)
         raise QueryExecutionError(
             "ranked SQL search requires the ranked planner; "
