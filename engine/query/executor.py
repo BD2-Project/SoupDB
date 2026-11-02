@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from engine.common.errors import QueryExecutionError
+from engine.common.ranked_catalog import RankedMetadata
 from engine.common.record import Record, decode_row, encode_row
 from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index
@@ -55,6 +56,19 @@ def execute(plan: Plan, catalog: Any) -> ResultSet:
             )
         return ResultSet(columns=())
     if isinstance(statement, CreateIndexStatement):
+        if statement.index_type in ("INVERTED", "IVF", "HNSW"):
+            catalog.create_ranked_index(
+                RankedMetadata(
+                    statement.index_name,
+                    statement.table,
+                    statement.column,
+                    statement.index_type,
+                    statement.metric,
+                    statement.dimension,
+                    statement.profile_id,
+                )
+            )
+            return ResultSet(columns=())
         catalog.create_index(
             statement.index_name,
             statement.table,

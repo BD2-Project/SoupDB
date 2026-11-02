@@ -28,6 +28,7 @@ from typing import Any
 
 from engine.algorithms.spatial import euclidean_metric
 from engine.common.errors import QueryExecutionError
+from engine.common.ranked_catalog import RankedMetadata, check_ranked_metadata
 from engine.common.schema import ColumnType
 from engine.indexes.base import Index
 from engine.indexes.rtree import RTree
@@ -232,8 +233,19 @@ def _plan_explain(statement: ExplainStatement, catalog: Any) -> Plan:
     return Plan(statement=statement, root=inner.root, output_schema=inner.output_schema)
 
 
+def _ensure_ranked_write_safe(catalog: Any, table: str) -> None:
+    """Never mutate table storage while ranked-index undo is unavailable."""
+    registry = getattr(catalog, "ranked_metadata_for", None)
+    ready = getattr(catalog, "ranked_indexes_for", None)
+    if (callable(registry) and registry(table)) or (callable(ready) and ready(table)):
+        raise QueryExecutionError(
+            "ranked DML is blocked until reversible index maintenance is installed"
+        )
+
+
 def _plan_insert(statement: InsertStatement, catalog: Any) -> Plan:
     schema = catalog.schema(statement.table)
+    _ensure_ranked_write_safe(catalog, statement.table)
     if statement.columns:
         expected = {column.name for column in schema}
         if len(statement.columns) != len(schema) or set(statement.columns) != expected:
@@ -247,6 +259,7 @@ def _plan_insert(statement: InsertStatement, catalog: Any) -> Plan:
 
 def _plan_delete(statement: DeleteStatement, catalog: Any) -> Plan:
     schema = catalog.schema(statement.table)
+    _ensure_ranked_write_safe(catalog, statement.table)
     catalog.file_org(statement.table)
     if statement.where is not None:
         _validate_columns(statement.where, schema)
@@ -270,8 +283,22 @@ def _plan_create(statement: CreateTableStatement, catalog: Any) -> Plan:
 
 def _plan_create_index(statement: CreateIndexStatement, catalog: Any) -> Plan:
     if statement.index_type in ("INVERTED", "IVF", "HNSW"):
-        # C16 only parses ranked DDL. C18 will enable it with a real factory.
-        raise QueryExecutionError("ranked CREATE INDEX requires a configured index factory")
+        schema = catalog.schema(statement.table)
+        meta = RankedMetadata(
+            statement.index_name,
+            statement.table,
+            statement.column,
+            statement.index_type,
+            statement.metric,
+            statement.dimension,
+            statement.profile_id,
+        )
+        check_ranked_metadata(meta, schema)
+        if catalog.index_location(statement.index_name) is not None:
+            raise QueryExecutionError(f"index {statement.index_name!r} already exists")
+        if getattr(catalog, "ranked_factory", None) is None:
+            raise QueryExecutionError("ranked CREATE INDEX requires a configured index factory")
+        return Plan(statement=statement)
     if any(
         value is not None for value in (statement.metric, statement.dimension, statement.profile_id)
     ):

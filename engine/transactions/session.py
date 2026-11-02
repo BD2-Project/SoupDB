@@ -106,15 +106,19 @@ class TransactionalSession:
             return self._execute_end_transaction()
         if self.current_transaction() is None:
             self.begin()
+            self._local.ranked_ddl_auto = True
             try:
-                result = self._run(statement)
-            except BaseException:
-                if self.current_transaction() is not None:
-                    self.rollback()
-                raise
-            else:
-                self.commit()
-            return result
+                try:
+                    result = self._run(statement)
+                except BaseException:
+                    if self.current_transaction() is not None:
+                        self.rollback()
+                    raise
+                else:
+                    self.commit()
+                return result
+            finally:
+                self._local.ranked_ddl_auto = False
         return self._run(statement)
 
     def _execute_begin_transaction(self) -> ResultSet:
@@ -252,6 +256,28 @@ class _LockingCatalog:
     def indexes_for(self, name: str, column: str):
         return self._catalog.indexes_for(name, column)
 
+    @property
+    def ranked_factory(self):
+        return getattr(self._catalog, "ranked_factory", None)
+
+    @property
+    def query_vectorizer(self):
+        return getattr(self._catalog, "query_vectorizer", None)
+
+    def ranked_indexes_for(self, name: str, column: str | None = None):
+        method = getattr(self._catalog, "ranked_indexes_for", None)
+        return method(name, column) if callable(method) else {}
+
+    def ranked_metadata_for(self, name: str, column: str | None = None):
+        method = getattr(self._catalog, "ranked_metadata_for", None)
+        return method(name, column) if callable(method) else {}
+
+    def create_ranked_index(self, metadata):
+        if not getattr(self._session._local, "ranked_ddl_auto", False):
+            raise TransactionError("ranked DDL is not reversible inside explicit transactions")
+        self._session._lock(("table", metadata.table), LockMode.EXCLUSIVE)
+        self._catalog.create_ranked_index(metadata)
+
     def index_location(self, name: str):
         return self._catalog.index_location(name)
 
@@ -280,11 +306,26 @@ class _LockingCatalog:
         self._catalog.create_index(index_name, table, column, index_type)
 
     def drop_table(self, name: str) -> None:
+        ranked = getattr(self._catalog, "ranked_metadata_for", None)
+        if (
+            callable(ranked)
+            and ranked(name)
+            and not getattr(self._session._local, "ranked_ddl_auto", False)
+        ):
+            raise TransactionError("ranked DDL is not reversible inside explicit transactions")
         self._session._lock(("table", name), LockMode.EXCLUSIVE)
         self._catalog.drop_table(name)
 
     def drop_index(self, index_name: str) -> None:
         location = self._catalog.index_location(index_name)
+        ranked = getattr(self._catalog, "ranked_metadata_for", None)
+        if (
+            location is not None
+            and callable(ranked)
+            and index_name in ranked(location[0])
+            and not getattr(self._session._local, "ranked_ddl_auto", False)
+        ):
+            raise TransactionError("ranked DDL is not reversible inside explicit transactions")
         if location is not None:
             self._session._lock(("table", location[0]), LockMode.EXCLUSIVE)
         self._catalog.drop_index(index_name)

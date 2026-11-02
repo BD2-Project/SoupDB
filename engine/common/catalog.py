@@ -36,6 +36,7 @@ from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index
 from engine.indexes.bplus_tree import BPlusTree
 from engine.indexes.extendible_hash import ExtendibleHash
+from engine.indexes.ranked_factory import RankedFactory
 from engine.indexes.rtree import RTree
 from engine.storage.base import FileOrganization
 from engine.storage.file_manager import FileManager
@@ -119,7 +120,9 @@ class Catalog:
         db_path: Path,
         page_size: int = 4096,
         buffer_capacity: int = 16,
+        ranked_factory: RankedFactory | None = None,
     ) -> None:
+        self._ranked_factory = ranked_factory
         self._files = FileManager(db_path, page_size=page_size, buffer_capacity=buffer_capacity)
         self._tables: dict[str, _Table] = {}
         self._ranked_meta: dict[str, RankedMetadata] = {}
@@ -132,6 +135,14 @@ class Catalog:
             if meta.name in self._ranked_meta:
                 raise QueryExecutionError(f"duplicate ranked metadata {meta.name!r}")
             self._ranked_meta[meta.name] = meta
+            if self._ranked_factory is not None:
+                binding = self._ranked_factory.load(
+                    meta, self.file_org(meta.table), self.schema(meta.table)
+                )
+                validate_ranked_binding(binding, self.schema(meta.table))
+                if binding.name != meta.name or binding.algorithm != meta.algorithm:
+                    raise QueryExecutionError("ranked factory loaded inconsistent metadata")
+                self._ranked_ready[meta.name] = binding
         self._io = AggregateIOCounters(lambda: self._files.disk_managers)
 
     @property
@@ -176,6 +187,43 @@ class Catalog:
             for index_name, entry in table.indexes.items()
             if entry.column == column
         }
+
+    @property
+    def ranked_factory(self) -> RankedFactory | None:
+        return self._ranked_factory
+
+    def create_ranked_index(self, metadata: RankedMetadata) -> None:
+        """Build first, persist metadata after provider succeeds."""
+        schema = self.schema(metadata.table)
+        check_ranked_metadata(metadata, schema)
+        if metadata.name in self._index_names():
+            raise QueryExecutionError(f"index {metadata.name!r} already exists")
+        if self._ranked_factory is None:
+            raise QueryExecutionError("ranked CREATE INDEX requires a configured index factory")
+        binding = self._ranked_factory.build(metadata, self.file_org(metadata.table), schema)
+        try:
+            if (
+                binding.name,
+                binding.table,
+                binding.column,
+                binding.algorithm,
+                binding.metric,
+                binding.dimension,
+                binding.profile_id,
+            ) != (
+                metadata.name,
+                metadata.table,
+                metadata.column,
+                metadata.algorithm,
+                metadata.metric,
+                metadata.dimension,
+                metadata.profile_id,
+            ):
+                raise QueryExecutionError("ranked factory returned inconsistent index metadata")
+            self.register_ranked_index(binding)
+        except BaseException:
+            binding.index.close()
+            raise
 
     def ranked_metadata_for(
         self, name: str, column: str | None = None
