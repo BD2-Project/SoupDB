@@ -200,3 +200,15 @@ ORDER BY score DESC;
 ```
 
 Estas consultas funcionan con `RankedIndex` y `QueryVectorizer` inyectados (fakes); **no implica disponibilidad del registro de perfiles ni del índice multimedia real**.
+
+
+## Estado de implementación y pruebas (C21)
+
+Los contratos iniciales de este documento eran una propuesta. En la rama
+`feat/sql-texto-multimedia` se han implementado parser, planificador,
+proyección/orden de scores, registro de metadata, factory inyectada,
+operadores y guardas transaccionales. `tests/integration/test_ranked_sql.py`
+prueba las cuatro consultas por API SQL y TCP **con proveedores simulados**.
+Las integraciones reales de extracción, IVF/HNSW e índice invertido
+continúan pendientes de verificación. Véase
+[SQL textual y multimedia](sql_texto_multimedia.md).
