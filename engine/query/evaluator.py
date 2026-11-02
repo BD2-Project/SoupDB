@@ -16,16 +16,18 @@ metrics always return a float, so the strict comparison rule above applies to
 their results as well.
 """
 
+import math
 import re
 from collections.abc import Iterable
 
 from engine.algorithms.spatial.geometry import Polygon2D
 from engine.algorithms.spatial.predicates import point_in_polygon
 from engine.common.errors import QueryExecutionError
-from engine.common.schema import ColumnDef
+from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.rtree import Point
 from engine.query.ast import (
     BetweenExpr,
+    BoundScoreExpr,
     ColumnRef,
     CompareExpr,
     DistanceExpr,
@@ -40,6 +42,7 @@ from engine.query.ast import (
     PointExpr,
     PolygonExpr,
 )
+from engine.query.ranked_binding import _INTERNAL_SCORE_NAME
 from engine.query.spatial_metrics import distance
 
 _COMPARISONS = {"=", "<>", "!=", "<", "<=", ">", ">="}
@@ -53,6 +56,20 @@ def evaluate(expr: Expr, row: Row, schema: Schema) -> object:
     """Evaluate a scalar expression or predicate against a single row."""
     if isinstance(expr, Literal):
         return expr.value
+
+    if isinstance(expr, BoundScoreExpr):
+        position = expr.position
+        if type(position) is not int or position != len(schema) - 1:
+            raise QueryExecutionError("invalid bound score position")
+        column = schema[position]
+        if column.name != _INTERNAL_SCORE_NAME or column.type_name is not ColumnType.FLOAT:
+            raise QueryExecutionError("bound score requires an internal FLOAT slot")
+        if position >= len(row):
+            raise QueryExecutionError("bound score is missing from row")
+        score = row[position]
+        if type(score) is not float or not math.isfinite(score):
+            raise QueryExecutionError("bound score must be a finite FLOAT")
+        return score
 
     if isinstance(expr, ColumnRef):
         return _column_value(expr.name, row, schema)

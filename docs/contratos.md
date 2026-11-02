@@ -65,3 +65,11 @@ renderizador.
 Sin `(FORMAT JSON)` el resultado sigue siendo el dibujo de texto indentado, que
 es lo útil desde una consola. El panel de plan del frontend necesita el árbol:
 no puede reconstruirlo a partir de las líneas.
+
+## Integración SQL de búsquedas rankeadas
+
+Las propuestas de integración SQL para las Partes 3 y 4 se documentan en
+[Integración SQL de búsquedas rankeadas](integracion_sql_rankeada.md).
+
+Este documento complementa los contratos congelados de Index y RankedIndex,
+sin modificarlos. Las decisiones pendientes requieren acuerdo del equipo.

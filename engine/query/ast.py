@@ -32,6 +32,11 @@ class ColumnRef(Expr):
 
 
 @dataclass(frozen=True)
+class StarExpr(Expr):
+    """A bare ``*`` in a mixed SELECT projection."""
+
+
+@dataclass(frozen=True)
 class CompareExpr(Expr):
     """Comparison ``left OP right`` with OP in ``= <> < <= > >=``."""
 
@@ -96,6 +101,41 @@ class LikeExpr(Expr):
 
     value: Expr
     pattern: Expr
+
+
+@dataclass(frozen=True)
+class MatchExpr(Expr):
+    """Ranked full-text predicate ``MATCH(column, query)``."""
+
+    column: ColumnRef
+    query: Expr
+
+
+@dataclass(frozen=True)
+class SimilarToExpr(Expr):
+    """SIMILAR_TO('reference', k=n) selects nearest neighbors by RID."""
+
+    source: Expr
+    k: Literal
+
+
+@dataclass(frozen=True)
+class ScoreExpr(Expr):
+    """Score of the ranked hit; bound to a temporary slot by the planner."""
+
+    kind: str = "text"
+
+
+@dataclass(frozen=True)
+class BoundScoreExpr(Expr):
+    """Internal score reference resolved to a temporary FLOAT column slot.
+
+    Not a user-addressable column or a ranking operation. The planner
+    resolves ``ScoreExpr`` into this node before evaluating a row.
+    """
+
+    position: int
+    kind: str
 
 
 @dataclass(frozen=True)
@@ -186,6 +226,14 @@ class LimitClause:
 
 
 @dataclass(frozen=True)
+class SearchOptions:
+    """Algorithm (and optional vector metric) selected by USING."""
+
+    strategy: str
+    metric: str | None = None
+
+
+@dataclass(frozen=True)
 class JoinClause:
     """A JOIN against ``table`` on predicate ``on``."""
 
@@ -207,6 +255,7 @@ class SelectStatement(Statement):
     having: HavingClause | None = None
     limit: LimitClause | None = None
     joins: tuple[JoinClause, ...] = ()
+    search: SearchOptions | None = None
 
 
 @dataclass(frozen=True)
@@ -284,6 +333,10 @@ class CreateIndexStatement(Statement):
     table: str
     column: str
     index_type: str = "BTREE"
+    # Ranked DDL options are explicit; old TYPE/implicit BTREE remain unchanged.
+    metric: str | None = None
+    dimension: int | None = None
+    profile_id: str | None = None
 
 
 @dataclass(frozen=True)

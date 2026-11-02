@@ -25,6 +25,7 @@ from engine.query import ResultSet
 from engine.query.ast import BeginTransactionStatement, EndTransactionStatement
 from engine.query.executor import _indexes_for_column, _skip_index_key
 from engine.query.executor import execute as execute_plan
+from engine.query.index_maintenance import maintain_ranked, ranked_targets
 from engine.query.parser import parse
 from engine.query.planner import plan as build_plan
 from engine.storage.base import FileOrganization
@@ -106,15 +107,19 @@ class TransactionalSession:
             return self._execute_end_transaction()
         if self.current_transaction() is None:
             self.begin()
+            self._local.ranked_ddl_auto = True
             try:
-                result = self._run(statement)
-            except BaseException:
-                if self.current_transaction() is not None:
-                    self.rollback()
-                raise
-            else:
-                self.commit()
-            return result
+                try:
+                    result = self._run(statement)
+                except BaseException:
+                    if self.current_transaction() is not None:
+                        self.rollback()
+                    raise
+                else:
+                    self.commit()
+                return result
+            finally:
+                self._local.ranked_ddl_auto = False
         return self._run(statement)
 
     def _execute_begin_transaction(self) -> ResultSet:
@@ -191,6 +196,9 @@ class TransactionalSession:
         must never do is leave a live row unindexed while reporting success, which is
         why the index update is not swallowed by a ``try``.
         """
+        # A row inserted and then deleted in the same transaction must not be
+        # resurrected at a different RID during rollback.
+        inserted = {(entry.table, entry.rid) for entry in journal if isinstance(entry, _UndoInsert)}
         for entry in reversed(journal):
             if isinstance(entry, _UndoInsert):
                 file_org = self._catalog.file_org(entry.table)
@@ -199,8 +207,20 @@ class TransactionalSession:
                     self._unindex_row(entry.table, record, entry.rid)
                 file_org.remove(entry.rid)
             elif isinstance(entry, _UndoRemove):
-                rid = self._catalog.file_org(entry.table).insert(entry.record)
-                self._index_row(entry.table, entry.record, rid)
+                schema = self._catalog.schema(entry.table)
+                row = decode_row(entry.record.data, schema)
+                # Remove stale references even when the original DELETE failed
+                # partway through ranked maintenance. Deletes are idempotent.
+                maintain_ranked(
+                    ranked_targets(self._catalog, entry.table),
+                    schema,
+                    row,
+                    entry.rid,
+                    insert=False,
+                )
+                if (entry.table, entry.rid) not in inserted:
+                    rid = self._catalog.file_org(entry.table).insert(entry.record)
+                    self._index_row(entry.table, entry.record, rid)
 
     def _index_row(self, table: str, record: Record, rid: RID) -> None:
         """Index a row that undoing a DELETE has just put back.
@@ -217,6 +237,13 @@ class TransactionalSession:
             for index in _indexes_for_column(self._catalog, table, column.name).values():
                 if not _skip_index_key(index, row[position]):
                     index.insert(row[position], rid)
+        maintain_ranked(
+            ranked_targets(self._catalog, table),
+            self._catalog.schema(table),
+            row,
+            rid,
+            insert=True,
+        )
 
     def _unindex_row(self, table: str, record: Record, rid: RID) -> None:
         """Drop from the indexes the row that undoing an INSERT is about to remove."""
@@ -225,6 +252,13 @@ class TransactionalSession:
             for index in _indexes_for_column(self._catalog, table, column.name).values():
                 if not _skip_index_key(index, row[position]):
                     index.remove(row[position], rid)
+        maintain_ranked(
+            ranked_targets(self._catalog, table),
+            self._catalog.schema(table),
+            row,
+            rid,
+            insert=False,
+        )
 
     def _row_values(self, table: str, record: Record) -> tuple[object, ...]:
         return decode_row(record.data, self._catalog.schema(table))
@@ -235,6 +269,8 @@ class TransactionalSession:
 
 class _LockingCatalog:
     """Catalog proxy that returns locking file organizations per access."""
+
+    ranked_transactional = True
 
     def __init__(self, catalog: Any, session: TransactionalSession) -> None:
         self._catalog = catalog
@@ -251,6 +287,28 @@ class _LockingCatalog:
 
     def indexes_for(self, name: str, column: str):
         return self._catalog.indexes_for(name, column)
+
+    @property
+    def ranked_factory(self):
+        return getattr(self._catalog, "ranked_factory", None)
+
+    @property
+    def query_vectorizer(self):
+        return getattr(self._catalog, "query_vectorizer", None)
+
+    def ranked_indexes_for(self, name: str, column: str | None = None):
+        method = getattr(self._catalog, "ranked_indexes_for", None)
+        return method(name, column) if callable(method) else {}
+
+    def ranked_metadata_for(self, name: str, column: str | None = None):
+        method = getattr(self._catalog, "ranked_metadata_for", None)
+        return method(name, column) if callable(method) else {}
+
+    def create_ranked_index(self, metadata):
+        if not getattr(self._session._local, "ranked_ddl_auto", False):
+            raise TransactionError("ranked DDL is not reversible inside explicit transactions")
+        self._session._lock(("table", metadata.table), LockMode.EXCLUSIVE)
+        self._catalog.create_ranked_index(metadata)
 
     def index_location(self, name: str):
         return self._catalog.index_location(name)
@@ -280,11 +338,26 @@ class _LockingCatalog:
         self._catalog.create_index(index_name, table, column, index_type)
 
     def drop_table(self, name: str) -> None:
+        ranked = getattr(self._catalog, "ranked_metadata_for", None)
+        if (
+            callable(ranked)
+            and ranked(name)
+            and not getattr(self._session._local, "ranked_ddl_auto", False)
+        ):
+            raise TransactionError("ranked DDL is not reversible inside explicit transactions")
         self._session._lock(("table", name), LockMode.EXCLUSIVE)
         self._catalog.drop_table(name)
 
     def drop_index(self, index_name: str) -> None:
         location = self._catalog.index_location(index_name)
+        ranked = getattr(self._catalog, "ranked_metadata_for", None)
+        if (
+            location is not None
+            and callable(ranked)
+            and index_name in ranked(location[0])
+            and not getattr(self._session._local, "ranked_ddl_auto", False)
+        ):
+            raise TransactionError("ranked DDL is not reversible inside explicit transactions")
         if location is not None:
             self._session._lock(("table", location[0]), LockMode.EXCLUSIVE)
         self._catalog.drop_index(index_name)
