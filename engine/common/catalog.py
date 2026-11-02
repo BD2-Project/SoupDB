@@ -189,6 +189,11 @@ class Catalog:
         }
 
     @property
+    def query_vectorizer(self):
+        """Optional SQL multimedia resolver attached to the configured factory."""
+        return getattr(self._ranked_factory, "query_vectorizer", None)
+
+    @property
     def ranked_factory(self) -> RankedFactory | None:
         return self._ranked_factory
 
