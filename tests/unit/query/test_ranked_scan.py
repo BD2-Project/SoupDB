@@ -179,6 +179,11 @@ def test_explain_has_ranked_index_details(search_data) -> None:
         "column": "contenido",
         "algorithm": "INVERTED",
         "requested_k": 3,
+        "candidate_policy": "bounded_top_k",
+        "provider_hits": 0,
+        "rows_fetched": 0,
+        "exact": True,
+        "exhaustive": True,
         "options": {"method": "bm25"},
     }
     assert plan.children == []

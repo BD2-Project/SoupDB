@@ -138,3 +138,39 @@ registrarán aquí con fecha, responsables y evidencia de revisión.
 propuestas y pendientes; no altera los ABC congelados ni habilita cambios
 irreversibles. La implementación seguirá el principio de fallo explícito cuando
 una capacidad necesaria aún no esté disponible.
+
+## SQL textual ejecutable con índices rankeados (C07–C10)
+
+Estas capacidades están verificadas **contra el catálogo de prueba y el
+`ScriptedRankedIndex`**, no constituyen todavía integración con el índice
+invertido persistente de Yeimi. Se conserva el `RankedIndex.top_k` original.
+
+```sql
+SELECT * FROM documentos
+WHERE MATCH(contenido, 'base de datos vectorial')
+USING TF_IDF LIMIT 10;
+
+SELECT *, SCORE() AS relevancia FROM articulos
+WHERE MATCH(texto, 'machine learning') USING BM25
+ORDER BY relevancia DESC;
+```
+
+Reglas de la implementación actual:
+
+- Un único `MATCH` por `SELECT`, como predicado principal o como parte de una
+  conjunción `AND`. `OR MATCH`, `NOT MATCH`, JOIN y GROUP BY se rechazan.
+- El registro debe contener exactamente un binding de familia `INVERTED`
+  compatible con la columna de texto; no se elige uno arbitrariamente.
+- Sin filtro residual, DISTINCT ni reordenamiento, `LIMIT + OFFSET` determina
+  los candidatos. Sin `LIMIT`, o cuando hay filtros, DISTINCT o un orden
+  distinto de `SCORE() DESC`, se solicita `item_count` y se requieren las tres
+  garantías explícitas: `exact=True`, `exhaustive=True`, `item_count` conocido.
+  No se utiliza sobremuestreo fijo ni un `k` por defecto.
+- `SCORE()` lee el FLOAT recibido del proveedor, sin recalcularlo, y es visible
+  solo cuando se proyecta explícitamente.
+- `EXPLAIN (FORMAT JSON)` no consulta el índice; `EXPLAIN ANALYZE` sí. La
+  hoja del plan se llama `InvertedIndexScan` e incluye `requested_k`,
+  `candidate_policy`, `provider_hits`, `rows_fetched`, `exact`, `exhaustive`
+  y las opciones de búsqueda.
+- El SQL todavía no crea ni persiste estos bindings; faltan C16–C20.
+  La semántica de exhaustividad del índice textual real debe confirmarla Yeimi.

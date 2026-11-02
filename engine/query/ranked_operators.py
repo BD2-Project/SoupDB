@@ -56,6 +56,7 @@ class RankedScan(_VolcanoBase):
         *,
         options: Mapping[str, Any] | None = None,
         op_name: str = "RankedScan",
+        candidate_policy: str = "bounded_top_k",
     ) -> None:
         super().__init__((), disk_manager)
         validate_ranked_binding(binding, schema)
@@ -67,6 +68,7 @@ class RankedScan(_VolcanoBase):
         self._request = request
         self._options = dict(options or {})
         self._op_name = op_name
+        self._candidate_policy = candidate_policy
         self._hits: tuple[tuple[RID, float], ...] = ()
         self._cursor = 0
         self._opened = False
@@ -152,6 +154,11 @@ class RankedScan(_VolcanoBase):
                 "column": self._binding.column,
                 "algorithm": self._binding.algorithm,
                 "requested_k": self._request,
+                "candidate_policy": self._candidate_policy,
+                "provider_hits": len(self._hits),
+                "rows_fetched": self._rows,
+                "exact": self._binding.exact,
+                "exhaustive": self._binding.exhaustive,
                 "options": dict(self._options),
             },
         )
@@ -169,6 +176,8 @@ class InvertedIndexScan(RankedScan):
         request: int,
         method: str,
         disk_manager: DiskManager | None = None,
+        *,
+        candidate_policy: str = "bounded_top_k",
     ) -> None:
         if binding.algorithm != "INVERTED":
             raise QueryExecutionError("InvertedIndexScan requires an INVERTED binding")
@@ -185,4 +194,5 @@ class InvertedIndexScan(RankedScan):
             disk_manager,
             options={"method": method},
             op_name="InvertedIndexScan",
+            candidate_policy=candidate_policy,
         )
