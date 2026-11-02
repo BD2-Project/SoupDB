@@ -38,6 +38,7 @@ class RankedBinding:
     exact: bool = False
     exhaustive: bool = False
     mutable: bool = False
+    reversible: bool = False
 
 
 def validate_ranked_binding(binding: RankedBinding, schema: tuple[ColumnDef, ...]) -> None:
@@ -81,6 +82,6 @@ def validate_ranked_binding(binding: RankedBinding, schema: tuple[ColumnDef, ...
         type(binding.item_count) is not int or binding.item_count < 0
     ):
         raise QueryExecutionError("item_count must be a non-negative integer or None")
-    for field in ("exact", "exhaustive", "mutable"):
+    for field in ("exact", "exhaustive", "mutable", "reversible"):
         if type(getattr(binding, field)) is not bool:
             raise QueryExecutionError(f"{field} capability must be boolean")
