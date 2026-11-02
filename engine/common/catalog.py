@@ -381,11 +381,15 @@ class Catalog:
         self._files.drop(f"t_{name}")
 
     def _forget_ranked(self, index_name: str) -> None:
+        meta = self._ranked_meta[index_name]
         binding = self._ranked_ready.pop(index_name, None)
         self._delete_sys_rows(RANKED_METADATA_FILE, RANKED_SCHEMA, lambda row: row[0] == index_name)
         self._ranked_meta.pop(index_name, None)
         if binding is not None:
             binding.index.close()
+        drop = getattr(self._ranked_factory, "drop", None)
+        if callable(drop):
+            drop(meta)
 
     def drop_index(self, index_name: str) -> None:
         """Remove an index, its sys row and its backing file."""

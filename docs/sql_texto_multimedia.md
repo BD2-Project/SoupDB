@@ -141,3 +141,64 @@ bloqueado dentro de transacciones explícitas.
 **No describir el proyecto como integración real completa** hasta que se
 superen estos puntos. Para detalles del contrato, consultar
 [Integración SQL rankeada](integracion_sql_rankeada.md).
+
+## Integración real opcional SIFT/MFCC e IVF/HNSW (C15/C22)
+
+La integración usa los **módulos reales existentes** `engine.multimedia`
+(SIFT/MFCC, codebook K-Means, BoW TF-IDF) y los índices físicos
+`engine.indexes.vector.ivf.IVFIndex` y `HNSWIndex`. No entrena un codebook
+implícitamente: se debe proporcionar un archivo `codebook.npz` generado con
+`python -m engine.multimedia.build_vectors` usando el mismo corpus.
+
+```python
+from pathlib import Path
+from engine.common.catalog import Catalog
+from engine.indexes.vector.sql_factory import OnDiskVectorFactory
+from engine.multimedia.sql_profiles import MultimediaProfile
+from engine.query import execute_sql
+
+root = Path("/ruta/a/dataset/imagenes")
+profiles = {
+    "imagenes-v1": MultimediaProfile(
+        "imagenes-v1", "image", root, Path("/ruta/a/codebook_imagen.npz"),
+        cache=Path("/ruta/a/cache_sift"),
+    ),
+}
+factory = OnDiskVectorFactory(Path("/ruta/a/soupdb/indices_ranked"), profiles)
+catalog = Catalog(Path("/ruta/a/soupdb/datos"), ranked_factory=factory)
+
+# Las filas deben contener rutas RELATIVAS a root, p.ej. "gatos/001.jpg".
+# CREATE TABLE, INSERT iniciales y CREATE INDEX se ejecutan con execute_sql.
+execute_sql(
+    "CREATE INDEX idx_imagenes ON imagenes (archivo) USING HNSW "
+    "WITH METRIC=cosine, DIMENSION=128, PROFILE='imagenes-v1'",
+    catalog,
+)
+result = execute_sql(
+    "SELECT archivo, SIMILARITY_SCORE() AS score FROM imagenes "
+    "WHERE SIMILAR_TO('gatos/001.jpg', k=5) USING HNSW "
+    "WITH METRIC=cosine ORDER BY score DESC",
+    catalog,
+)
+catalog.close()
+```
+
+`DIMENSION` corresponde a la **cantidad de palabras del codebook** (K), no
+a las dimensiones de SIFT (128) o MFCC (20). Para audio use
+`MultimediaProfile(id, "audio_segment", ...)` con referencias
+`ruta/audio.wav#segment=000000` (sin sufijo se utiliza el primer segmento de
+5 segundos). Imagen y audio deben usar perfiles y codebooks separados.
+
+Restricciones actuales:
+
+- Los índices físicos IVF/HNSW **son aproximados**: `exact=False`,
+  `exhaustive=False`; no se garantiza recall perfecto.
+- INSERT/DELETE posteriores en tablas indexadas quedan **bloqueados**.
+  Requieren un proveedor con mutación atómica y reversible.
+- Los archivos multimedia deben permanecer bajo la raíz del perfil; el
+  codebook debe mantenerse idéntico entre construcción y reapertura.
+- Al reabrir la BD se debe proporcionar de nuevo el factory con el mismo
+  `storage_root`, perfiles y parámetros de almacenamiento.
+- El espacio de vectores y el codebook no pueden cambiar sin reconstruir el índice.
+- El adapter carga y valida los codebooks existentes; **no** equivale a un
+  benchmark de recall sobre datasets reales ni integra el índice textual INVERTED.
