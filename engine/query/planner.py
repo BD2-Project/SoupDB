@@ -149,6 +149,13 @@ def _contains_unplanned_ranked_expr(value: object) -> bool:
 
 def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
     if statement.search is not None or _contains_unplanned_ranked_expr(statement):
+        # Only a catalog exposing ranked bindings may enter the specialized path.
+        # Unsupported syntax remains fail-closed, including old C05 guard tests.
+        if callable(getattr(catalog, "ranked_indexes_for", None)):
+            from engine.query.ranked_planning import plan_text_search
+
+            root = plan_text_search(statement, catalog)
+            return Plan(statement=statement, root=root, output_schema=root.schema)
         raise QueryExecutionError(
             "ranked SQL search requires the ranked planner; "
             "MATCH()/SCORE()/USING cannot execute yet"
