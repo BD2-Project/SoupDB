@@ -25,6 +25,7 @@ from engine.query import ResultSet
 from engine.query.ast import BeginTransactionStatement, EndTransactionStatement
 from engine.query.executor import _indexes_for_column, _skip_index_key
 from engine.query.executor import execute as execute_plan
+from engine.query.index_maintenance import maintain_ranked, ranked_targets
 from engine.query.parser import parse
 from engine.query.planner import plan as build_plan
 from engine.storage.base import FileOrganization
@@ -195,6 +196,9 @@ class TransactionalSession:
         must never do is leave a live row unindexed while reporting success, which is
         why the index update is not swallowed by a ``try``.
         """
+        # A row inserted and then deleted in the same transaction must not be
+        # resurrected at a different RID during rollback.
+        inserted = {(entry.table, entry.rid) for entry in journal if isinstance(entry, _UndoInsert)}
         for entry in reversed(journal):
             if isinstance(entry, _UndoInsert):
                 file_org = self._catalog.file_org(entry.table)
@@ -203,8 +207,20 @@ class TransactionalSession:
                     self._unindex_row(entry.table, record, entry.rid)
                 file_org.remove(entry.rid)
             elif isinstance(entry, _UndoRemove):
-                rid = self._catalog.file_org(entry.table).insert(entry.record)
-                self._index_row(entry.table, entry.record, rid)
+                schema = self._catalog.schema(entry.table)
+                row = decode_row(entry.record.data, schema)
+                # Remove stale references even when the original DELETE failed
+                # partway through ranked maintenance. Deletes are idempotent.
+                maintain_ranked(
+                    ranked_targets(self._catalog, entry.table),
+                    schema,
+                    row,
+                    entry.rid,
+                    insert=False,
+                )
+                if (entry.table, entry.rid) not in inserted:
+                    rid = self._catalog.file_org(entry.table).insert(entry.record)
+                    self._index_row(entry.table, entry.record, rid)
 
     def _index_row(self, table: str, record: Record, rid: RID) -> None:
         """Index a row that undoing a DELETE has just put back.
@@ -221,6 +237,13 @@ class TransactionalSession:
             for index in _indexes_for_column(self._catalog, table, column.name).values():
                 if not _skip_index_key(index, row[position]):
                     index.insert(row[position], rid)
+        maintain_ranked(
+            ranked_targets(self._catalog, table),
+            self._catalog.schema(table),
+            row,
+            rid,
+            insert=True,
+        )
 
     def _unindex_row(self, table: str, record: Record, rid: RID) -> None:
         """Drop from the indexes the row that undoing an INSERT is about to remove."""
@@ -229,6 +252,13 @@ class TransactionalSession:
             for index in _indexes_for_column(self._catalog, table, column.name).values():
                 if not _skip_index_key(index, row[position]):
                     index.remove(row[position], rid)
+        maintain_ranked(
+            ranked_targets(self._catalog, table),
+            self._catalog.schema(table),
+            row,
+            rid,
+            insert=False,
+        )
 
     def _row_values(self, table: str, record: Record) -> tuple[object, ...]:
         return decode_row(record.data, self._catalog.schema(table))
@@ -239,6 +269,8 @@ class TransactionalSession:
 
 class _LockingCatalog:
     """Catalog proxy that returns locking file organizations per access."""
+
+    ranked_transactional = True
 
     def __init__(self, catalog: Any, session: TransactionalSession) -> None:
         self._catalog = catalog

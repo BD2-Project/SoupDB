@@ -29,6 +29,7 @@ from engine.query.ast import (
     Statement,
 )
 from engine.query.evaluator import Schema, evaluate
+from engine.query.index_maintenance import maintain_ranked, ranked_targets
 from engine.query.operators import Operator, PlanNode
 from engine.query.planner import Plan, is_spatial_index
 from engine.query.resultset import ResultSet
@@ -148,6 +149,7 @@ def _execute_select(plan: Plan) -> ResultSet:
 def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
+    ranked = ranked_targets(catalog, statement.table)
     columns = statement.columns or tuple(column.name for column in schema)
     positions = [_column_index(schema, name) for name in columns]
     affected = 0
@@ -161,6 +163,7 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
                 if _skip_index_key(index, values[position]):
                     continue
                 index.insert(values[position], rid)
+        maintain_ranked(ranked, schema, tuple(values), rid, insert=True)
         affected += 1
     return ResultSet(columns=(), affected=affected)
 
@@ -168,6 +171,7 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
 def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
+    ranked = ranked_targets(catalog, statement.table)
     rows_to_remove = []
     for rid, record in file_org.scan():
         row = decode_row(record.data, schema)
@@ -182,6 +186,7 @@ def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
                 if _skip_index_key(index, row[position]):
                     continue
                 index.remove(row[position], rid)
+        maintain_ranked(ranked, schema, row, rid, insert=False)
         affected += 1
     return ResultSet(columns=(), affected=affected)
 

@@ -68,6 +68,7 @@ from engine.query.ast import (
     Statement,
 )
 from engine.query.evaluator import Schema
+from engine.query.index_maintenance import ranked_targets
 from engine.query.operators import (
     Aggregate,
     Distinct,
@@ -234,12 +235,11 @@ def _plan_explain(statement: ExplainStatement, catalog: Any) -> Plan:
 
 
 def _ensure_ranked_write_safe(catalog: Any, table: str) -> None:
-    """Never mutate table storage while ranked-index undo is unavailable."""
-    registry = getattr(catalog, "ranked_metadata_for", None)
-    ready = getattr(catalog, "ranked_indexes_for", None)
-    if (callable(registry) and registry(table)) or (callable(ready) and ready(table)):
+    """Permit ranked writes only with a reversible provider and an undo journal."""
+    targets = ranked_targets(catalog, table)
+    if targets and not getattr(catalog, "ranked_transactional", False):
         raise QueryExecutionError(
-            "ranked DML is blocked until reversible index maintenance is installed"
+            "ranked DML is blocked without TransactionalSession with reversible undo"
         )
 
 
