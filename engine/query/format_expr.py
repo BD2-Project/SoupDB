@@ -26,6 +26,7 @@ from engine.query.ast import (
     PointExpr,
     PolygonExpr,
     ScoreExpr,
+    SimilarToExpr,
     StarExpr,
 )
 
@@ -48,6 +49,8 @@ def format_expr(expr: Expr) -> str:
         return expr.name
     if isinstance(expr, StarExpr):
         return "*"
+    if isinstance(expr, SimilarToExpr):
+        return f"SIMILAR_TO({format_expr(expr.source)}, k={format_expr(expr.k)})"
     if isinstance(expr, MatchExpr):
         return f"MATCH({format_expr(expr.column)}, {format_expr(expr.query)})"
     if isinstance(expr, (ScoreExpr, BoundScoreExpr)):

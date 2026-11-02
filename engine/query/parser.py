@@ -48,6 +48,7 @@ from engine.query.ast import (
     SearchOptions,
     SelectColumn,
     SelectStatement,
+    SimilarToExpr,
     StarExpr,
     Statement,
     UpdateStatement,
@@ -383,12 +384,25 @@ class _Parser:
         if self._match_word("USING"):
             token = self._peek()
             strategy = self._expect_ident_or_keyword()
-            if strategy not in ("TF_IDF", "BM25"):
+            if strategy not in ("TF_IDF", "BM25", "IVF", "HNSW"):
                 raise QueryParseError(
-                    f"unsupported text search strategy {strategy!r} "
-                    f"at position {token.position}; use TF_IDF or BM25"
+                    f"unsupported search strategy {strategy!r} at position {token.position}"
                 )
-            search = SearchOptions(strategy=strategy)
+            metric = None
+            if self._match_word("WITH"):
+                if not self._match_word("METRIC"):
+                    raise QueryParseError("WITH requires METRIC=metric")
+                eq = self._expect_kind(TokenKind.OPERATOR)
+                if eq.value != "=":
+                    raise QueryParseError("METRIC requires '='")
+                metric = self._expect_ident_or_keyword().lower()
+                if metric not in ("cosine", "euclidean", "inner_product"):
+                    raise QueryParseError(f"unsupported vector metric {metric!r}")
+                if strategy not in ("IVF", "HNSW"):
+                    raise QueryParseError("WITH METRIC is only valid for vector search")
+            elif strategy in ("IVF", "HNSW"):
+                raise QueryParseError("vector search requires WITH METRIC=metric")
+            search = SearchOptions(strategy=strategy, metric=metric)
         group_by: tuple[Expr, ...] = ()
         if self._match_keyword("GROUP"):
             self._expect_keyword("BY")
@@ -520,6 +534,8 @@ class _Parser:
 
     @staticmethod
     def _is_boolean_expression(expr: Expr) -> bool:
+        if isinstance(expr, SimilarToExpr):
+            return True
         if isinstance(
             expr,
             (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr, IntersectsExpr, MatchExpr),
@@ -635,6 +651,30 @@ class _Parser:
             arg = self._parse_expression()
         self._expect_kind(TokenKind.RPAREN)
         return FunctionExpr(name=name, arg=arg, distinct=distinct)
+
+    def _parse_similar_to_expr(self) -> SimilarToExpr:
+        self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        reference = self._parse_expression()
+        if not isinstance(reference, Literal) or type(reference.value) is not str:
+            raise QueryParseError("SIMILAR_TO requires a string reference")
+        self._expect_kind(TokenKind.COMMA)
+        if not self._match_word("K"):
+            raise QueryParseError("SIMILAR_TO requires named k=integer")
+        eq = self._expect_kind(TokenKind.OPERATOR)
+        if eq.value != "=":
+            raise QueryParseError("SIMILAR_TO k requires '='")
+        token = self._expect_kind(TokenKind.NUMBER)
+        if not token.value.isdigit():
+            raise QueryParseError("SIMILAR_TO k must be a non-negative integer")
+        self._expect_kind(TokenKind.RPAREN)
+        return SimilarToExpr(source=reference, k=Literal(int(token.value)))
+
+    def _parse_similarity_score_expr(self) -> ScoreExpr:
+        self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        self._expect_kind(TokenKind.RPAREN)
+        return ScoreExpr(kind="vector")
 
     def _parse_match_expr(self) -> MatchExpr:
         token = self._advance()
@@ -752,6 +792,20 @@ class _Parser:
 
         if self._match_kind(TokenKind.NULL):
             return Literal(None)
+
+        if (
+            token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD)
+            and token.value.upper() == "SIMILAR_TO"
+            and self._checks_lparen_next()
+        ):
+            return self._parse_similar_to_expr()
+
+        if (
+            token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD)
+            and token.value.upper() == "SIMILARITY_SCORE"
+            and self._checks_lparen_next()
+        ):
+            return self._parse_similarity_score_expr()
 
         if (
             token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD)

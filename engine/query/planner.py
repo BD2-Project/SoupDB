@@ -62,6 +62,7 @@ from engine.query.ast import (
     ScoreExpr,
     SelectColumn,
     SelectStatement,
+    SimilarToExpr,
     StarExpr,
     Statement,
 )
@@ -136,7 +137,7 @@ def _contains_unplanned_ranked_expr(value: object) -> bool:
     The old planner must not silently treat MATCH() as a regular predicate or
     expose SCORE() without a ranked source. The C07 planner replaces this guard.
     """
-    if isinstance(value, (MatchExpr, ScoreExpr, BoundScoreExpr, StarExpr)):
+    if isinstance(value, (MatchExpr, SimilarToExpr, ScoreExpr, BoundScoreExpr, StarExpr)):
         return True
     if isinstance(value, (tuple, list)):
         return any(_contains_unplanned_ranked_expr(item) for item in value)

@@ -112,6 +112,14 @@ class MatchExpr(Expr):
 
 
 @dataclass(frozen=True)
+class SimilarToExpr(Expr):
+    """SIMILAR_TO('reference', k=n) selects nearest neighbors by RID."""
+
+    source: Expr
+    k: Literal
+
+
+@dataclass(frozen=True)
 class ScoreExpr(Expr):
     """Score of the ranked hit; bound to a temporary slot by the planner."""
 
