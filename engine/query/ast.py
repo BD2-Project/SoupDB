@@ -333,6 +333,10 @@ class CreateIndexStatement(Statement):
     table: str
     column: str
     index_type: str = "BTREE"
+    # Ranked DDL options are explicit; old TYPE/implicit BTREE remain unchanged.
+    metric: str | None = None
+    dimension: int | None = None
+    profile_id: str | None = None
 
 
 @dataclass(frozen=True)

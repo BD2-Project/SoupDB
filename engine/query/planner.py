@@ -269,6 +269,13 @@ def _plan_create(statement: CreateTableStatement, catalog: Any) -> Plan:
 
 
 def _plan_create_index(statement: CreateIndexStatement, catalog: Any) -> Plan:
+    if statement.index_type in ("INVERTED", "IVF", "HNSW"):
+        # C16 only parses ranked DDL. C18 will enable it with a real factory.
+        raise QueryExecutionError("ranked CREATE INDEX requires a configured index factory")
+    if any(
+        value is not None for value in (statement.metric, statement.dimension, statement.profile_id)
+    ):
+        raise QueryExecutionError("scalar/spatial CREATE INDEX cannot have vector options")
     if statement.index_type not in _INDEX_TYPES:
         raise QueryExecutionError(
             f"unsupported index type {statement.index_type!r}; use {', '.join(_INDEX_TYPES)}"

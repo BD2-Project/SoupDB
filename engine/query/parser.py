@@ -306,14 +306,60 @@ class _Parser:
         column = self._expect_kind(TokenKind.IDENTIFIER).value
         self._expect_kind(TokenKind.RPAREN)
         index_type = "BTREE"
+        metric = None
+        dimension = None
+        profile_id = None
         if self._match_keyword("TYPE"):
             index_type = self._expect_ident_or_keyword()
+            if self._match_word("USING"):
+                raise QueryParseError("CREATE INDEX cannot combine TYPE and USING")
+        elif self._match_word("USING"):
+            index_type = self._expect_ident_or_keyword()
+            if index_type not in ("INVERTED", "IVF", "HNSW"):
+                raise QueryParseError(f"unsupported specialized index {index_type!r}")
+            if self._match_word("WITH"):
+                seen: set[str] = set()
+                while True:
+                    key = self._expect_ident_or_keyword()
+                    if key not in ("METRIC", "DIMENSION", "PROFILE") or key in seen:
+                        raise QueryParseError(f"unsupported or repeated index option {key!r}")
+                    seen.add(key)
+                    eq = self._expect_kind(TokenKind.OPERATOR)
+                    if eq.value != "=":
+                        raise QueryParseError("index options require '='")
+                    if key == "METRIC":
+                        metric = self._expect_ident_or_keyword().lower()
+                        if metric not in ("euclidean", "cosine", "inner_product"):
+                            raise QueryParseError(f"unsupported metric {metric!r}")
+                    elif key == "DIMENSION":
+                        token = self._expect_kind(TokenKind.NUMBER)
+                        if not token.value.isdecimal() or int(token.value) <= 0:
+                            raise QueryParseError("DIMENSION must be a positive integer")
+                        dimension = int(token.value)
+                    else:
+                        token = self._expect_kind(TokenKind.STRING)
+                        if not token.value.strip():
+                            raise QueryParseError("PROFILE must be a non-empty string")
+                        profile_id = token.value
+                    if not self._match_comma():
+                        break
+            if index_type == "INVERTED" and any(
+                value is not None for value in (metric, dimension, profile_id)
+            ):
+                raise QueryParseError("INVERTED cannot use vector options")
+            if index_type in ("IVF", "HNSW") and (
+                metric is None or dimension is None or profile_id is None
+            ):
+                raise QueryParseError("IVF/HNSW require METRIC, DIMENSION and PROFILE")
         self._error_if_not_eof()
         return CreateIndexStatement(
             index_name=index_name,
             table=table,
             column=column,
             index_type=index_type,
+            metric=metric,
+            dimension=dimension,
+            profile_id=profile_id,
         )
 
     def _parse_drop_table(self) -> DropTableStatement:
