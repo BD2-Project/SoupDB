@@ -137,3 +137,9 @@ AUDIT: PASSED - NO ACTIVE BUGS
 Revision independiente de InvertedStore: manifest versionado persiste RID reales, doc_len, N, avgdl, page_size y configuracion/version del analizador. load exige los cuatro artefactos, verifica estadisticas, df, IDs de postings y suma TF por documento antes de devolver recursos. Los documentos vacios cuentan para N. build publica por rename desde staging tras validar reapertura, limpia runs/staging en fallo y rechaza sobrescribir destinos existentes. El analizador se reconstruye sin corpus ni descargas.
 
 Validacion independiente: `python -m pytest tests/unit/indexes/inverted/test_store.py -q`: 11 tests aprobados. Dos comprobaciones adicionales con TemporaryDirectory confirmaron limpieza completa si un termino excede la pagina hash y rechazo de un doc_id corrupto en postings; tras fallar load se pudieron eliminar todos los archivos en Windows (sin handles filtrados). No se modificaron proveedores vectoriales.
+
+### Fase 5.1-5.3: formulas de scoring
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente de scoring.py: TF-IDF usa TF crudo y log(N/df); coseno define vectores cero como score cero y espera normas de vectores completos. BM25 usa IDF positiva log(1+(N-df+0.5)/(df+0.5)), k1=1.2 y b=0.75 por defecto; algebra de saturacion equivalente evita overflow para k1 grande. Parametros BM25 finitos y rangos validados explicitamente. Coincidencia permanece independiente del valor del score. `python -m pytest tests/unit/indexes/inverted/test_scoring.py -q`: 13 tests aprobados con calculo manual, normalizacion por longitud, ceros y parametros invalidos. Aplicacion de las formulas al indice completo pendiente en el siguiente gate.
