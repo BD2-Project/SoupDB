@@ -97,3 +97,9 @@ AUDIT: PASSED - NO ACTIVE BUGS
 Revision independiente de qa-auditor: normalizacion NFKC/casefold conserva acentos y ene; puntuacion y guiones bajos separan tokens; stopwords ES/EN se filtran antes de aplicar reglas explicitas de stemming. Stoplist y stemming configurables, configuracion inmutable y TOKENIZER_VERSION disponibles para persistencia posterior. Las reglas son heuristicas bilingues documentadas, sin prometer equivalencia linguistica completa.
 
 Validacion: `python -m pytest tests/unit/indexes/inverted/test_tokenizer.py tests/unit/indexes/test_ranked_index_contract.py -q`: 68 tests aprobados (33 del tokenizador y 35 del contrato existente). Incluye normalizacion Unicode, vocabulario valido, stopwords personalizadas, plurales ES/EN, verbos/adverbios, entradas vacias e invalidas y determinismo. Persistencia del analizador se verificara cuando exista build/load; no se modificaron modulos vectoriales.
+
+### Fase 3: API publica de runs ordenados
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+qa-auditor reviso write_sorted_run/read_sorted_run/merge_sorted_runs: framing reutilizado, validacion del orden al escribir, rechazo de sobrescritura, merge con fan_in limitado, preservacion de entradas y cleanup ante fallo o cierre temprano. ExitStack corrige liberacion de archivos ya abiertos si falla abrir otro run. Validacion independiente: `python -m pytest tests/unit/algorithms/test_external_sort.py tests/unit/algorithms/test_sorted_runs.py -q`: 19 tests aprobados. Esta microfeature no cambia APIs vectoriales ni implementa todavia SPIMI.

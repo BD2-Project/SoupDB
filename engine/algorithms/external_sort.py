@@ -4,6 +4,7 @@ import heapq
 import struct
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
+from contextlib import ExitStack
 from functools import cmp_to_key
 from pathlib import Path
 from typing import BinaryIO
@@ -14,6 +15,77 @@ Comparator = Callable[[Record, Record], int]
 
 _LENGTH_FORMAT = "<I"
 _LENGTH_SIZE = struct.calcsize(_LENGTH_FORMAT)
+
+
+def write_sorted_run(
+    path: str | Path, records: Iterable[Record], comparator: Comparator
+) -> Path:
+    """Write an already sorted run, rejecting disorder and existing files.
+
+    Runs use the same length-prefixed Record payloads as external_sort.
+    A failed write removes only the newly created output.
+    """
+    path = Path(path)
+    created = False
+    try:
+        with path.open("xb") as file:
+            created = True
+            previous: Record | None = None
+            for record in records:
+                if previous is not None and comparator(previous, record) > 0:
+                    raise ValueError("run records must be sorted")
+                _write_record(file, record)
+                previous = record
+    except BaseException:
+        if created:
+            path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def read_sorted_run(path: str | Path) -> Iterator[Record]:
+    """Read a framed run; truncated lengths or payloads raise ValueError."""
+    yield from _read_run(Path(path))
+
+
+def merge_sorted_runs(
+    paths: Iterable[str | Path],
+    comparator: Comparator,
+    *,
+    fan_in: int = 8,
+    temp_dir: str | Path | None = None,
+) -> Iterator[Record]:
+    """Merge sorted runs without changing inputs or sorting their contents.
+
+    Each pass opens at most fan_in input files and one output. Temporary
+    outputs are removed on exhaustion, failure, or explicit generator.close().
+    Inputs must already be sorted under comparator (write_sorted_run checks).
+    """
+    if type(fan_in) is not int or fan_in < 2:
+        raise ValueError("fan_in must be an integer of at least 2")
+    runs = [Path(path) for path in paths]
+    order_key = cmp_to_key(comparator)
+    with tempfile.TemporaryDirectory(dir=temp_dir) as working_directory:
+        workdir = Path(working_directory)
+        pass_number = 0
+        while len(runs) > 1:
+            outputs: list[Path] = []
+            for group_number, start in enumerate(range(0, len(runs), fan_in)):
+                group = runs[start : start + fan_in]
+                if len(group) == 1:
+                    outputs.append(group[0])
+                    continue
+                output = workdir / f"pass-{pass_number}-run-{group_number}.bin"
+                _merge_runs(group, output, order_key=order_key)
+                outputs.append(output)
+            # Inputs supplied by the caller are never removed.
+            for path in runs:
+                if path.parent == workdir and path not in outputs:
+                    path.unlink()
+            runs = outputs
+            pass_number += 1
+        if runs:
+            yield from _read_run(runs[0])
 
 
 def external_sort(
@@ -154,10 +226,8 @@ def _merge_runs(
     *,
     order_key,
 ) -> None:
-    files: list[BinaryIO] = []
-
-    try:
-        files = [path.open("rb") for path in inputs]
+    with ExitStack() as stack:
+        files = [stack.enter_context(path.open("rb")) for path in inputs]
         heap: list[tuple[object, int, int, Record]] = []
         sequence = 0
 
@@ -194,11 +264,6 @@ def _merge_runs(
                         ),
                     )
                     sequence += 1
-
-    finally:
-        for file in files:
-            file.close()
-
 
 def _read_run(path: Path) -> Iterator[Record]:
     with path.open("rb") as file:
