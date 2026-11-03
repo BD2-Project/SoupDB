@@ -151,3 +151,17 @@ AUDIT: PASSED - NO ACTIVE BUGS
 Revision independiente de InvertedIndex: normas TF-IDF calculadas con todo el vector documental persistido; consulta usa TF crudo y omite OOV. Ambos metodos acumulan sobre postings y devuelven floats ordenados por score descendente/RID ascendente. top_k conserva universo completo con ceros; match_top_k usa union de documentos coincidentes, conserva ceros y devuelve [] para consulta vacia/stopwords/OOV. Valida k, query y opciones antes de buscar. close idempotente, apertura reconstruye normas sin corpus y cierra store si falla su inicializacion.
 
 Validacion: `python -m pytest tests/unit/indexes/inverted/test_index.py tests/unit/indexes/test_ranked_index_contract.py -q`: 67 tests aprobados. Se agregaron casos reales TF-IDF y BM25 a la suite canonica conservando sus asserts originales, ademas de calculos manuales, frecuencia de consulta, reapertura y semantica MATCH separada. Integracion SQL del hook pendiente Fase 6.
+
+### Fase 6: delegacion de factories y hook MATCH
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente de DelegatingRankedFactory: copia la configuracion, enruta build/load/drop por algoritmo, rechaza algoritmos no configurados y propaga query_vectorizer compartido sin importar implementaciones multimedia. Hook InvertedIndexScan usa match_top_k solo cuando es callable; RankedScan y fakes conservan top_k y validacion de resultados. SQL real confirma exclusiones OOV/vacio/stopwords y conserva coincidencias TF-IDF con score cero. Validacion independiente combinada de factory, SQL real/fake y ejecucion textual: 39 tests aprobados. El gate separado del provider durable espera completar pruebas de fallo y validacion de descriptor.
+
+### Fase 6.1-6.4: provider durable e integracion SQL real
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente: factory construye desde file_org.scan con RID reales, omite NULL y preserva textos vacios; declara exact/exhaustive y bloquea DML mediante capacidades inmutables. Descriptor vincula identidad SQL, algoritmo y cardinalidad con artefactos; load no accede al corpus. Staging y cleanup cubren error de entrada y fallo de reapertura posterior a publicacion. Drop/rebuild y Catalog reopen conservan resultados en ambos metodos. Hallazgo de version booleana/flotante aceptada por igualdad Python corregido con tipo int exacto y pruebas de regresion antes del gate.
+
+Validacion independiente: `python -m pytest tests/unit/indexes/inverted/test_provider.py tests/unit/indexes/test_ranked_factory.py tests/integration/test_ranked_real_inverted_sql.py -q`: 20 tests aprobados. Ademas del conjunto previo de 39 tests, cubre identidad/cardinalidad, falta de hash sin recrearlo, load sin scan y cleanup de builds fallidos. Integracion real cubre filtros, DISTINCT, orden, offsets, score cero, consultas sin coincidencias y reapertura/drop/rebuild.
