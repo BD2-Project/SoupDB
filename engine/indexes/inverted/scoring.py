@@ -24,7 +24,13 @@ def cosine(dot: float, query_norm: float, document_norm: float) -> float:
 
 def validate_bm25(k1: float, b: float) -> None:
     for name, value in (("k1", k1), ("b", b)):
-        if type(value) not in (int, float) or not math.isfinite(value):
+        if type(value) not in (int, float):
+            raise ValueError(f"BM25 {name} must be a finite number")
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite:
             raise ValueError(f"BM25 {name} must be a finite number")
     if k1 <= 0 or not 0 <= b <= 1:
         raise ValueError("BM25 requires k1 > 0 and 0 <= b <= 1")

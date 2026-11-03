@@ -21,10 +21,12 @@ def test_bm25_manual_calculation_and_length_normalization():
     assert shorter > score
     assert bm25_term(0, n=0, df=0, doc_len=0, avgdl=0.0) == 0.0
     assert math.isfinite(bm25_term(2, n=3, df=2, doc_len=3, avgdl=2, k1=1e308))
+    assert bm25_term(2, n=3, df=2, doc_len=3, avgdl=2, k1=1e-320) > 0.0
 
 
 @pytest.mark.parametrize("k1,b", [(0, .75), (-1, .75), (1.2, -1), (1.2, 2),
-                                    (math.nan, .75), (1.2, math.inf), (True, .75)])
+                                    (math.nan, .75), (1.2, math.inf), (True, .75),
+                                    (10**1000, .75), (1.2, 10**1000)])
 def test_invalid_bm25_parameters(k1, b):
     with pytest.raises(ValueError):
         validate_bm25(k1, b)

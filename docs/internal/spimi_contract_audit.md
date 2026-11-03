@@ -165,3 +165,19 @@ AUDIT: PASSED - NO ACTIVE BUGS
 Revision independiente: factory construye desde file_org.scan con RID reales, omite NULL y preserva textos vacios; declara exact/exhaustive y bloquea DML mediante capacidades inmutables. Descriptor vincula identidad SQL, algoritmo y cardinalidad con artefactos; load no accede al corpus. Staging y cleanup cubren error de entrada y fallo de reapertura posterior a publicacion. Drop/rebuild y Catalog reopen conservan resultados en ambos metodos. Hallazgo de version booleana/flotante aceptada por igualdad Python corregido con tipo int exacto y pruebas de regresion antes del gate.
 
 Validacion independiente: `python -m pytest tests/unit/indexes/inverted/test_provider.py tests/unit/indexes/test_ranked_factory.py tests/integration/test_ranked_real_inverted_sql.py -q`: 20 tests aprobados. Ademas del conjunto previo de 39 tests, cubre identidad/cardinalidad, falta de hash sin recrearlo, load sin scan y cleanup de builds fallidos. Integracion real cubre filtros, DISTINCT, orden, offsets, score cero, consultas sin coincidencias y reapertura/drop/rebuild.
+
+### Correccion de validacion BM25 tras revision final
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+La revision final adicional detecto OverflowError al pasar enteros gigantes a math.isfinite. El validador ahora transforma ese caso en ValueError consistente con opciones invalidas. Revision independiente del fix y `python -m pytest tests/unit/indexes/inverted/test_scoring.py tests/unit/indexes/inverted/test_index.py -q`: 33 tests aprobados. Regresiones cubren enteros gigantes para ambos parametros y k1 positivo subnormal sin score invalido. El hallazgo queda resuelto antes del cierre.
+
+### Fase 7: muestra reproducible, benchmark y cierre
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente de sampler/benchmark/docs: reservoir sampling uniforme con semilla, schema confirmado, exportacion UTF-8 atomica, sin importar scripts/corpus.py ni ejecutar sus efectos laterales. Benchmark concatena titulo/texto, conserva IDs fuente, verifica ranking y reapertura de ambos metodos y limpia indices temporales incluso ante fallos. `python -m pytest tests/unit/indexes/inverted/test_bench_scripts.py -q`: 9 tests aprobados.
+
+Corrida real del coordinador: muestra 1000 de 171332 documentos TREC-COVID, semilla 7, SHA-256 `3e997607225a722ee8ff2e4d2d91bdefa24b064e19f87fbb624d2693d8558212`. Presupuesto 262144 bytes, build 13.0007201 s, load 3.4068064 s, artefactos 2055198 bytes; seis consultas TF-IDF/BM25 con reapertura verificada. qa-auditor verifico independientemente hash del corpus, cardinalidad, pertenencia RID/ID fuente, unicidad y scores finitos descendentes del reporte local `benchmarks/data/inverted_bench.json`. Datos/reportes quedan excluidos de Git.
+
+Regresion ampliada reportada por coordinador: 552 tests aprobados (unitarios ranked/inverted/sort e integracion SQL fake/real invertida). La integracion SQL vectorial real opcional no pudo recolectarse por dependencia multimedia preexistente ausente: sklearn. Los tests unitarios vectoriales ranked y routing de factories si pasaron; este limite no equivale a validacion multimedia completa. No se instalaron dependencias multimedia adicionales.
