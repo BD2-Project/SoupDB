@@ -103,3 +103,17 @@ Validacion: `python -m pytest tests/unit/indexes/inverted/test_tokenizer.py test
 AUDIT: PASSED - NO ACTIVE BUGS
 
 qa-auditor reviso write_sorted_run/read_sorted_run/merge_sorted_runs: framing reutilizado, validacion del orden al escribir, rechazo de sobrescritura, merge con fan_in limitado, preservacion de entradas y cleanup ante fallo o cierre temprano. ExitStack corrige liberacion de archivos ya abiertos si falla abrir otro run. Validacion independiente: `python -m pytest tests/unit/algorithms/test_external_sort.py tests/unit/algorithms/test_sorted_runs.py -q`: 19 tests aprobados. Esta microfeature no cambia APIs vectoriales ni implementa todavia SPIMI.
+
+### Fase 3.1: lector de corpus
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente: conserva IDs fuente separados de RID, concatena title/text, admite aliases documentados, mantiene documentos vacios, rechaza IDs duplicados normalizados y registra ruta/linea al omitir JSON o campos invalidos. Lectura sin crear archivos faltantes. Las pruebas incluyen Unicode, los 12 pares de aliases y recuperacion tras lineas invalidas.
+
+### Fase 3.2-3.4: bloques SPIMI y merge por termino
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente: TF por documento, IDs densos con mapa a RID reales, preservacion de longitudes cero, spills en directorios exclusivos y uso de la API publica de external_sort. Merge agrega TF de pares repartidos y produce terminos/postings ordenados. El presupuesto es aproximado y sus excepciones por documento/Counter estan documentadas. Fallos eliminan solo directorios propios, el merge cierra temporales y el caso sin runs elimina su directorio vacio. Hallazgo inicial del coordinador sobre ese directorio huerfano corregido antes del gate.
+
+Validacion independiente de lector y SPIMI: `python -m pytest tests/unit/indexes/inverted/test_corpus_reader.py tests/unit/indexes/inverted/test_spimi.py -q`: 28 tests aprobados (17 lector, 11 SPIMI). La muestra externa 1k corresponde a validacion posterior, no se descargo aqui.
