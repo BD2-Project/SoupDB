@@ -117,3 +117,9 @@ AUDIT: PASSED - NO ACTIVE BUGS
 Revision independiente: TF por documento, IDs densos con mapa a RID reales, preservacion de longitudes cero, spills en directorios exclusivos y uso de la API publica de external_sort. Merge agrega TF de pares repartidos y produce terminos/postings ordenados. El presupuesto es aproximado y sus excepciones por documento/Counter estan documentadas. Fallos eliminan solo directorios propios, el merge cierra temporales y el caso sin runs elimina su directorio vacio. Hallazgo inicial del coordinador sobre ese directorio huerfano corregido antes del gate.
 
 Validacion independiente de lector y SPIMI: `python -m pytest tests/unit/indexes/inverted/test_corpus_reader.py tests/unit/indexes/inverted/test_spimi.py -q`: 28 tests aprobados (17 lector, 11 SPIMI). La muestra externa 1k corresponde a validacion posterior, no se descargo aqui.
+
+### Fase 4.1: postings binarios
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente de PostingsFile: magic/version, conteo y pares uint64, IDs ordenados unicos, TF positivo, validacion antes de escritura y comprobacion de offset/longitud/df/bounds al leer. load no crea archivos faltantes, rechaza headers desconocidos y cierra el handle ante error; close es idempotente. `python -m pytest tests/unit/indexes/inverted/test_postings.py -q`: 9 tests aprobados, incluyendo round-trip, listas multiples/vacias y corrupcion/truncamiento. La limpieza de builds parciales se auditara en el componente que administra el directorio completo.
