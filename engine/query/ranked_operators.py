@@ -85,7 +85,7 @@ class RankedScan(_VolcanoBase):
         try:
             self._file_org.lock_shared()
             if self._request:
-                raw_hits = self._binding.index.top_k(self._query, self._request, **self._options)
+                raw_hits = self._search()
                 if not isinstance(raw_hits, list):
                     raise QueryExecutionError("ranked index must return a list of hits")
                 if len(raw_hits) > self._request:
@@ -111,6 +111,9 @@ class RankedScan(_VolcanoBase):
                 f"ranked search failed for index {self._binding.name!r}: {exc}"
             ) from exc
         self._opened = True
+
+    def _search(self) -> list[tuple[RID, float]]:
+        return self._binding.index.top_k(self._query, self._request, **self._options)
 
     def next(self) -> Record | None:
         if not self._opened:
@@ -166,6 +169,14 @@ class RankedScan(_VolcanoBase):
 
 class InvertedIndexScan(RankedScan):
     """Text ranked-search leaf for inverted indexes (TF-IDF or BM25)."""
+
+    def _search(self) -> list[tuple[RID, float]]:
+        # Real text providers distinguish MATCH candidates from the complete
+        # RankedIndex universe. Existing providers/fakes retain their contract.
+        match_search = getattr(self._binding.index, "match_top_k", None)
+        if callable(match_search):
+            return match_search(self._query, self._request, **self._options)
+        return super()._search()
 
     def __init__(
         self,
