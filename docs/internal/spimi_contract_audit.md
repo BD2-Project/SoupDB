@@ -129,3 +129,11 @@ Revision independiente de PostingsFile: magic/version, conteo y pares uint64, ID
 AUDIT: PASSED - NO ACTIVE BUGS
 
 Revision independiente: find consulta realmente ExtendibleHash.search y resuelve RID auxiliares al sidecar versionado, sin usar RID de documentos. Valida capacidad uint32/uint16 de esos punteros, longitud UTF-8 de terminos, metadata y coherencia hash/sidecar al reabrir. Los offsets separados permiten iterar e intercalar consultas. load exige artefactos existentes y cierra recursos ante corrupcion; managers propios permiten controlar fallos de apertura. `python -m pytest tests/unit/indexes/inverted/test_dictionary.py -q`: 7 tests aprobados, incluyendo 160 terminos con paginas pequenas, reapertura, duplicados, limites y corrupciones con liberacion de handles verificada en Windows.
+
+### Fase 4.3-4.4: estadisticas y layout persistente
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente de InvertedStore: manifest versionado persiste RID reales, doc_len, N, avgdl, page_size y configuracion/version del analizador. load exige los cuatro artefactos, verifica estadisticas, df, IDs de postings y suma TF por documento antes de devolver recursos. Los documentos vacios cuentan para N. build publica por rename desde staging tras validar reapertura, limpia runs/staging en fallo y rechaza sobrescribir destinos existentes. El analizador se reconstruye sin corpus ni descargas.
+
+Validacion independiente: `python -m pytest tests/unit/indexes/inverted/test_store.py -q`: 11 tests aprobados. Dos comprobaciones adicionales con TemporaryDirectory confirmaron limpieza completa si un termino excede la pagina hash y rechazo de un doc_id corrupto en postings; tras fallar load se pudieron eliminar todos los archivos en Windows (sin handles filtrados). No se modificaron proveedores vectoriales.
