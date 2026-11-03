@@ -15,6 +15,7 @@ import pytest
 
 from engine.common.rid import RID
 from engine.indexes.base import RankedIndex
+from engine.indexes.inverted.index import InvertedIndex
 from engine.indexes.vector.brute_force import BruteForceIndex
 from engine.indexes.vector.hnsw import HNSWIndex
 from engine.indexes.vector.ivf import IVFIndex
@@ -75,6 +76,16 @@ def _hnsw_build(path: Path, items: list[tuple[Any, RID]]) -> RankedIndex:
 
 
 CASES: dict[str, Callable[[], Case]] = {
+    "inverted_tf_idf": lambda: Case(
+        build=lambda path, items: InvertedIndex.build(path / "inverted", items),
+        reopen=lambda path: InvertedIndex.load(path / "inverted"),
+        items=_texts(), query="vector index", opts={"method": "tf_idf"},
+    ),
+    "inverted_bm25": lambda: Case(
+        build=lambda path, items: InvertedIndex.build(path / "inverted", items),
+        reopen=lambda path: InvertedIndex.load(path / "inverted"),
+        items=_texts(), query="vector index", opts={"method": "bm25"},
+    ),
     "fake_vector": lambda: Case(
         build=_fake_build(vector_scorer),
         reopen=lambda path: FakeRankedIndex(vector_scorer, path / "fake.json"),

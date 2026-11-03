@@ -143,3 +143,11 @@ Validacion independiente: `python -m pytest tests/unit/indexes/inverted/test_sto
 AUDIT: PASSED - NO ACTIVE BUGS
 
 Revision independiente de scoring.py: TF-IDF usa TF crudo y log(N/df); coseno define vectores cero como score cero y espera normas de vectores completos. BM25 usa IDF positiva log(1+(N-df+0.5)/(df+0.5)), k1=1.2 y b=0.75 por defecto; algebra de saturacion equivalente evita overflow para k1 grande. Parametros BM25 finitos y rangos validados explicitamente. Coincidencia permanece independiente del valor del score. `python -m pytest tests/unit/indexes/inverted/test_scoring.py -q`: 13 tests aprobados con calculo manual, normalizacion por longitud, ceros y parametros invalidos. Aplicacion de las formulas al indice completo pendiente en el siguiente gate.
+
+### Fase 5.4: RankedIndex real
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente de InvertedIndex: normas TF-IDF calculadas con todo el vector documental persistido; consulta usa TF crudo y omite OOV. Ambos metodos acumulan sobre postings y devuelven floats ordenados por score descendente/RID ascendente. top_k conserva universo completo con ceros; match_top_k usa union de documentos coincidentes, conserva ceros y devuelve [] para consulta vacia/stopwords/OOV. Valida k, query y opciones antes de buscar. close idempotente, apertura reconstruye normas sin corpus y cierra store si falla su inicializacion.
+
+Validacion: `python -m pytest tests/unit/indexes/inverted/test_index.py tests/unit/indexes/test_ranked_index_contract.py -q`: 67 tests aprobados. Se agregaron casos reales TF-IDF y BM25 a la suite canonica conservando sus asserts originales, ademas de calculos manuales, frecuencia de consulta, reapertura y semantica MATCH separada. Integracion SQL del hook pendiente Fase 6.
