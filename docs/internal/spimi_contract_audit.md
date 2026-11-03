@@ -69,23 +69,31 @@ external_sort(records: Iterable[Record], comparator, *, memory_limit_bytes, fan_
 
 ## Decisiones confirmadas tras Fase 0
 
-1. Diccionario: t?rmino -> RID auxiliar -> archivo sidecar con df/offset/longitud. Los RID auxiliares nunca se usan para recuperar documentos de tabla.
-2. Merge: ampliar la API p?blica de external_sort para fusionar runs ya ordenados; no importar funciones privadas ni reordenar los bloques innecesariamente.
-3. Coincidencias: top_k por defecto conserva la enumeraci?n de todos los documentos requerida por la suite. MATCH usa un modo expl?cito de solo coincidencias del analizador, incluidas coincidencias cuyo score sea cero. Consulta vac?a, OOV o formada solo por stopwords devuelve [] en ese modo; no inferir coincidencia a partir de score > 0.
-4. Inyecci?n: factory delegada por algoritmo, con provider INVERTED y delegaci?n a providers vectoriales existentes. Mantener la inyecci?n expl?cita Catalog(..., ranked_factory=...) y no alterar implementaciones vectoriales.
+1. Diccionario: término -> RID auxiliar -> archivo sidecar con df/offset/longitud. Los RID auxiliares nunca se usan para recuperar documentos de tabla.
+2. Merge: ampliar la API pública de external_sort para fusionar runs ya ordenados; no importar funciones privadas ni reordenar los bloques innecesariamente.
+3. Coincidencias: top_k por defecto conserva la enumeración de todos los documentos requerida por la suite. MATCH usa un modo explícito de solo coincidencias del analizador, incluidas coincidencias cuyo score sea cero. Consulta vacía, OOV o formada solo por stopwords devuelve [] en ese modo; no inferir coincidencia a partir de score > 0.
+4. Inyección: factory delegada por algoritmo, con provider INVERTED y delegación a providers vectoriales existentes. Mantener la inyección explícita Catalog(..., ranked_factory=...) y no alterar implementaciones vectoriales.
 
 Estas decisiones fueron confirmadas por el usuario. No quedan pendientes las cuatro preguntas iniciales de esta fase.
 
-## Estado de auditor?a
+## Estado de auditoría
 
-Documento preparado por contract-analyst y revisado independientemente por qa-auditor. La revisi?n est?tica confirma los siete requisitos de la suite, la separaci?n entre RID auxiliares y reales, las limitaciones de ExtendibleHash y la ausencia inicial de merge p?blico de runs preexistentes.
+Documento preparado por contract-analyst y revisado independientemente por qa-auditor. La revisión estática confirma los siete requisitos de la suite, la separación entre RID auxiliares y reales, las limitaciones de ExtendibleHash y la ausencia inicial de merge público de runs preexistentes.
 
-El intento inicial de baseline fall? por falta de pytest. Posteriormente se instal? pytest 9.2.0 localmente y el coordinador confirm? 79 tests aprobados en el conjunto de contrato ranked, ExtendibleHash, external_sort e integraci?n SQL. No se descargaron datasets durante este descubrimiento.
+El intento inicial de baseline falló por falta de pytest. Posteriormente se instaló pytest 9.2.0 localmente y el coordinador confirmó 79 tests aprobados en el conjunto de contrato ranked, ExtendibleHash, external_sort e integración SQL. No se descargaron datasets durante este descubrimiento.
 
-Decisiones de dise?o resueltas y baseline aprobado. La Fase 1 agrega ?nicamente m?dulos importables y un scaffold abstracto de InvertedIndex; su auditor?a independiente debe registrarse antes del commit.
+Decisiones de diseño resueltas y baseline aprobado. La Fase 1 agrega únicamente módulos importables y un scaffold abstracto de InvertedIndex; su auditoría independiente debe registrarse antes del commit.
 
 ### Fase 1: revision independiente
 
 AUDIT: PASSED - NO ACTIVE BUGS
 
 qa-auditor verifico los 11 modulos nuevos: docstrings sin efectos laterales e InvertedIndex como subclase abstracta de RankedIndex, sin implementar funcionalidad prematuramente. La importacion explicita de todos los modulos paso. `python -m pytest tests/unit/indexes/test_ranked_index_contract.py --collect-only -q` recolecto 35 tests sin errores. No se modificaron implementaciones vectoriales ni archivos de usuario ajenos al alcance. Este gate cubre solamente el esqueleto de Fase 1; no acredita scoring, persistencia o integracion todavia.
+
+### Fase 2: tokenizador
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente de qa-auditor: normalizacion NFKC/casefold conserva acentos y ene; puntuacion y guiones bajos separan tokens; stopwords ES/EN se filtran antes de aplicar reglas explicitas de stemming. Stoplist y stemming configurables, configuracion inmutable y TOKENIZER_VERSION disponibles para persistencia posterior. Las reglas son heuristicas bilingues documentadas, sin prometer equivalencia linguistica completa.
+
+Validacion: `python -m pytest tests/unit/indexes/inverted/test_tokenizer.py tests/unit/indexes/test_ranked_index_contract.py -q`: 68 tests aprobados (33 del tokenizador y 35 del contrato existente). Incluye normalizacion Unicode, vocabulario valido, stopwords personalizadas, plurales ES/EN, verbos/adverbios, entradas vacias e invalidas y determinismo. Persistencia del analizador se verificara cuando exista build/load; no se modificaron modulos vectoriales.
