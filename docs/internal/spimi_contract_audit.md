@@ -123,3 +123,9 @@ Validacion independiente de lector y SPIMI: `python -m pytest tests/unit/indexes
 AUDIT: PASSED - NO ACTIVE BUGS
 
 Revision independiente de PostingsFile: magic/version, conteo y pares uint64, IDs ordenados unicos, TF positivo, validacion antes de escritura y comprobacion de offset/longitud/df/bounds al leer. load no crea archivos faltantes, rechaza headers desconocidos y cierra el handle ante error; close es idempotente. `python -m pytest tests/unit/indexes/inverted/test_postings.py -q`: 9 tests aprobados, incluyendo round-trip, listas multiples/vacias y corrupcion/truncamiento. La limpieza de builds parciales se auditara en el componente que administra el directorio completo.
+
+### Fase 4.2: diccionario sobre ExtendibleHash
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+Revision independiente: find consulta realmente ExtendibleHash.search y resuelve RID auxiliares al sidecar versionado, sin usar RID de documentos. Valida capacidad uint32/uint16 de esos punteros, longitud UTF-8 de terminos, metadata y coherencia hash/sidecar al reabrir. Los offsets separados permiten iterar e intercalar consultas. load exige artefactos existentes y cierra recursos ante corrupcion; managers propios permiten controlar fallos de apertura. `python -m pytest tests/unit/indexes/inverted/test_dictionary.py -q`: 7 tests aprobados, incluyendo 160 terminos con paginas pequenas, reapertura, duplicados, limites y corrupciones con liberacion de handles verificada en Windows.
