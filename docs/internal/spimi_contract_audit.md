@@ -181,3 +181,16 @@ Revision independiente de sampler/benchmark/docs: reservoir sampling uniforme co
 Corrida real del coordinador: muestra 1000 de 171332 documentos TREC-COVID, semilla 7, SHA-256 `3e997607225a722ee8ff2e4d2d91bdefa24b064e19f87fbb624d2693d8558212`. Presupuesto 262144 bytes, build 13.0007201 s, load 3.4068064 s, artefactos 2055198 bytes; seis consultas TF-IDF/BM25 con reapertura verificada. qa-auditor verifico independientemente hash del corpus, cardinalidad, pertenencia RID/ID fuente, unicidad y scores finitos descendentes del reporte local `benchmarks/data/inverted_bench.json`. Datos/reportes quedan excluidos de Git.
 
 Regresion ampliada reportada por coordinador: 552 tests aprobados (unitarios ranked/inverted/sort e integracion SQL fake/real invertida). La integracion SQL vectorial real opcional no pudo recolectarse por dependencia multimedia preexistente ausente: sklearn. Los tests unitarios vectoriales ranked y routing de factories si pasaron; este limite no equivale a validacion multimedia completa. No se instalaron dependencias multimedia adicionales.
+
+## Validación final del coordinador
+
+563 tests aprobados tras agregar scripts de benchmark y regresión de parámetros
+BM25 fuera del rango float. Comando: selección de tests/unit/*ranked*, suite
+tests/unit/indexes/inverted, test_external_sort, test_sorted_runs e integración
+SQL fake/real invertida. La suite SQL vectorial real no se ejecutó por falta
+de scikit-learn; no se considera validación multimedia completa.
+
+Smoke SQL real adicional: 1.000 documentos, heap page_size=8192, provider delegado,
+build 16,156 s, MATCH TF-IDF/BM25 top-10 idénticos tras cerrar/reabrir Catalog,
+MATCH vacío sin filas y temporales eliminados. Reporte local ignorado por Git:
+benchmarks/data/inverted_sql_smoke.json.
