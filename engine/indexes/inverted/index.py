@@ -11,7 +11,7 @@ from engine.common.rid import RID
 from engine.indexes.base import RankedIndex
 from engine.indexes.inverted.scoring import bm25_term, cosine, idf, validate_bm25
 from engine.indexes.inverted.store import InvertedStore
-from engine.indexes.inverted.tokenizer import Tokenizer
+from engine.indexes.inverted.tokenizer import DEFAULT_TOKENIZER, Tokenizer
 
 
 class InvertedIndex(RankedIndex):
@@ -40,7 +40,7 @@ class InvertedIndex(RankedIndex):
     @classmethod
     def build(
         cls, path: str | Path, items: Iterable[tuple[str, RID]], *,
-        tokenizer: Tokenizer = Tokenizer(), memory_limit_bytes: int = 8 * 1024 * 1024,
+        tokenizer: Tokenizer = DEFAULT_TOKENIZER, memory_limit_bytes: int = 8 * 1024 * 1024,
         page_size: int = 4096, fan_in: int = 8,
     ) -> "InvertedIndex":
         return cls(InvertedStore.build(

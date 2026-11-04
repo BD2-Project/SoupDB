@@ -10,7 +10,6 @@ from engine.common.rid import RID
 from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.inverted.provider import OnDiskInvertedFactory
 
-
 SCHEMA = (ColumnDef("body", ColumnType.TEXT),)
 METADATA = RankedMetadata("idx", "docs", "body", "INVERTED")
 

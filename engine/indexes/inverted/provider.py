@@ -14,7 +14,7 @@ from engine.common.record import decode_row
 from engine.common.rid import RID
 from engine.common.schema import ColumnDef
 from engine.indexes.inverted.index import InvertedIndex
-from engine.indexes.inverted.tokenizer import Tokenizer
+from engine.indexes.inverted.tokenizer import DEFAULT_TOKENIZER, Tokenizer
 from engine.storage.base import FileOrganization
 
 _MANIFEST = "sql_index.json"
@@ -28,7 +28,7 @@ class OnDiskInvertedFactory:
     """
 
     def __init__(
-        self, storage_root: str | Path, *, tokenizer: Tokenizer = Tokenizer(),
+        self, storage_root: str | Path, *, tokenizer: Tokenizer = DEFAULT_TOKENIZER,
         memory_limit_bytes: int = 8 * 1024 * 1024, page_size: int = 4096, fan_in: int = 8,
     ) -> None:
         self.storage_root = Path(storage_root)

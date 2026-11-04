@@ -12,7 +12,7 @@ from engine.indexes.inverted.dictionary import DictionaryEntry, TermDictionary
 from engine.indexes.inverted.merge import merged_terms
 from engine.indexes.inverted.postings import PostingsFile
 from engine.indexes.inverted.spimi import spimi_runs
-from engine.indexes.inverted.tokenizer import TOKENIZER_VERSION, Tokenizer
+from engine.indexes.inverted.tokenizer import DEFAULT_TOKENIZER, TOKENIZER_VERSION, Tokenizer
 
 _VERSION = 1
 _ARTIFACTS = ("manifest.json", "postings.bin", "terms.meta", "terms.hash")
@@ -35,7 +35,7 @@ class InvertedStore:
     @classmethod
     def build(
         cls, path: str | Path, items: Iterable[tuple[str, RID]], *,
-        tokenizer: Tokenizer = Tokenizer(), memory_limit_bytes: int = 8 * 1024 * 1024,
+        tokenizer: Tokenizer = DEFAULT_TOKENIZER, memory_limit_bytes: int = 8 * 1024 * 1024,
         page_size: int = 4096, fan_in: int = 8,
     ) -> "InvertedStore":
         """Stage, validate, and rename into a new directory; never replace an index.

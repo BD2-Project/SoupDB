@@ -194,3 +194,13 @@ Smoke SQL real adicional: 1.000 documentos, heap page_size=8192, provider delega
 build 16,156 s, MATCH TF-IDF/BM25 top-10 idénticos tras cerrar/reabrir Catalog,
 MATCH vacío sin filas y temporales eliminados. Reporte local ignorado por Git:
 benchmarks/data/inverted_sql_smoke.json.
+
+## Regresion completa y revision de estilo posterior
+
+AUDIT: PASSED - NO ACTIVE BUGS
+
+El usuario solicito instalar las dependencias pendientes y ejecutar la regresion completa. La limitacion anterior de scikit-learn quedo resuelta; la integracion SQL vectorial real aprobo sus cuatro tests. qa-auditor verifico directamente `benchmarks/data/regression_full.xml`: 2330 tests, cero fallos, errores y skips, tiempo registrado 217.536 s. `regression_coverage.json` registra 8856/9322 lineas ejecutables cubiertas (95.0011%). Esta evidencia corresponde a la corrida completa previa al ajuste de estilo siguiente.
+
+Ruff detecto siete incumplimientos de estilo en archivos de la sesion. Correccion revisada: DEFAULT_TOKENIZER compartido es seguro porque Tokenizer es frozen y su stoplist es frozenset; los otros cambios solo separan una linea larga y normalizan imports. Validacion independiente posterior: Ruff sobre todos los archivos Python de la sesion sin errores y 196 tests de inverted/contrato/SQL real invertida aprobados. No se detectaron bugs activos en esa correccion. El informe de sesion consolida resultados y limites de cobertura.
+
+Revision independiente del informe de sesion completada: resultados y limites cotejados con XML/JSON y reportes locales. El XML posterior a los ajustes registra 567 tests, cero fallos/errores/skips y 7.439 s (7.45 s comunicado por pytest). Esta seleccion posterior incluye SQL vectorial real. El informe distingue la cobertura completa del snapshot anterior de la validacion focalizada posterior. AUDIT: PASSED - NO ACTIVE BUGS para el informe final.

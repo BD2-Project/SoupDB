@@ -7,7 +7,8 @@ from engine.indexes.inverted.corpus_reader import read_corpus
 
 def _corpus(tmp_path, rows):
     path = tmp_path / "corpus.jsonl"
-    path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
+    serialized = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    path.write_text(serialized, encoding="utf-8")
     return path
 
 

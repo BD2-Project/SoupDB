@@ -102,6 +102,9 @@ class Tokenizer:
         return [stem(word) if self.stemming else word for word in words]
 
 
+DEFAULT_TOKENIZER = Tokenizer()
+
+
 def tokenize(
     text: str,
     *,

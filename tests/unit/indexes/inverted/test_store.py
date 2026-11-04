@@ -6,7 +6,6 @@ from engine.common.rid import RID
 from engine.indexes.inverted.store import InvertedStore
 from engine.indexes.inverted.tokenizer import Tokenizer
 
-
 TOKENIZER = Tokenizer(stopwords=frozenset({"omit"}), stemming=False)
 ITEMS = [("Árbol disk disk omit", RID(7, 2)), ("disk page árbol", RID(2, 4)), ("", RID(9, 0))]
 

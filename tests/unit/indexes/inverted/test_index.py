@@ -6,7 +6,6 @@ from engine.common.rid import RID
 from engine.indexes.inverted.index import InvertedIndex
 from engine.indexes.inverted.tokenizer import Tokenizer
 
-
 ITEMS = [("alpha alpha beta", RID(7, 0)), ("alpha gamma", RID(1, 3)), ("delta", RID(2, 0))]
 
 
