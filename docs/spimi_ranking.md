@@ -103,6 +103,10 @@ heap de 8.192 bytes para admitir los documentos de esta muestra, cuyo texto
 concatenado más largo ocupa 5.827 bytes UTF-8. Los temporales se eliminaron.
 Resumen local: `benchmarks/data/inverted_sql_smoke.json`.
 
-La validación final aprobó 563 tests de ranked, índice invertido, sort/merge y
-SQL. La suite SQL vectorial real no se recolectó por ausencia de scikit-learn
-en el entorno; las pruebas unitarias ranked vectoriales y de delegación pasaron.
+La regresión completa posterior aprobó 2.330 tests, sin fallos ni omisiones,
+incluida la suite SQL vectorial real después de instalar las dependencias
+multimedia en el Python local. La cobertura de líneas medida fue 95,00 % global
+y 93,52 % en inverted. Después de ajustes de estilo se aprobaron 567 pruebas
+focalizadas adicionales y Ruff sobre los archivos de esta sesión.
+El [informe completo](internal/spimi_session_report.md) documenta comandos,
+alcance, resultados, commits y límites de estas mediciones.
