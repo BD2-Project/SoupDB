@@ -5,7 +5,7 @@ Fecha: 2026-11-03. Fase 0; no contiene implementación del índice.
 ## Acuerdos del usuario
 
 - Fuente: `scripts/corpus.py`, función `corpus()`, dataset TREC-COVID, campos `_id`, `title`, `text`.
-- Exportar muestra reproducible de 1.000 documentos con semilla fija y conservar esos campos. Indexar título y texto concatenados. Añadir casos pequeños ES/EN.
+- Exportar muestra reproducible de 1.000, 10.000 y 100.000 documentos con semilla fija y conservar esos campos. Indexar título y texto concatenados. Añadir casos pequeños ES/EN.
 - Stopwords español e inglés; stemming de nivel intermedio. No referencias numéricas de issues en commits.
 - Leer APIs completas está autorizado. Aclarar dudas descubiertas antes de Fase 1.
 - El script tiene llamadas de descarga al nivel del módulo: importarlo ejecuta las tres lecturas. No se ejecutó ni descargó el corpus durante este análisis.

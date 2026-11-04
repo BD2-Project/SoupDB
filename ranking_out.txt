@@ -1,0 +1,8 @@
+﻿python : C:\Users\yeimi\AppData\Local\Programs\Python\Python312\python.exe: can't open file 
+'C:\\Users\\yeimi\\Downloads\\SoupDB\\find_ranking.py': [Errno 2] No such file or directory
+En línea: 1 Carácter: 1
++ python C:\Users\yeimi\Downloads\SoupDB\find_ranking.py 2>&1 | Out-Fil ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\yeimi\...le or directory:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

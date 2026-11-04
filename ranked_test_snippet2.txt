@@ -1,0 +1,82 @@
+"""C21: official ranked SQL scenarios through public API and actual TCP sockets.
+
+The providers are scripted fakes: this verifies SQL/TCP integration, not real
+TF-IDF/BM25 scoring or IVF/HNSW recall.
+"""
+
+import json
+import socket
+import threading
+
+import pytest
+
+from engine.common.ranked import RankedBinding
+from engine.common.schema import ColumnDef, ColumnType
+from engine.query import execute_sql
+from engine.transactions import protocol as proto
+from engine.transactions.connection_handler import ConnectionHandler
+from engine.transactions.transaction_manager import TransactionManager
+from tests.fakes.fake_catalog import FakeCatalog
+from tests.fakes.fake_query_vectorizer import FakeQueryVectorizer
+from tests.fakes.fake_ranked_search import ScriptedRankedIndex
+
+pytestmark = pytest.mark.integration
+
+SQL_TEXT_TFIDF = (
+    "SELECT * FROM documentos WHERE MATCH(contenido, 'base de datos vectorial') "
+    "USING TF_IDF LIMIT 10"
+)
+SQL_TEXT_BM25 = (
+    "SELECT *, SCORE() AS relevancia FROM articulos "
+    "WHERE MATCH(texto, 'machine learning') USING BM25 "
+    "ORDER BY relevancia DESC"
+)
+SQL_IMAGE_HNSW = (
+    "SELECT * FROM imagenes WHERE SIMILAR_TO('foto_consulta.jpg', k=2) "
+    "USING HNSW WITH METRIC=cosine"
+)
+SQL_AUDIO_IVF = (
+    "SELECT nombre, artista, SIMILARITY_SCORE() AS score FROM canciones "
+    "WHERE SIMILAR_TO('audio_query.mp3', k=2) USING IVF WITH METRIC=euclidean "
+    "ORDER BY score DESC"
+)
+
+SCENARIOS = (
+    (SQL_TEXT_TFIDF, ("id", "contenido"), ((2, "segundo"), (1, "primero"))),
+    (
+        SQL_TEXT_BM25,
+        ("id", "texto", "relevancia"),
+        ((12, "aprendizaje b", 0.9), (11, "aprendizaje a", 0.4)),
+    ),
+    (
+        SQL_IMAGE_HNSW,
+        ("id", "archivo"),
+        ((22, "imagen b.jpg"), (21, "imagen a.jpg")),
+    ),
+    (
+        SQL_AUDIO_IVF,
+        ("nombre", "artista", "score"),
+        (("pista b", "beto", 0.8), ("pista a", "ana", -0.2)),
+    ),
+)
+
+
+def _create_ranked(
+    catalog: FakeCatalog,
+    table: str,
+    schema: tuple[ColumnDef, ...],
+    rows: tuple[tuple[object, ...], ...],
+    column: str,
+    algorithm: str,
+    query: str | tuple[float, ...],
+    scores: tuple[tuple[int, float], ...],
+    *,
+    method: str | None = None,
+    metric: str | None = None,
+    profile: str | None = None,
+) -> ScriptedRankedIndex:
+    catalog.create_table(table, schema)
+    for row in rows:
+        catalog.insert(table, row)
+    rids = [rid for rid, _ in catalog.file_org(table).scan()]
+    kind = {"INVERTED": "text", "I
