@@ -3,7 +3,7 @@ name: plugins-release
 # Publica el core y los plugins en PyPI.
 # - Tag dedicado `plugins-v*` (no cada release del gestor, para evitar
 #   republicar versiones ya existentes).
-# - O manualmente con workflow_dispatch.
+# - O manualmente con workflow_dispatch (target: all | core | inverted | vector | plugins).
 #
 # Requiere el secret PYPI_TOKEN (o configurar Trusted Publishing en PyPI y
 # reemplazar el paso por pypa/gh-action-pypi-publish).
@@ -15,7 +15,7 @@ on:
       target:
         description: "Paquetes a publicar"
         type: choice
-        options: [all, core, plugins]
+        options: [all, core, inverted, vector, plugins]
         default: all
 
 permissions:
@@ -32,8 +32,10 @@ jobs:
           if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.target }}" = "all" ] || [ "${{ inputs.target }}" = "core" ]; then
             uv build --package soupdb --out-dir dist
           fi
-          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.target }}" = "all" ] || [ "${{ inputs.target }}" = "plugins" ]; then
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.target }}" = "all" ] || [ "${{ inputs.target }}" = "plugins" ] || [ "${{ inputs.target }}" = "inverted" ]; then
             uv build --package soupdb-inverted --out-dir dist
+          fi
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.target }}" = "all" ] || [ "${{ inputs.target }}" = "plugins" ] || [ "${{ inputs.target }}" = "vector" ]; then
             uv build --package soupdb-vector --out-dir dist
           fi
       - name: Publish to PyPI
