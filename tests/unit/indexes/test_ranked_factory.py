@@ -60,3 +60,27 @@ def test_distinct_vector_resolvers_require_explicit_shared_resolver():
     shared = object()
     assert DelegatingRankedFactory(factories, query_vectorizer=shared).query_vectorizer is shared
     assert DelegatingRankedFactory({"INVERTED": Delegate(object())}).query_vectorizer is None
+
+
+def test_discovered_only_vector_plugin_does_not_force_shared_vectorizer():
+    from soupdb_vector.plugin import HNSWPlugin, IVFPlugin
+
+    from engine.plugins import PluginRegistry
+
+    registry = PluginRegistry()
+    registry.register(IVFPlugin({"storage_root": "/tmp/ivf"}), source="sql")
+    registry.register(HNSWPlugin(), source="entry-point:hnsw")
+    factory = DelegatingRankedFactory.from_registry(registry)
+    assert factory.query_vectorizer is not None
+
+
+def test_two_configured_vector_plugins_with_different_configs_fail():
+    from soupdb_vector.plugin import HNSWPlugin, IVFPlugin
+
+    from engine.plugins import PluginRegistry
+
+    registry = PluginRegistry()
+    registry.register(IVFPlugin({"storage_root": "/tmp/ivf"}), source="sql")
+    registry.register(HNSWPlugin({"storage_root": "/tmp/hnsw"}), source="sql")
+    with pytest.raises(ValueError, match="shared query_vectorizer"):
+        DelegatingRankedFactory.from_registry(registry)

@@ -198,6 +198,21 @@ class PluginRegistry:
     def enabled(self) -> tuple[str, ...]:
         return tuple(sorted(name for name, reg in self._registrations.items() if reg.enabled))
 
+    def configured(self) -> tuple[str, ...]:
+        """Plugins with persisted or explicit config (not merely discovered).
+
+        Entry-point-only registrations have no user configuration yet. They must
+        not contribute a query vectorizer: activating just one vector plugin
+        with ``CREATE EXTENSION ... WITH`` would otherwise look ambiguous.
+        """
+        return tuple(
+            sorted(
+                name
+                for name, registration in self._registrations.items()
+                if registration.enabled and not registration.source.startswith("entry-point:")
+            )
+        )
+
     def __contains__(self, name: object) -> bool:
         try:
             return _normalize(name) in self._registrations
