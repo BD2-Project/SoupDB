@@ -15,6 +15,7 @@ from engine.common.rid import RID
 from engine.common.schema import ColumnDef
 from engine.storage.base import FileOrganization
 from soupdb_inverted.index import InvertedIndex
+from soupdb_inverted.mutable import MutableInvertedIndex
 from soupdb_inverted.tokenizer import DEFAULT_TOKENIZER, Tokenizer
 
 _MANIFEST = "sql_index.json"
@@ -70,8 +71,8 @@ class OnDiskInvertedFactory:
             item_count=len(index),
             exact=True,
             exhaustive=True,
-            mutable=False,
-            reversible=False,
+            mutable=True,
+            reversible=True,
         )
 
     def build(
@@ -144,6 +145,7 @@ class OnDiskInvertedFactory:
             index = InvertedIndex.load(directory / "index")
             if len(index) != count:
                 raise ValueError("physical document count differs from SQL metadata")
+            index = MutableInvertedIndex(index, directory / "mutations.json")
             binding = self._binding(metadata, index)
             validate_ranked_binding(binding, schema)
             return binding

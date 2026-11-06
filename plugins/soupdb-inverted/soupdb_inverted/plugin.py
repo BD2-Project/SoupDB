@@ -40,8 +40,8 @@ class InvertedPlugin:
         return PluginCapabilities(
             exact=True,
             exhaustive=True,
-            mutable=False,
-            reversible=False,
+            mutable=True,
+            reversible=True,
             query_kind="text",
             operators=frozenset({"search"}),
             index_options=frozenset({"method"}),

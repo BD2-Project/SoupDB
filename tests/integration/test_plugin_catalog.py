@@ -7,6 +7,7 @@ from engine.common.ranked import RankedBinding
 from engine.indexes.ranked_factory import DelegatingRankedFactory
 from engine.plugins import PluginRegistry
 from engine.query import execute_sql
+from engine.transactions.session import TransactionalSession
 from tests.fakes.fake_ranked_index import FakeRankedIndex, text_scorer
 
 
@@ -79,6 +80,23 @@ def test_plugin_search_syntax_is_uniform(tmp_path):
         )
         assert result.rows[0][0] == 1
         assert result.rows[0][1] > 0
+    finally:
+        catalog.close()
+
+
+def test_ranked_dml_keeps_text_index_in_sync(tmp_path):
+    db_path = tmp_path / "db"
+    catalog = Catalog(db_path, ranked_factory=_inverted_factory(tmp_path))
+    try:
+        execute_sql("CREATE TABLE docs (id INT, contenido TEXT)", catalog)
+        execute_sql("INSERT INTO docs VALUES (1, 'alpha beta')", catalog)
+        execute_sql("CREATE INDEX idx_docs ON docs (contenido) USING INVERTED", catalog)
+        session = TransactionalSession(catalog)
+        query = "SELECT id FROM docs WHERE SEARCH(contenido, 'omega') USING INVERTED LIMIT 10"
+        session.execute("INSERT INTO docs VALUES (2, 'omega sigma')")
+        assert execute_sql(query, catalog).rows == ((2,),)
+        session.execute("DELETE FROM docs WHERE id = 2")
+        assert execute_sql(query, catalog).rows == ()
     finally:
         catalog.close()
 
