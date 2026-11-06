@@ -23,13 +23,27 @@ def make_catalog(tmp_path: Path, **kwargs) -> Catalog:
 
 def test_sys_tables_are_registered(tmp_path: Path) -> None:
     catalog = make_catalog(tmp_path)
-    assert catalog.tables() == ["SysTables", "SysColumns", "SysIndexes"]
+    assert catalog.tables() == [
+        "SysTables",
+        "SysColumns",
+        "SysIndexes",
+        "SysPlugins",
+        "SysTypes",
+        "SysPluginIndexes",
+    ]
 
 
 def test_sys_tables_reopen_persists(tmp_path: Path) -> None:
     catalog = make_catalog(tmp_path)
     catalog.close()
-    assert make_catalog(tmp_path).tables() == ["SysTables", "SysColumns", "SysIndexes"]
+    assert make_catalog(tmp_path).tables() == [
+        "SysTables",
+        "SysColumns",
+        "SysIndexes",
+        "SysPlugins",
+        "SysTypes",
+        "SysPluginIndexes",
+    ]
 
 
 def test_create_table_adds_schema(tmp_path: Path) -> None:
@@ -174,7 +188,14 @@ def test_drop_table_persists_across_reopen(tmp_path: Path) -> None:
     catalog.close()
     reopened = make_catalog(tmp_path)
     assert "papers" not in reopened.tables()
-    assert reopened.tables() == ["SysTables", "SysColumns", "SysIndexes"]
+    assert reopened.tables() == [
+        "SysTables",
+        "SysColumns",
+        "SysIndexes",
+        "SysPlugins",
+        "SysTypes",
+        "SysPluginIndexes",
+    ]
 
 
 def test_drop_table_removes_backing_file(tmp_path: Path) -> None:

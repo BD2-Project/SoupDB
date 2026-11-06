@@ -147,6 +147,7 @@ def _execute_select(plan: Plan) -> ResultSet:
 
 
 def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
+    _ensure_writable(catalog, statement.table)
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
     ranked = ranked_targets(catalog, statement.table)
@@ -169,6 +170,7 @@ def _execute_insert(statement: InsertStatement, catalog: Any) -> ResultSet:
 
 
 def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
+    _ensure_writable(catalog, statement.table)
     schema = catalog.schema(statement.table)
     file_org = catalog.file_org(statement.table)
     ranked = ranked_targets(catalog, statement.table)
@@ -189,6 +191,13 @@ def _execute_delete(statement: DeleteStatement, catalog: Any) -> ResultSet:
         maintain_ranked(ranked, schema, row, rid, insert=False)
         affected += 1
     return ResultSet(columns=(), affected=affected)
+
+
+def _ensure_writable(catalog: Any, table: str) -> None:
+    """Reject DML over the read-only ``Sys*`` catalog tables."""
+    checker = getattr(catalog, "is_system_table", None)
+    if callable(checker) and checker(table):
+        raise QueryExecutionError(f"system table {table!r} is read-only")
 
 
 def _indexes_for_column(catalog: Any, table: str, column: str) -> dict[str, Index]:

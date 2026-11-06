@@ -282,6 +282,9 @@ def _plan_create(statement: CreateTableStatement, catalog: Any) -> Plan:
 
 
 def _plan_create_index(statement: CreateIndexStatement, catalog: Any) -> Plan:
+    is_system = getattr(catalog, "is_system_table", None)
+    if callable(is_system) and is_system(statement.table):
+        raise QueryExecutionError(f"system table {statement.table!r} is read-only")
     if statement.index_type in ("INVERTED", "IVF", "HNSW"):
         schema = catalog.schema(statement.table)
         meta = RankedMetadata(

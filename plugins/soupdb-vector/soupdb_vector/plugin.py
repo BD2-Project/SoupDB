@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -21,6 +22,11 @@ DEFAULT_STORAGE_ROOT = os.environ.get("SOUPDB_PLUGIN_STORAGE", ".soupdb-plugins"
 DEFAULT_PAGE_SIZE = 4096
 DEFAULT_NLIST = 4
 DEFAULT_BUFFER_CAPACITY = 16
+
+#: Both IVF and HNSW must resolve query vectors through the *same* vectorizer
+#: instance when their stored configuration is identical. The cache makes that
+#: true even though each plugin class owns its own factory reference.
+_FACTORY_CACHE: dict[str, OnDiskVectorFactory] = {}
 
 
 class _VectorPluginBase:
@@ -57,6 +63,9 @@ class _VectorPluginBase:
             "profiles": dict(self._config.get("profiles", {})),
         }
 
+    def configure(self, config: Mapping[str, Any]) -> None:
+        self._config = dict(config)
+
     def validate_options(self, options: Mapping[str, Any]) -> dict[str, Any]:
         unknown = set(options) - {"metric", "dimension", "profile"}
         if unknown:
@@ -80,13 +89,23 @@ class _VectorPluginBase:
 
     def _factory(self) -> OnDiskVectorFactory:
         config = self.default_config()
-        return OnDiskVectorFactory(
-            Path(config["storage_root"]),
-            self._profiles(),
-            page_size=config["page_size"],
-            nlist=config["nlist"],
-            buffer_capacity=config["buffer_capacity"],
-        )
+        key = json.dumps(config, sort_keys=True, default=str)
+        factory = _FACTORY_CACHE.get(key)
+        if factory is None:
+            factory = OnDiskVectorFactory(
+                Path(config["storage_root"]),
+                self._profiles(),
+                page_size=config["page_size"],
+                nlist=config["nlist"],
+                buffer_capacity=config["buffer_capacity"],
+            )
+            _FACTORY_CACHE[key] = factory
+        return factory
+
+    @property
+    def query_vectorizer(self):
+        """Shared resolver used by the SQL planner for SIMILAR_TO references."""
+        return self._factory().query_vectorizer
 
     def build(
         self,

@@ -54,6 +54,9 @@ class InvertedPlugin:
             "fan_in": int(self._config.get("fan_in", DEFAULT_FAN_IN)),
         }
 
+    def configure(self, config: Mapping[str, Any]) -> None:
+        self._config = dict(config)
+
     def validate_options(self, options: Mapping[str, Any]) -> dict[str, Any]:
         unknown = set(options) - {"method"}
         if unknown:

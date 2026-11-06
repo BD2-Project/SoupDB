@@ -21,6 +21,8 @@ from the scalar structures and the catalog validates the column type at
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from json import dumps as json_dumps
+from json import loads as json_loads
 from pathlib import Path
 
 from engine.common.errors import QueryExecutionError
@@ -36,8 +38,10 @@ from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index
 from engine.indexes.bplus_tree import BPlusTree
 from engine.indexes.extendible_hash import ExtendibleHash
-from engine.indexes.ranked_factory import RankedFactory
+from engine.indexes.ranked_factory import DelegatingRankedFactory, RankedFactory
 from engine.indexes.rtree import RTree
+from engine.plugins.errors import PluginError, PluginNotFoundError
+from engine.plugins.registry import PluginRegistry
 from engine.storage.base import FileOrganization
 from engine.storage.file_manager import FileManager
 from engine.storage.heap_file import HeapFile
@@ -66,10 +70,50 @@ SYS_INDEXES_SCHEMA = (
     ColumnDef("index_type", ColumnType.TEXT),
 )
 
+SYS_PLUGINS_SCHEMA = (
+    ColumnDef("plugin_name", ColumnType.TEXT),
+    ColumnDef("version", ColumnType.TEXT),
+    ColumnDef("api_version", ColumnType.INT),
+    ColumnDef("enabled", ColumnType.BOOL),
+    ColumnDef("config_json", ColumnType.TEXT),
+)
+
+SYS_TYPES_SCHEMA = (
+    ColumnDef("type_name", ColumnType.TEXT),
+    ColumnDef("plugin_name", ColumnType.TEXT),
+    ColumnDef("encoding", ColumnType.INT),
+    ColumnDef("size", ColumnType.INT),
+)
+
+SYS_PLUGIN_INDEXES_SCHEMA = (
+    ColumnDef("index_name", ColumnType.TEXT),
+    ColumnDef("table_name", ColumnType.TEXT),
+    ColumnDef("column_name", ColumnType.TEXT),
+    ColumnDef("index_type", ColumnType.TEXT),
+    ColumnDef("plugin_name", ColumnType.TEXT),
+    ColumnDef("options_json", ColumnType.TEXT),
+    ColumnDef("capabilities_json", ColumnType.TEXT),
+    ColumnDef("item_count", ColumnType.INT),
+    ColumnDef("artifact_root", ColumnType.TEXT),
+)
+
 _SYS_TABLES = (
     ("SysTables", SYS_TABLES_SCHEMA),
     ("SysColumns", SYS_COLUMNS_SCHEMA),
     ("SysIndexes", SYS_INDEXES_SCHEMA),
+    ("SysPlugins", SYS_PLUGINS_SCHEMA),
+    ("SysTypes", SYS_TYPES_SCHEMA),
+    ("SysPluginIndexes", SYS_PLUGIN_INDEXES_SCHEMA),
+)
+
+#: (type_name, plugin_name, encoding, size). Native types declare plugin_name="".
+_NATIVE_TYPES = (
+    ("INT", "", 0, 4),
+    ("FLOAT", "", 0, 8),
+    ("VARCHAR", "", 0, 0),
+    ("TEXT", "", 0, 0),
+    ("BOOL", "", 0, 1),
+    ("POINT", "", 0, 16),
 )
 
 _RESERVED_PREFIX = "Sys"
@@ -127,10 +171,15 @@ class Catalog:
         self._tables: dict[str, _Table] = {}
         self._ranked_meta: dict[str, RankedMetadata] = {}
         self._ranked_ready: dict[str, RankedBinding] = {}
+        self._plugin_registry: PluginRegistry | None = None
         self._seed_sys_metadata()
         self._load()
-        for row in self._read_sys_rows(RANKED_METADATA_FILE, RANKED_SCHEMA):
-            meta = RankedMetadata.from_row(row)
+        self._ensure_sys_tables()
+        self._seed_types()
+        self._load_plugins()
+        self._migrate_ranked_metadata()
+        for row in self._read_sys_rows("SysPluginIndexes", SYS_PLUGIN_INDEXES_SCHEMA):
+            meta = _meta_from_row(row)
             check_ranked_metadata(meta, self.schema(meta.table))
             if meta.name in self._ranked_meta:
                 raise QueryExecutionError(f"duplicate ranked metadata {meta.name!r}")
@@ -199,6 +248,8 @@ class Catalog:
 
     def create_ranked_index(self, metadata: RankedMetadata) -> None:
         """Build first, persist metadata after provider succeeds."""
+        if self.is_system_table(metadata.table):
+            raise QueryExecutionError(f"system table {metadata.table!r} is read-only")
         schema = self.schema(metadata.table)
         check_ranked_metadata(metadata, schema)
         if metadata.name in self._index_names():
@@ -270,12 +321,26 @@ class Catalog:
             binding.mutable,
         )
         check_ranked_metadata(meta, schema)
-        self._insert_sys_row(RANKED_METADATA_FILE, RANKED_SCHEMA, meta.to_row())
+        self._upsert_sys_row(
+            "SysPluginIndexes",
+            SYS_PLUGIN_INDEXES_SCHEMA,
+            _ranked_row(meta),
+            key=lambda row: row[0] == meta.name,
+        )
+        self._persist_plugin_config(meta.algorithm)
         self._ranked_meta[meta.name] = meta
         self._ranked_ready[meta.name] = binding
 
     def tables(self) -> list[str]:
         return list(self._tables)
+
+    def is_system_table(self, name: str) -> bool:
+        """Whether ``name`` is a read-only system catalog table."""
+        return name.startswith(_RESERVED_PREFIX)
+
+    def types(self) -> tuple[tuple[object, ...], ...]:
+        """Rows of ``SysTypes``: type name, plugin name, wire encoding and size."""
+        return tuple(self._read_sys_rows("SysTypes", SYS_TYPES_SCHEMA))
 
     # --- DDL -------------------------------------------------------------
 
@@ -325,6 +390,8 @@ class Catalog:
     ) -> None:
         if index_name in self._index_names():
             raise QueryExecutionError(f"index {index_name!r} already exists")
+        if self.is_system_table(table_name):
+            raise QueryExecutionError(f"system table {table_name!r} is read-only")
         table = self._table(table_name)
         if column not in {c.name for c in table.schema}:
             raise QueryExecutionError(f"unknown column {column!r} in table {table_name!r}")
@@ -383,7 +450,11 @@ class Catalog:
     def _forget_ranked(self, index_name: str) -> None:
         meta = self._ranked_meta[index_name]
         binding = self._ranked_ready.pop(index_name, None)
-        self._delete_sys_rows(RANKED_METADATA_FILE, RANKED_SCHEMA, lambda row: row[0] == index_name)
+        self._delete_sys_rows(
+            "SysPluginIndexes",
+            SYS_PLUGIN_INDEXES_SCHEMA,
+            lambda row: row[0] == index_name,
+        )
         self._ranked_meta.pop(index_name, None)
         if binding is not None:
             binding.index.close()
@@ -439,6 +510,119 @@ class Catalog:
                         column.length or 0,
                     ),
                 )
+
+    def _ensure_sys_tables(self) -> None:
+        """Register system tables introduced after this database was created."""
+        for sys_name, sys_schema in _SYS_TABLES:
+            if sys_name in self._tables:
+                continue
+            self._insert_sys_row(
+                "SysTables",
+                SYS_TABLES_SCHEMA,
+                (sys_name, sys_name, "HEAP", len(self._tables)),
+            )
+            for column_position, column in enumerate(sys_schema):
+                self._insert_sys_row(
+                    "SysColumns",
+                    SYS_COLUMNS_SCHEMA,
+                    (
+                        sys_name,
+                        column_position,
+                        column.name,
+                        column.type_name.value,
+                        column.length or 0,
+                    ),
+                )
+            self._tables[sys_name] = _Table(
+                name=sys_name,
+                schema=sys_schema,
+                file_id=sys_name,
+                strategy="HEAP",
+                file=self._open_file(sys_name, sys_schema, "HEAP"),
+                indexes={},
+            )
+
+    def _seed_types(self) -> None:
+        """Register the native column types in ``SysTypes`` on first open."""
+        if self._read_sys_rows("SysTypes", SYS_TYPES_SCHEMA):
+            return
+        for row in _NATIVE_TYPES:
+            self._insert_sys_row("SysTypes", SYS_TYPES_SCHEMA, row)
+
+    def _load_plugins(self) -> None:
+        """Discover installed plugins and apply configurations stored in SysPlugins.
+
+        When a factory is injected explicitly (tests, embeds), it wins. Otherwise
+        the catalog rebuilds the factory from the installed entry points and the
+        persisted configuration, so reopening a database no longer requires the
+        caller to re-inject every plugin parameter by hand.
+        """
+        if self._ranked_factory is not None:
+            self._plugin_registry = getattr(self._ranked_factory, "registry", None)
+            return
+        registry = PluginRegistry()
+        try:
+            registry.discover()
+        except PluginError:
+            self._plugin_registry = registry
+            return
+        stored = self._read_sys_rows("SysPlugins", SYS_PLUGINS_SCHEMA)
+        if not stored:
+            # No plugin was persisted for this database: keep metadata-only
+            # entries instead of trying to reopen artifacts that were never
+            # registered with a plugin configuration.
+            self._plugin_registry = registry
+            return
+        for row in stored:
+            plugin_name, _version, _api_version, enabled, config_json = row
+            if not enabled or plugin_name not in registry:
+                continue
+            try:
+                config = json_loads(config_json or "{}")
+            except ValueError as exc:
+                raise QueryExecutionError(
+                    f"invalid stored configuration for plugin {plugin_name!r}: {exc}"
+                ) from exc
+            if not isinstance(config, dict):
+                raise QueryExecutionError(
+                    f"stored configuration for plugin {plugin_name!r} must be an object"
+                )
+            registry.register(registry.plugin(plugin_name), config, replace=True, source="catalog")
+        self._plugin_registry = registry
+        if registry.available():
+            self._ranked_factory = DelegatingRankedFactory.from_registry(registry)
+
+    def _migrate_ranked_metadata(self) -> None:
+        """One-version migration from the legacy ``SysRankedIndexes`` layout."""
+        if self._read_sys_rows("SysPluginIndexes", SYS_PLUGIN_INDEXES_SCHEMA):
+            return
+        for row in self._read_sys_rows(RANKED_METADATA_FILE, RANKED_SCHEMA):
+            self._insert_sys_row(
+                "SysPluginIndexes",
+                SYS_PLUGIN_INDEXES_SCHEMA,
+                _ranked_row(RankedMetadata.from_row(row)),
+            )
+
+    def _persist_plugin_config(self, algorithm: str) -> None:
+        """Store the plugin configuration needed to reload this index later."""
+        registry = getattr(self._ranked_factory, "registry", None)
+        if registry is None:
+            return
+        try:
+            registration = registry.get(algorithm)
+        except PluginNotFoundError:
+            return
+        plugin = registration.plugin
+        row = (
+            str(plugin.name),
+            str(getattr(plugin, "version", "0.0.0")),
+            int(getattr(plugin, "api_version", 1)),
+            True,
+            json_dumps(dict(registration.config), sort_keys=True, default=str),
+        )
+        self._upsert_sys_row(
+            "SysPlugins", SYS_PLUGINS_SCHEMA, row, key=lambda item: item[0] == row[0]
+        )
 
     def _load(self) -> None:
         t_rows = self._read_sys_rows("SysTables", SYS_TABLES_SCHEMA)
@@ -553,6 +737,18 @@ class Catalog:
         file = HeapFile(disk_manager, buffer_manager)
         file.insert(Record(data=encode_row(row, schema)))
 
+    def _upsert_sys_row(
+        self,
+        name: str,
+        schema: tuple[ColumnDef, ...],
+        row: tuple[object, ...],
+        *,
+        key: Callable[[tuple[object, ...]], bool],
+    ) -> None:
+        """Replace the first matching system row, or append a new one."""
+        self._delete_sys_rows(name, schema, key)
+        self._insert_sys_row(name, schema, row)
+
     def _read_sys_rows(self, name: str, schema: tuple[ColumnDef, ...]) -> list[tuple[object, ...]]:
         disk_manager, buffer_manager = self._files.storage(name)
         file = HeapFile(disk_manager, buffer_manager)
@@ -571,6 +767,68 @@ class Catalog:
         ]
         for rid in awaiting:
             file.remove(rid)
+
+
+def _ranked_row(meta: RankedMetadata) -> tuple[object, ...]:
+    """Map ``RankedMetadata`` to a ``SysPluginIndexes`` row."""
+    options: dict[str, object] = {}
+    if meta.metric is not None:
+        options["metric"] = meta.metric
+    if meta.dimension is not None:
+        options["dimension"] = meta.dimension
+    if meta.profile_id is not None:
+        options["profile_id"] = meta.profile_id
+    capabilities = {
+        "exact": bool(meta.exact),
+        "exhaustive": bool(meta.exhaustive),
+        "mutable": bool(meta.mutable),
+    }
+    return (
+        meta.name,
+        meta.table,
+        meta.column,
+        meta.algorithm,
+        meta.algorithm,
+        json_dumps(options, sort_keys=True),
+        json_dumps(capabilities, sort_keys=True),
+        meta.item_count,
+        "",
+    )
+
+
+def _meta_from_row(row: tuple[object, ...]) -> RankedMetadata:
+    """Rebuild ``RankedMetadata`` from a ``SysPluginIndexes`` row."""
+    (
+        name,
+        table,
+        column,
+        index_type,
+        plugin_name,
+        options_json,
+        capabilities_json,
+        item_count,
+        _artifact_root,
+    ) = row
+    try:
+        options = json_loads(options_json) if options_json else {}
+        capabilities = json_loads(capabilities_json) if capabilities_json else {}
+    except ValueError as exc:
+        raise QueryExecutionError(f"invalid plugin index metadata JSON: {exc}") from exc
+    if not isinstance(options, dict) or not isinstance(capabilities, dict):
+        raise QueryExecutionError("plugin index metadata JSON must contain objects")
+    return RankedMetadata(
+        name,
+        table,
+        column,
+        plugin_name or index_type,
+        options.get("metric"),
+        options.get("dimension"),
+        options.get("profile_id"),
+        item_count,
+        bool(capabilities.get("exact", False)),
+        bool(capabilities.get("exhaustive", False)),
+        bool(capabilities.get("mutable", False)),
+    )
 
 
 def _check_columns(columns: tuple[ColumnDef, ...]) -> None:

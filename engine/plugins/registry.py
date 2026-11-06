@@ -80,6 +80,9 @@ class FactoryPluginAdapter:
     def default_config(self) -> dict[str, Any]:
         return dict(self._config)
 
+    def configure(self, config: Mapping[str, Any]) -> None:
+        self._config = dict(config)
+
     def validate_options(self, options: Mapping[str, Any]) -> dict[str, Any]:
         return dict(options)
 
@@ -148,6 +151,9 @@ class PluginRegistry:
             enabled=True,
             source=source,
         )
+        configure = getattr(plugin, "configure", None)
+        if callable(configure):
+            configure(registration.config)
         self._registrations[name] = registration
         return registration
 
