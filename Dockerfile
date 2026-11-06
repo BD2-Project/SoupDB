@@ -17,6 +17,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
     SOUPDB_PLUGIN_SITE=/opt/soupdb/plugin-site \
     PYTHONPATH=/opt/soupdb/plugin-site
 COPY --from=build /app/.venv ./.venv
+# El venv de uv no siembra pip; el entrypoint lo necesita para instalar wheels
+# de plugins en caliente (SOUPDB_PLUGINS=1).
+RUN python -m ensurepip --upgrade
 COPY engine ./engine
 COPY docker/entrypoint.sh /usr/local/bin/soupdb-entrypoint
 RUN chmod +x /usr/local/bin/soupdb-entrypoint

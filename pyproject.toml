@@ -1,6 +1,6 @@
 [project]
 name = "soupdb"
-version = "0.4.0"
+version = "0.6.1"
 description = "Motor de base de datos multimodal (relacional, espacial, vectorial) con RAG sobre papers académicos."
 readme = "README.md"
 requires-python = ">=3.11"
