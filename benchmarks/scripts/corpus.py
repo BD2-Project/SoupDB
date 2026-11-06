@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def _read_dataset(path, required_columns):
     df = pd.read_json(path, lines=True)
     missing = set(required_columns) - set(df.columns)
@@ -10,6 +11,7 @@ def _read_dataset(path, required_columns):
         )
     return df[required_columns]
 
+
 def corpus_test():
     df = _read_dataset(
         "hf://datasets/mteb/trec-covid/qrels/test.jsonl",
@@ -17,12 +19,14 @@ def corpus_test():
     )
     return df.to_dict(orient="records")
 
+
 def corpus():
     df = _read_dataset(
         "hf://datasets/mteb/trec-covid/corpus.jsonl",
-        ["_id", "title","text"],
+        ["_id", "title", "text"],
     )
     return df.to_dict(orient="records")
+
 
 def corpus_queries():
     df = _read_dataset(
@@ -30,6 +34,7 @@ def corpus_queries():
         ["_id", "text"],
     )
     return df.to_dict(orient="records")
+
 
 print("Corpus test:", corpus_test()[:2])
 print("Corpus:", corpus()[:2])
