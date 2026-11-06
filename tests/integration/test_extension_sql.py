@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from engine.common.catalog import Catalog
@@ -90,3 +92,83 @@ def test_create_extension_through_transactional_session(tmp_path):
         assert _search(catalog)[0][0] == 1
     finally:
         catalog.close()
+
+
+def test_create_extension_ivf_with_custom_storage_root(tmp_path):
+    db_path = tmp_path / "db"
+    catalog = Catalog(db_path)
+    try:
+        execute_sql(
+            f"CREATE EXTENSION ivf WITH (storage_root = '{(tmp_path / 'ivf').as_posix()}')",
+            catalog,
+        )
+        assert execute_sql("SELECT plugin_name FROM SysPlugins", catalog).rows == (("IVF",),)
+    finally:
+        catalog.close()
+
+    # Reopen without factory: only IVF is configured; HNSW stays discovered-only.
+    reopened = Catalog(db_path)
+    try:
+        assert execute_sql("SELECT plugin_name FROM SysPlugins", reopened).rows == (("IVF",),)
+    finally:
+        reopened.close()
+
+
+def test_both_vector_plugins_with_same_config_share_the_vectorizer(tmp_path):
+    catalog = Catalog(tmp_path / "db")
+    try:
+        execute_sql("CREATE EXTENSION ivf", catalog)
+        execute_sql("CREATE EXTENSION hnsw", catalog)
+        rows = execute_sql("SELECT plugin_name FROM SysPlugins", catalog).rows
+        assert set(rows) == {("HNSW",), ("IVF",)}
+    finally:
+        catalog.close()
+
+
+def test_incompatible_vector_configs_fail_cleanly_and_do_not_persist(tmp_path):
+    catalog = Catalog(tmp_path / "db")
+    try:
+        execute_sql(
+            f"CREATE EXTENSION ivf WITH (storage_root = '{(tmp_path / 'a').as_posix()}')",
+            catalog,
+        )
+        with pytest.raises(QueryExecutionError, match="cannot activate plugin 'HNSW'"):
+            execute_sql(
+                f"CREATE EXTENSION hnsw WITH (storage_root = '{(tmp_path / 'b').as_posix()}')",
+                catalog,
+            )
+        assert execute_sql("SELECT plugin_name FROM SysPlugins", catalog).rows == (("IVF",),)
+    finally:
+        catalog.close()
+
+
+def test_profiles_json_is_persisted_and_reloaded(tmp_path):
+    db_path = tmp_path / "db"
+    profiles = json.dumps(
+        {
+            "img-v1": {
+                "kind": "image",
+                "root": "/datasets/imagenes",
+                "codebook": "/codebooks/img.npz",
+            }
+        }
+    )
+    catalog = Catalog(db_path)
+    try:
+        execute_sql(
+            "CREATE EXTENSION ivf WITH "
+            f"(storage_root = '{(tmp_path / 'ivf').as_posix()}', profiles = '{profiles}')",
+            catalog,
+        )
+        config_json = execute_sql("SELECT config_json FROM SysPlugins", catalog).rows[0][0]
+        assert "img-v1" in config_json
+    finally:
+        catalog.close()
+
+    reopened = Catalog(db_path)
+    try:
+        assert reopened.plugin_capabilities("IVF") is not None
+        plugin = reopened._plugin_registry.plugin("IVF")
+        assert "img-v1" in plugin._profiles()
+    finally:
+        reopened.close()

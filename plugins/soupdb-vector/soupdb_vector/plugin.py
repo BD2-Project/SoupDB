@@ -88,9 +88,44 @@ class _VectorPluginBase:
                 result[key] = value
         if "profiles" in config:
             value = config["profiles"]
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError as exc:
+                    raise QueryExecutionError(f"profiles must be valid JSON: {exc}") from exc
             if not isinstance(value, Mapping):
-                raise QueryExecutionError("profiles must be a mapping")
-            result["profiles"] = dict(value)
+                raise QueryExecutionError("profiles must be an object or a JSON object string")
+            profiles: dict[str, object] = {}
+            for profile_id, profile in value.items():
+                if not isinstance(profile_id, str) or not profile_id.strip():
+                    raise QueryExecutionError("profile ids must be non-empty strings")
+                if not isinstance(profile, Mapping):
+                    raise QueryExecutionError(f"profile {profile_id!r} must be an object")
+                kind = profile.get("kind")
+                if kind not in ("image", "audio_segment"):
+                    raise QueryExecutionError(
+                        f"profile {profile_id!r} kind must be 'image' or 'audio_segment'"
+                    )
+                root = profile.get("root")
+                codebook = profile.get("codebook")
+                if not isinstance(root, str) or not root.strip():
+                    raise QueryExecutionError(f"profile {profile_id!r} needs a non-empty root")
+                if not isinstance(codebook, str) or not codebook.strip():
+                    raise QueryExecutionError(f"profile {profile_id!r} needs a non-empty codebook")
+                normalized: dict[str, object] = {
+                    "kind": kind,
+                    "root": root,
+                    "codebook": codebook,
+                }
+                cache = profile.get("cache")
+                if cache is not None:
+                    if not isinstance(cache, str) or not cache.strip():
+                        raise QueryExecutionError(
+                            f"profile {profile_id!r} cache must be a non-empty string"
+                        )
+                    normalized["cache"] = cache
+                profiles[profile_id] = normalized
+            result["profiles"] = profiles
         return result
 
     def validate_options(self, options: Mapping[str, Any]) -> dict[str, Any]:

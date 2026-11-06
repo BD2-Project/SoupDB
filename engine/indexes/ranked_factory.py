@@ -121,7 +121,7 @@ def _resolve_registry_vectorizer(
     if explicit is not None:
         return explicit
     resolvers = {}
-    for name in registry.available():
+    for name in registry.configured():
         resolver = getattr(_factory_of(registry.plugin(name)), "query_vectorizer", None)
         if resolver is not None:
             resolvers[id(resolver)] = resolver

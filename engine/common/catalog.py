@@ -289,7 +289,21 @@ class Catalog:
         validator = getattr(plugin, "validate_config", None)
         validated = validator(dict(options)) if callable(validator) else dict(options)
         config = {**plugin.default_config(), **validated}
+        try:
+            previous = registry.get(normalized)
+        except PluginNotFoundError:
+            previous = None
         registry.register(plugin, config, replace=True, source="sql")
+        try:
+            factory = DelegatingRankedFactory.from_registry(registry)
+        except ValueError as exc:
+            if previous is not None:
+                registry.register(
+                    previous.plugin, previous.config, replace=True, source=previous.source
+                )
+            else:
+                registry.unregister(normalized)
+            raise QueryExecutionError(f"cannot activate plugin {normalized!r}: {exc}") from exc
         row = (
             str(plugin.name).upper(),
             str(getattr(plugin, "version", "0.0.0")),
@@ -301,7 +315,7 @@ class Catalog:
             "SysPlugins", SYS_PLUGINS_SCHEMA, row, key=lambda item: str(item[0]).upper() == row[0]
         )
         self._plugin_registry = registry
-        self._ranked_factory = DelegatingRankedFactory.from_registry(registry)
+        self._ranked_factory = factory
 
     def drop_extension(self, name: str) -> None:
         """Deactivate a plugin, refusing while indexes still depend on it."""
@@ -326,9 +340,13 @@ class Catalog:
         except PluginNotFoundError:
             pass
         self._plugin_registry = registry
-        self._ranked_factory = (
-            DelegatingRankedFactory.from_registry(registry) if registry.available() else None
-        )
+        if not registry.available():
+            self._ranked_factory = None
+            return
+        try:
+            self._ranked_factory = DelegatingRankedFactory.from_registry(registry)
+        except ValueError as exc:
+            raise QueryExecutionError(f"cannot drop extension {normalized!r}: {exc}") from exc
 
     def create_ranked_index(self, metadata: RankedMetadata) -> None:
         """Build first, persist metadata after provider succeeds."""
@@ -674,7 +692,10 @@ class Catalog:
             registry.register(registry.plugin(plugin_name), config, replace=True, source="catalog")
         self._plugin_registry = registry
         if registry.available():
-            self._ranked_factory = DelegatingRankedFactory.from_registry(registry)
+            try:
+                self._ranked_factory = DelegatingRankedFactory.from_registry(registry)
+            except ValueError as exc:
+                raise QueryExecutionError(f"cannot load configured plugins: {exc}") from exc
 
     def _migrate_ranked_metadata(self) -> None:
         """One-version migration from the legacy ``SysRankedIndexes`` layout."""
