@@ -30,7 +30,14 @@ Histórico de rescates:
 
 ## Próxima versión
 
-- **v0.5.0**: cierre de *Avance 3* — índice invertido (tokenizador + SPIMI, TF-IDF y BM25, postings y diccionario en disco), corpus de texto de 10k/100k y benchmarks contra PostgreSQL GIN (issues #110–#114, #125–#130). Al fusionar esa publicación se cierra el milestone y se crea el tag.
+- **v0.5.0**: índice invertido completo (tokenizador bilingüe + SPIMI, TF-IDF y BM25, postings y diccionario persistentes) y mantenimiento de índices por DML.
+- **v0.6.0**: arquitectura de plugins (`engine/plugins`), catálogo `SysPlugins`/`SysTypes`/`SysPluginIndexes`, SQL uniforme `SEARCH(...) USING <plugin>`, protocolo v2 con tipos por nombre y prepared statements, empaquetado `soupdb-inverted`/`soupdb-vector` y Docker con instalación en caliente. Ver [plugins.md](plugins.md) y [sql_plugins.md](sql_plugins.md).
+
+## Cómo publicar una entrega
+
+1. `uv run --group multimedia pytest` y `uv run ruff check .` en verde.
+2. PR `dev -> main` de publicación.
+3. `git tag -a vX.Y.Z <merge> -m "..."` y `git push origin vX.Y.Z`.
 
 ## Frontend asociado
 

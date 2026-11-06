@@ -42,6 +42,7 @@ from engine.query.ast import (
     MatchExpr,
     NotExpr,
     OrderByItem,
+    Parameter,
     PointExpr,
     PolygonExpr,
     ScoreExpr,
@@ -922,6 +923,15 @@ class _Parser:
 
         if self._match_kind(TokenKind.STRING):
             return Literal(token.value)
+
+        if token.kind is TokenKind.PARAMETER:
+            self._advance()
+            index = int(token.value)
+            if index < 1:
+                raise QueryParseError(
+                    f"prepared parameters are 1-based (got ${index}) at position {token.position}"
+                )
+            return Parameter(index)
 
         if self._match_keyword("TRUE"):
             return Literal(True)

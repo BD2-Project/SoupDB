@@ -11,6 +11,7 @@ class TokenKind(Enum):
     IDENTIFIER = "identifier"
     NUMBER = "number"
     STRING = "string"
+    PARAMETER = "parameter"
     OPERATOR = "operator"
     STAR = "star"
     NULL = "null"

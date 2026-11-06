@@ -45,6 +45,8 @@ nav:
   - Inicio: index.md
   - Contratos: contratos.md
   - SQL textual y multimedia: sql_texto_multimedia.md
+  - SQL de plugins: sql_plugins.md
+  - Plugins: plugins.md
   - Índices vectoriales: vectores.md
   - Datasets multimedia: datasets_multimedia.md
   - Protocolo: protocolo.md

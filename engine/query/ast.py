@@ -25,6 +25,13 @@ class Literal(Expr):
 
 
 @dataclass(frozen=True)
+class Parameter(Expr):
+    """Positional prepared-statement parameter ``$n`` (1-based)."""
+
+    index: int
+
+
+@dataclass(frozen=True)
 class ColumnRef(Expr):
     """A reference to a column by name."""
 

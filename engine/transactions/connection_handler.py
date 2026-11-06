@@ -18,6 +18,8 @@ import threading
 from typing import Any
 
 from engine.common.errors import ProtocolError, SoupDBError
+from engine.query.params import bind_parameters
+from engine.query.parser import parse
 from engine.transactions import protocol as proto
 from engine.transactions.session import TransactionalSession
 from engine.transactions.transaction_manager import TransactionManager
@@ -103,12 +105,20 @@ class ConnectionHandler:
             lock_timeout_ms=self._lock_timeout_ms,
         )
         try:
+            prepared: dict[str, Any] = {}
             while True:
-                opcode, payload = proto.recv_frame(conn)
-                conn.sendall(self._dispatch(opcode, payload, session))
+                version, opcode, payload = proto.recv_frame_versioned(conn)
+                if opcode == proto.OP_PREPARE:
+                    conn.sendall(self._prepare(payload, prepared, version))
+                elif opcode == proto.OP_EXECUTE:
+                    conn.sendall(self._execute_prepared(payload, prepared, session, version))
+                elif opcode == proto.OP_DEALLOCATE:
+                    conn.sendall(self._deallocate(payload, prepared, version))
+                else:
+                    conn.sendall(self._dispatch(opcode, payload, session, version))
         except ProtocolError as exc:
             try:
-                conn.sendall(self._error(proto.ERR_GENERIC, str(exc)))
+                conn.sendall(self._error(proto.ERR_GENERIC, str(exc), proto.VERSION))
             except OSError:
                 pass
         except (ConnectionError, OSError):
@@ -123,32 +133,76 @@ class ConnectionHandler:
         opcode: int,
         payload: bytes,
         session: TransactionalSession,
+        version: int = proto.VERSION,
     ) -> bytes:
         try:
             if opcode == proto.OP_PING:
-                return proto.encode_frame(proto.OP_PONG)
+                return proto.encode_frame(proto.OP_PONG, version=version)
             if opcode == proto.OP_BEGIN:
                 session.begin()
-                return proto.encode_frame(proto.OP_OK, proto.encode_ok(0))
+                return proto.encode_frame(proto.OP_OK, proto.encode_ok(0), version=version)
             if opcode == proto.OP_COMMIT:
                 session.commit()
-                return proto.encode_frame(proto.OP_OK, proto.encode_ok(0))
+                return proto.encode_frame(proto.OP_OK, proto.encode_ok(0), version=version)
             if opcode == proto.OP_ROLLBACK:
                 session.rollback()
-                return proto.encode_frame(proto.OP_OK, proto.encode_ok(0))
+                return proto.encode_frame(proto.OP_OK, proto.encode_ok(0), version=version)
             if opcode == proto.OP_QUERY:
                 sql = proto.decode_query(payload)
                 result = session.execute(sql)
-                # Un SELECT devuelve RESULT; DML y DDL devuelven OK con las filas
-                # afectadas, como fija docs/protocolo.md y espera el driver rsoup
-                # (QueryResult::Affected). Antes todo salía como RESULT vacío.
-                if result.columns:
-                    return proto.encode_frame(proto.OP_RESULT, proto.encode_resultset(result))
-                return proto.encode_frame(proto.OP_OK, proto.encode_ok(result.affected))
+                return self._result_frame(result, version)
             _LOGGER.warning("unknown opcode %s", opcode)
-            return self._error(proto.ERR_GENERIC, f"unknown opcode {opcode}")
+            return self._error(proto.ERR_GENERIC, f"unknown opcode {opcode}", version)
         except SoupDBError as exc:
-            return self._error(proto.error_code(exc), str(exc))
+            return self._error(proto.error_code(exc), str(exc), version)
 
-    def _error(self, code: int, message: str) -> bytes:
-        return proto.encode_frame(proto.OP_ERROR, proto.encode_error(code, message))
+    def _prepare(self, payload: bytes, prepared: dict[str, Any], version: int) -> bytes:
+        try:
+            name, sql = proto.decode_prepare(payload)
+            prepared[name] = parse(sql)
+            return proto.encode_frame(proto.OP_OK, proto.encode_ok(0), version=version)
+        except SoupDBError as exc:
+            return self._error(proto.error_code(exc), str(exc), version)
+
+    def _execute_prepared(
+        self,
+        payload: bytes,
+        prepared: dict[str, Any],
+        session: TransactionalSession,
+        version: int,
+    ) -> bytes:
+        try:
+            name, params = proto.decode_execute(payload)
+            statement = prepared.get(name)
+            if statement is None:
+                return self._error(
+                    proto.ERR_GENERIC, f"unknown prepared statement {name!r}", version
+                )
+            result = session.execute_statement(bind_parameters(statement, params))
+            return self._result_frame(result, version)
+        except SoupDBError as exc:
+            return self._error(proto.error_code(exc), str(exc), version)
+
+    def _deallocate(self, payload: bytes, prepared: dict[str, Any], version: int) -> bytes:
+        try:
+            name = proto.decode_deallocate(payload)
+            prepared.pop(name, None)
+            return proto.encode_frame(proto.OP_OK, proto.encode_ok(0), version=version)
+        except SoupDBError as exc:
+            return self._error(proto.error_code(exc), str(exc), version)
+
+    def _result_frame(self, result: Any, version: int) -> bytes:
+        # Un SELECT devuelve RESULT; DML y DDL devuelven OK con las filas
+        # afectadas, como fija docs/protocolo.md y espera el driver rsoup.
+        if result.columns:
+            return proto.encode_frame(
+                proto.OP_RESULT,
+                proto.encode_resultset(result, version=version),
+                version=version,
+            )
+        return proto.encode_frame(proto.OP_OK, proto.encode_ok(result.affected), version=version)
+
+    def _error(self, code: int, message: str, version: int = proto.VERSION) -> bytes:
+        return proto.encode_frame(
+            proto.OP_ERROR, proto.encode_error(code, message), version=version
+        )

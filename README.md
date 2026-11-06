@@ -19,10 +19,12 @@ Motor de base de datos **multimodal** (relacional, espacial y vectorial) constru
 
 ## Arquitectura
 
-**SQL textual y multimedia:** el motor soporta la integración SQL con
-proveedores rankeados inyectados. Las pruebas actuales usan fakes; la
-integración con los índices reales sigue en desarrollo. Ver
-[consultas y límites](docs/sql_texto_multimedia.md).
+**Arquitectura de plugins:** el núcleo (storage, tipos base, B+/hash/R-tree,
+SQL y transacciones) se mantiene nativo. Full-text (`soupdb-inverted`) y
+vectorial (`soupdb-vector`) son plugins instalables que declaran capacidades y
+se descubren por entry points. El SQL uniforme de búsqueda es
+`SEARCH(col, expr) USING <plugin> WITH (...)` + `SCORE()`. Ver
+[plugins](docs/plugins.md) y [SQL de plugins](docs/sql_plugins.md).
 
 ```mermaid
 flowchart LR
@@ -48,7 +50,7 @@ flowchart LR
 
 Trabajo **multirepo**: `SoupDB` (gestor de base de datos), desarrollado en este repositorio; `rsoup` (driver de red y control de transacciones y concurrencia, en [BD2-Project/rsoup](https://github.com/BD2-Project/rsoup) — [documentación](https://github.com/BD2-Project/rsoup/tree/main/docs)); `SoupChef` (cliente de escritorio del gestor). El desarrollo se coordina mediante contexto compartido de arquitectura, reglas y convenciones que aplican a todos los equipos y a los agentes de IA.
 
-El **driver `rsoup`** es el cliente Rust que los consumidores usan para conectarse al pool del gestor (TCP/IP, protocolo binario v1, puerto `DRIVER_PORT`); el frontend SoupChef lo integra vía Tauri. Ver [docs/driver.md](docs/driver.md) y el protocolo en [docs/protocolo.md](docs/protocolo.md).
+El **driver `rsoup`** es el cliente Rust que los consumidores usan para conectarse al pool del gestor (TCP/IP, protocolo binario v1/v2, puerto `DRIVER_PORT`); el frontend SoupChef lo integra vía Tauri. Ver [docs/driver.md](docs/driver.md) y el protocolo en [docs/protocolo.md](docs/protocolo.md).
 
 ## Dependencias
 
