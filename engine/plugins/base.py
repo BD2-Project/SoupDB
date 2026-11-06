@@ -37,6 +37,9 @@ class IndexPlugin(Protocol):
     def configure(self, config: Mapping[str, Any]) -> None:
         """Apply a configuration loaded from ``SysPlugins`` or the caller."""
 
+    def validate_config(self, config: Mapping[str, Any]) -> dict[str, Any]:
+        """Validate/normalize ``CREATE EXTENSION ... WITH (...)`` options."""
+
     def validate_options(self, options: Mapping[str, Any]) -> dict[str, Any]:
         """Validate/normalize ``CREATE INDEX ... WITH (...)`` options."""
 

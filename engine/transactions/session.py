@@ -313,6 +313,22 @@ class _LockingCatalog:
     def index_location(self, name: str):
         return self._catalog.index_location(name)
 
+    def plugin_capabilities(self, name: str):
+        method = getattr(self._catalog, "plugin_capabilities", None)
+        return method(name) if callable(method) else None
+
+    def extension_configured(self, name: str) -> bool:
+        method = getattr(self._catalog, "extension_configured", None)
+        return method(name) if callable(method) else False
+
+    def create_extension(self, name: str, options: dict[str, object]) -> None:
+        self._session._lock(("catalog", "plugins"), LockMode.EXCLUSIVE)
+        self._catalog.create_extension(name, options)
+
+    def drop_extension(self, name: str) -> None:
+        self._session._lock(("catalog", "plugins"), LockMode.EXCLUSIVE)
+        self._catalog.drop_extension(name)
+
     def tables(self):
         return self._catalog.tables()
 

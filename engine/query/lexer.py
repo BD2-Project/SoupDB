@@ -30,6 +30,8 @@ _KEYWORDS = {
     "DROP",
     "TABLE",
     "INDEX",
+    "EXTENSION",
+    "PLUGIN",
     "ON",
     "ENGINE",
     "TYPE",

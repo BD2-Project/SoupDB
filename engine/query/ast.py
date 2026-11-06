@@ -387,6 +387,21 @@ class DropIndexStatement(Statement):
 
 
 @dataclass(frozen=True)
+class CreateExtensionStatement(Statement):
+    """``CREATE EXTENSION <plugin> [WITH (...)]`` activates an installed plugin."""
+
+    name: str
+    options: tuple[tuple[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
+class DropExtensionStatement(Statement):
+    """``DROP EXTENSION <plugin>`` deactivates a plugin with no dependent indexes."""
+
+    name: str
+
+
+@dataclass(frozen=True)
 class BeginTransactionStatement(Statement):
     """``BEGIN [TRANSACTION]``: opens a transaction on the current session thread.
 

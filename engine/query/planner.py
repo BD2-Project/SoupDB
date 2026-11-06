@@ -38,10 +38,12 @@ from engine.query.ast import (
     BoundScoreExpr,
     ColumnRef,
     CompareExpr,
+    CreateExtensionStatement,
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
     DistanceExpr,
+    DropExtensionStatement,
     DropIndexStatement,
     DropTableStatement,
     EndTransactionStatement,
@@ -125,6 +127,10 @@ def plan(statement: Statement, catalog: Any) -> Plan:
         return _plan_create(statement, catalog)
     if isinstance(statement, CreateIndexStatement):
         return _plan_create_index(statement, catalog)
+    if isinstance(statement, CreateExtensionStatement):
+        return _plan_create_extension(statement, catalog)
+    if isinstance(statement, DropExtensionStatement):
+        return _plan_drop_extension(statement, catalog)
     if isinstance(statement, DropTableStatement):
         return _plan_drop_table(statement, catalog)
     if isinstance(statement, DropIndexStatement):
@@ -367,6 +373,20 @@ def _plan_drop_table(statement: DropTableStatement, catalog: Any) -> Plan:
 def _plan_drop_index(statement: DropIndexStatement, catalog: Any) -> Plan:
     if catalog.index_location(statement.index_name) is None:
         raise QueryExecutionError(f"unknown index {statement.index_name!r}")
+    return Plan(statement=statement)
+
+
+def _plan_create_extension(statement: CreateExtensionStatement, catalog: Any) -> Plan:
+    capabilities = getattr(catalog, "plugin_capabilities", None)
+    if callable(capabilities) and capabilities(statement.name) is None:
+        raise QueryExecutionError(f"plugin {statement.name!r} is not installed")
+    return Plan(statement=statement)
+
+
+def _plan_drop_extension(statement: DropExtensionStatement, catalog: Any) -> Plan:
+    configured = getattr(catalog, "extension_configured", None)
+    if callable(configured) and not configured(statement.name):
+        raise QueryExecutionError(f"extension {statement.name!r} is not installed")
     return Plan(statement=statement)
 
 
