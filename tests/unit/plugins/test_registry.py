@@ -142,3 +142,17 @@ def test_discovery_uses_entry_points(monkeypatch):
     registry = PluginRegistry()
     assert registry.discover() == ("DUMMY",)
     assert registry.available() == ("DUMMY",)
+
+
+def test_configured_excludes_entry_point_only_plugins():
+    class SqlPlugin(FakePlugin):
+        name = "SQLONE"
+
+    class DiscoveredPlugin(FakePlugin):
+        name = "DISC"
+
+    registry = PluginRegistry()
+    registry.register(SqlPlugin(), source="sql")
+    registry.register(DiscoveredPlugin(), source="entry-point:disc")
+    assert registry.configured() == ("SQLONE",)
+    assert set(registry.available()) == {"SQLONE", "DISC"}

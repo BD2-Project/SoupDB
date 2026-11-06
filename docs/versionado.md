@@ -26,6 +26,7 @@ Convención formalizada el 2026-11-02 tras la auditoría de ramas, tags y milest
 | `v0.5.0` | 2026-11-06 | **Índice invertido + DML en índices** | #152 | SPIMI/TF-IDF/BM25 reales, mantenimiento por INSERT/DELETE con tombstones, catálogo de plugins y autocarga |
 | `v0.6.0` | 2026-11-06 | **Plugins y protocolo v2** | #152 | `SEARCH(...) USING <plugin>`, `SCORE()` único, DDL genérico, protocolo v2 con tipos por nombre y prepared statements, Docker con instalación en caliente |
 | `v0.7.0` | 2026-11-06 | **`CREATE EXTENSION`** | #160 / #161 | Activación de plugins por SQL (persistente en `SysPlugins`), `DROP EXTENSION` con RESTRICT |
+| `v0.7.1` | 2026-11-06 | **Fix vectorizador + profiles JSON** | pendiente | `CREATE EXTENSION ivf WITH (storage_root=...)` ya no exige un vectorizador compartido con plugins solo descubiertos; `profiles` acepta JSON en SQL |
 
 Histórico de rescates:
 
