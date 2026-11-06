@@ -1,0 +1,34 @@
+name: plugins-release
+
+# Publica el core y los plugins en PyPI.
+# - Tag dedicado `plugins-v*` (no cada release del gestor, para evitar
+#   republicar versiones ya existentes).
+# - O manualmente con workflow_dispatch.
+#
+# Requiere el secret PYPI_TOKEN (o configurar Trusted Publishing en PyPI y
+# reemplazar el paso por pypa/gh-action-pypi-publish).
+on:
+  push:
+    tags: ["plugins-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build wheels (core + plugins)
+        run: |
+          uv build --package soupdb --out-dir dist
+          uv build --package soupdb-inverted --out-dir dist
+          uv build --package soupdb-vector --out-dir dist
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          test -n "$UV_PUBLISH_TOKEN" || { echo "Falta el secret PYPI_TOKEN"; exit 1; }
+          uv publish dist/*
