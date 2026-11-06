@@ -31,4 +31,4 @@ jobs:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
           test -n "$UV_PUBLISH_TOKEN" || { echo "Falta el secret PYPI_TOKEN"; exit 1; }
-          uv publish dist/*
+          uv publish --check-url https://pypi.org/simple/ dist/*
