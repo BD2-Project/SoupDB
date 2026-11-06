@@ -21,8 +21,7 @@ def compare(left: Record, right: Record) -> int:
 
 def test_merge_multiple_passes_preserves_inputs_and_duplicates(tmp_path: Path) -> None:
     paths = [
-        write_sorted_run(tmp_path / f"{i}.run", [record(i), record(20)], compare)
-        for i in range(9)
+        write_sorted_run(tmp_path / f"{i}.run", [record(i), record(20)], compare) for i in range(9)
     ]
     original = {p: p.read_bytes() for p in paths}
     work = tmp_path / "work"

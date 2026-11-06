@@ -45,8 +45,10 @@ def stem(token: str) -> str:
         token = token[:-3] + "z"
     elif len(token) >= 5 and token.endswith("ies"):
         token = token[:-3] + "y"
-    elif len(token) >= 6 and token.endswith("es") and token[:-2].endswith(
-        ("l", "r", "n", "d", "x", "z", "ch", "sh", "ss")
+    elif (
+        len(token) >= 6
+        and token.endswith("es")
+        and token[:-2].endswith(("l", "r", "n", "d", "x", "z", "ch", "sh", "ss"))
     ):
         token = token[:-2]
     elif len(token) >= 5 and token.endswith("s") and not token.endswith(("us", "is", "ss")):

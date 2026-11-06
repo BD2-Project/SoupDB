@@ -14,7 +14,10 @@ CORPUS_URL = "https://huggingface.co/datasets/mteb/trec-covid/resolve/main/corpu
 
 
 def reservoir_sample(
-    lines: Iterable[str | bytes], *, size: int = 1000, seed: int = 7,
+    lines: Iterable[str | bytes],
+    *,
+    size: int = 1000,
+    seed: int = 7,
 ) -> tuple[list[dict], int]:
     """Uniform sampling without replacement in O(size) retained documents.
 
@@ -31,10 +34,13 @@ def reservoir_sample(
             continue
         try:
             row = json.loads(line)
-            if (not isinstance(row, dict) or type(row.get("_id")) not in (str, int)
-                    or not str(row["_id"]).strip()
-                    or not isinstance(row.get("title"), str)
-                    or not isinstance(row.get("text"), str)):
+            if (
+                not isinstance(row, dict)
+                or type(row.get("_id")) not in (str, int)
+                or not str(row["_id"]).strip()
+                or not isinstance(row.get("title"), str)
+                or not isinstance(row.get("text"), str)
+            ):
                 raise ValueError("expected _id, title and text")
         except (ValueError, TypeError) as exc:
             raise ValueError(f"invalid corpus document at line {line_number}") from exc
@@ -74,8 +80,7 @@ def write_sample(output: str | Path, sample: list[dict]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, help="Local source JSONL instead of downloading")
-    parser.add_argument("--output", type=Path,
-                        default=Path("benchmarks/data/trec_covid_1k.jsonl"))
+    parser.add_argument("--output", type=Path, default=Path("benchmarks/data/trec_covid_1k.jsonl"))
     parser.add_argument("--size", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
@@ -89,8 +94,19 @@ def main() -> None:
             sample, count = reservoir_sample(lines, size=args.size, seed=args.seed)
         source = CORPUS_URL
     digest = write_sample(args.output, sample)
-    print(json.dumps({"source": source, "source_documents": count, "sample_size": len(sample),
-                      "seed": args.seed, "sha256": digest, "output": str(args.output)}, indent=2))
+    print(
+        json.dumps(
+            {
+                "source": source,
+                "source_documents": count,
+                "sample_size": len(sample),
+                "seed": args.seed,
+                "sha256": digest,
+                "output": str(args.output),
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -37,8 +37,14 @@ def validate_bm25(k1: float, b: float) -> None:
 
 
 def bm25_term(
-    tf: int, *, n: int, df: int, doc_len: int, avgdl: float,
-    k1: float = 1.2, b: float = 0.75,
+    tf: int,
+    *,
+    n: int,
+    df: int,
+    doc_len: int,
+    avgdl: float,
+    k1: float = 1.2,
+    b: float = 0.75,
 ) -> float:
     """Score one matching term; the caller validates shared BM25 parameters."""
     if tf == 0 or avgdl == 0.0:

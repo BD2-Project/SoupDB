@@ -8,11 +8,11 @@ from contextlib import ExitStack, closing
 from pathlib import Path
 
 from engine.common.rid import RID
-from engine.indexes.inverted.dictionary import DictionaryEntry, TermDictionary
-from engine.indexes.inverted.merge import merged_terms
-from engine.indexes.inverted.postings import PostingsFile
-from engine.indexes.inverted.spimi import spimi_runs
-from engine.indexes.inverted.tokenizer import DEFAULT_TOKENIZER, TOKENIZER_VERSION, Tokenizer
+from soupdb_inverted.dictionary import DictionaryEntry, TermDictionary
+from soupdb_inverted.merge import merged_terms
+from soupdb_inverted.postings import PostingsFile
+from soupdb_inverted.spimi import spimi_runs
+from soupdb_inverted.tokenizer import DEFAULT_TOKENIZER, TOKENIZER_VERSION, Tokenizer
 
 _VERSION = 1
 _ARTIFACTS = ("manifest.json", "postings.bin", "terms.meta", "terms.hash")
@@ -21,8 +21,14 @@ _ARTIFACTS = ("manifest.json", "postings.bin", "terms.meta", "terms.hash")
 class InvertedStore:
     """Immutable dense-document postings with a persistent ExtendibleHash dictionary."""
 
-    def __init__(self, dictionary: TermDictionary, postings: PostingsFile,
-                 tokenizer: Tokenizer, rids: dict[int, RID], lengths: dict[int, int]) -> None:
+    def __init__(
+        self,
+        dictionary: TermDictionary,
+        postings: PostingsFile,
+        tokenizer: Tokenizer,
+        rids: dict[int, RID],
+        lengths: dict[int, int],
+    ) -> None:
         self._dictionary = dictionary
         self._postings = postings
         self.tokenizer = tokenizer
@@ -34,9 +40,14 @@ class InvertedStore:
 
     @classmethod
     def build(
-        cls, path: str | Path, items: Iterable[tuple[str, RID]], *,
-        tokenizer: Tokenizer = DEFAULT_TOKENIZER, memory_limit_bytes: int = 8 * 1024 * 1024,
-        page_size: int = 4096, fan_in: int = 8,
+        cls,
+        path: str | Path,
+        items: Iterable[tuple[str, RID]],
+        *,
+        tokenizer: Tokenizer = DEFAULT_TOKENIZER,
+        memory_limit_bytes: int = 8 * 1024 * 1024,
+        page_size: int = 4096,
+        fan_in: int = 8,
     ) -> "InvertedStore":
         """Stage, validate, and rename into a new directory; never replace an index.
 
@@ -53,8 +64,9 @@ class InvertedStore:
             working = Path(temporary)
             stage = working / "index"
             stage.mkdir()
-            built = spimi_runs(items, working / "runs", tokenizer=tokenizer,
-                               memory_limit_bytes=memory_limit_bytes)
+            built = spimi_runs(
+                items, working / "runs", tokenizer=tokenizer, memory_limit_bytes=memory_limit_bytes
+            )
             with ExitStack() as stack:
                 dictionary = TermDictionary.create(stage, page_size=page_size)
                 stack.callback(dictionary.close)
@@ -73,8 +85,10 @@ class InvertedStore:
                     "stopwords": sorted(tokenizer.stopwords),
                     "stemming": tokenizer.stemming,
                 },
-                "documents": [[rid.page_id, rid.slot, built.doc_lengths[doc_id]]
-                              for doc_id, rid in built.rids.items()],
+                "documents": [
+                    [rid.page_id, rid.slot, built.doc_lengths[doc_id]]
+                    for doc_id, rid in built.rids.items()
+                ],
                 "N": count,
                 "avgdl": sum(built.doc_lengths.values()) / count if count else 0.0,
             }
@@ -93,17 +107,23 @@ class InvertedStore:
         if any(not (root / name).is_file() for name in _ARTIFACTS):
             raise FileNotFoundError("inverted index artifacts are missing")
         manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-        if (not isinstance(manifest, dict) or type(manifest.get("version")) is not int
-                or manifest.get("version") != _VERSION):
+        if (
+            not isinstance(manifest, dict)
+            or type(manifest.get("version")) is not int
+            or manifest.get("version") != _VERSION
+        ):
             raise ValueError("invalid inverted store version")
         page_size = manifest.get("page_size")
         if type(page_size) is not int or page_size < 128:
             raise ValueError("invalid inverted store page size")
         config = manifest.get("tokenizer")
-        if (not isinstance(config, dict) or type(config.get("version")) is not int
-                or config.get("version") != TOKENIZER_VERSION
-                or not isinstance(config.get("stopwords"), list)
-                or type(config.get("stemming")) is not bool):
+        if (
+            not isinstance(config, dict)
+            or type(config.get("version")) is not int
+            or config.get("version") != TOKENIZER_VERSION
+            or not isinstance(config.get("stopwords"), list)
+            or type(config.get("stemming")) is not bool
+        ):
             raise ValueError("invalid persisted tokenizer configuration")
         try:
             tokenizer = Tokenizer(frozenset(config["stopwords"]), config["stemming"])
@@ -111,14 +131,21 @@ class InvertedStore:
             raise ValueError("invalid persisted stopwords") from exc
         documents = manifest.get("documents")
         count = manifest.get("N")
-        if (not isinstance(documents, list) or type(count) is not int
-                or count < 0 or count != len(documents)):
+        if (
+            not isinstance(documents, list)
+            or type(count) is not int
+            or count < 0
+            or count != len(documents)
+        ):
             raise ValueError("inconsistent document count")
         rids: dict[int, RID] = {}
         lengths: dict[int, int] = {}
         for doc_id, document in enumerate(documents):
-            if (not isinstance(document, list) or len(document) != 3
-                    or any(type(value) is not int or value < 0 for value in document)):
+            if (
+                not isinstance(document, list)
+                or len(document) != 3
+                or any(type(value) is not int or value < 0 for value in document)
+            ):
                 raise ValueError("invalid persisted document metadata")
             rids[doc_id] = RID(document[0], document[1])
             lengths[doc_id] = document[2]
@@ -126,8 +153,11 @@ class InvertedStore:
             raise ValueError("duplicate persisted document RID")
         expected_avg = sum(lengths.values()) / count if count else 0.0
         avg = manifest.get("avgdl")
-        if (type(avg) is not float or not math.isfinite(avg)
-                or not math.isclose(avg, expected_avg, rel_tol=1e-12, abs_tol=1e-12)):
+        if (
+            type(avg) is not float
+            or not math.isfinite(avg)
+            or not math.isclose(avg, expected_avg, rel_tol=1e-12, abs_tol=1e-12)
+        ):
             raise ValueError("inconsistent average document length")
         dictionary = TermDictionary.load(root, page_size=page_size)
         try:

@@ -32,8 +32,15 @@ class DictionaryEntry:
 class TermDictionary:
     """Append-only term metadata; close flushes the owned hash buffer pool."""
 
-    def __init__(self, file: BinaryIO, disk: DiskManager, index: ExtendibleHash,
-                 *, page_size: int, writable: bool) -> None:
+    def __init__(
+        self,
+        file: BinaryIO,
+        disk: DiskManager,
+        index: ExtendibleHash,
+        *,
+        page_size: int,
+        writable: bool,
+    ) -> None:
         self._file = file
         self._disk = disk
         self._index = index
@@ -124,9 +131,15 @@ class TermDictionary:
         # Hash entry overhead: bucket(9), key length(2), RID(6), key tag(1).
         if len(encoded) > self._page_size - 18:
             raise ValueError("term does not fit in an ExtendibleHash bucket")
-        if (any(type(value) is not int or not 0 <= value < 2**64
-                for value in (entry.df, entry.offset, entry.length))
-                or entry.df == 0 or entry.offset < 8 or entry.length != 8 + entry.df * 16):
+        if (
+            any(
+                type(value) is not int or not 0 <= value < 2**64
+                for value in (entry.df, entry.offset, entry.length)
+            )
+            or entry.df == 0
+            or entry.offset < 8
+            or entry.length != 8 + entry.df * 16
+        ):
             raise ValueError("invalid dictionary entry")
         if self._index.search(term):
             raise ValueError("duplicate dictionary term")

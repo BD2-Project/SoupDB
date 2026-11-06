@@ -13,9 +13,9 @@ from engine.common.ranked_catalog import RankedMetadata, check_ranked_metadata
 from engine.common.record import decode_row
 from engine.common.rid import RID
 from engine.common.schema import ColumnDef
-from engine.indexes.inverted.index import InvertedIndex
-from engine.indexes.inverted.tokenizer import DEFAULT_TOKENIZER, Tokenizer
 from engine.storage.base import FileOrganization
+from soupdb_inverted.index import InvertedIndex
+from soupdb_inverted.tokenizer import DEFAULT_TOKENIZER, Tokenizer
 
 _MANIFEST = "sql_index.json"
 
@@ -28,8 +28,13 @@ class OnDiskInvertedFactory:
     """
 
     def __init__(
-        self, storage_root: str | Path, *, tokenizer: Tokenizer = DEFAULT_TOKENIZER,
-        memory_limit_bytes: int = 8 * 1024 * 1024, page_size: int = 4096, fan_in: int = 8,
+        self,
+        storage_root: str | Path,
+        *,
+        tokenizer: Tokenizer = DEFAULT_TOKENIZER,
+        memory_limit_bytes: int = 8 * 1024 * 1024,
+        page_size: int = 4096,
+        fan_in: int = 8,
     ) -> None:
         self.storage_root = Path(storage_root)
         self.tokenizer = tokenizer
@@ -47,15 +52,26 @@ class OnDiskInvertedFactory:
 
     def _descriptor(self, metadata: RankedMetadata, count: int) -> dict[str, object]:
         return {
-            "version": 1, "name": metadata.name, "table": metadata.table,
-            "column": metadata.column, "algorithm": metadata.algorithm, "count": count,
+            "version": 1,
+            "name": metadata.name,
+            "table": metadata.table,
+            "column": metadata.column,
+            "algorithm": metadata.algorithm,
+            "count": count,
         }
 
     def _binding(self, metadata: RankedMetadata, index: InvertedIndex) -> RankedBinding:
         return RankedBinding(
-            name=metadata.name, table=metadata.table, column=metadata.column,
-            algorithm="INVERTED", index=index, item_count=len(index),
-            exact=True, exhaustive=True, mutable=False, reversible=False,
+            name=metadata.name,
+            table=metadata.table,
+            column=metadata.column,
+            algorithm="INVERTED",
+            index=index,
+            item_count=len(index),
+            exact=True,
+            exhaustive=True,
+            mutable=False,
+            reversible=False,
         )
 
     def build(
@@ -83,8 +99,11 @@ class OnDiskInvertedFactory:
         published = False
         try:
             index = InvertedIndex.build(
-                staging / "index", documents(), tokenizer=self.tokenizer,
-                memory_limit_bytes=self.memory_limit_bytes, page_size=self.page_size,
+                staging / "index",
+                documents(),
+                tokenizer=self.tokenizer,
+                memory_limit_bytes=self.memory_limit_bytes,
+                page_size=self.page_size,
                 fan_in=self.fan_in,
             )
             count = len(index)

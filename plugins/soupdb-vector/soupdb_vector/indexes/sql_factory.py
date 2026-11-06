@@ -18,10 +18,10 @@ from engine.common.ranked import RankedBinding
 from engine.common.ranked_catalog import RankedMetadata
 from engine.common.record import decode_row
 from engine.common.schema import ColumnDef
-from engine.indexes.vector.hnsw import HNSWIndex
-from engine.indexes.vector.ivf import IVFIndex
-from engine.multimedia.sql_profiles import MultimediaProfile, MultimediaQueryVectorizer
 from engine.storage.base import FileOrganization
+from soupdb_vector.indexes.hnsw import HNSWIndex
+from soupdb_vector.indexes.ivf import IVFIndex
+from soupdb_vector.multimedia.sql_profiles import MultimediaProfile, MultimediaQueryVectorizer
 
 _MANIFEST = "sql_index.json"
 _VERSION = 1

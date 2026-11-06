@@ -11,8 +11,13 @@ ITEMS = [("alpha alpha beta", RID(7, 0)), ("alpha gamma", RID(1, 3)), ("delta", 
 
 @pytest.fixture
 def index(tmp_path):
-    index = InvertedIndex.build(tmp_path / "index", ITEMS, memory_limit_bytes=1,
-                                tokenizer=Tokenizer(stemming=False), fan_in=2)
+    index = InvertedIndex.build(
+        tmp_path / "index",
+        ITEMS,
+        memory_limit_bytes=1,
+        tokenizer=Tokenizer(stemming=False),
+        fan_in=2,
+    )
     yield index
     index.close()
 
@@ -44,8 +49,7 @@ def test_match_empty_stopwords_and_unknown_differ_from_full_contract(index, quer
 
 
 def test_zero_score_match_is_retained(tmp_path):
-    index = InvertedIndex.build(tmp_path / "common", [("common", RID(3, 0)),
-                                                     ("common", RID(1, 0))])
+    index = InvertedIndex.build(tmp_path / "common", [("common", RID(3, 0)), ("common", RID(1, 0))])
     try:
         assert index.match_top_k("common", 10) == [(RID(1, 0), 0.0), (RID(3, 0), 0.0)]
         assert index.match_top_k("common", 10, method="bm25")[0][1] > 0.0
@@ -68,10 +72,17 @@ def test_reload_reconstructs_full_scores_and_match_membership(tmp_path, method):
         index.close()
 
 
-@pytest.mark.parametrize("options", [{"bogus": 1}, {"method": "wrong"},
-                                    {"matches_only": 1}, {"b": .2},
-                                    {"method": "bm25", "k1": 0},
-                                    {"method": "bm25", "b": math.nan}])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"bogus": 1},
+        {"method": "wrong"},
+        {"matches_only": 1},
+        {"b": 0.2},
+        {"method": "bm25", "k1": 0},
+        {"method": "bm25", "b": math.nan},
+    ],
+)
 def test_invalid_search_options(index, options):
     with pytest.raises(ValueError):
         index.top_k("alpha", 3, **options)

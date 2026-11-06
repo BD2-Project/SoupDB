@@ -7,8 +7,9 @@ from engine.indexes.inverted.dictionary import DictionaryEntry, TermDictionary
 
 def test_hash_lookup_sidecar_iteration_and_reopen(tmp_path: Path) -> None:
     dictionary = TermDictionary.create(tmp_path, page_size=128)
-    entries = [(f"term-{i}", DictionaryEntry(i + 1, 8 + i * 100, 8 + (i + 1) * 16))
-               for i in range(160)]
+    entries = [
+        (f"term-{i}", DictionaryEntry(i + 1, 8 + i * 100, 8 + (i + 1) * 16)) for i in range(160)
+    ]
     for term, entry in entries:
         dictionary.add(term, entry)
     dictionary.close()
@@ -26,9 +27,12 @@ def test_hash_lookup_sidecar_iteration_and_reopen(tmp_path: Path) -> None:
 def test_invalid_terms_entries_and_duplicates(tmp_path: Path) -> None:
     dictionary = TermDictionary.create(tmp_path, page_size=128)
     entry = DictionaryEntry(1, 8, 24)
-    for term, value in [("", entry), ("ñ" * 56, entry),
-                        ("bad", DictionaryEntry(0, 8, 8)),
-                        ("bad", DictionaryEntry(1, 8, 999))]:
+    for term, value in [
+        ("", entry),
+        ("ñ" * 56, entry),
+        ("bad", DictionaryEntry(0, 8, 8)),
+        ("bad", DictionaryEntry(1, 8, 999)),
+    ]:
         with pytest.raises(ValueError):
             dictionary.add(term, value)
     dictionary.add("term", entry)

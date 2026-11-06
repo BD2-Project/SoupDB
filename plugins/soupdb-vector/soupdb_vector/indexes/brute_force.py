@@ -11,9 +11,9 @@ from typing import Any
 
 from engine.common.rid import RID
 from engine.indexes.base import RankedIndex
-from engine.indexes.vector.constants import DEFAULT_METRIC, VECTOR_BUFFER_CAPACITY
-from engine.indexes.vector.metrics import norm, score_fn
-from engine.indexes.vector.store import VectorStore
+from soupdb_vector.indexes.constants import DEFAULT_METRIC, VECTOR_BUFFER_CAPACITY
+from soupdb_vector.indexes.metrics import norm, score_fn
+from soupdb_vector.indexes.store import VectorStore
 
 
 class BruteForceIndex(RankedIndex):

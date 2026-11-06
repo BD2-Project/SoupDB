@@ -8,7 +8,7 @@ Segmento de audio: {"id": 0, "type": "audio_segment", "path": "rock/a.mp3",
 cualquier máquina. Los archivos se ordenan antes de numerar: mismos archivos, mismo
 manifest. Para un dataset de 1k/10k/100k basta con ``limit``.
 
-Uso: python -m engine.multimedia.manifest {image,audio} RAIZ SALIDA.jsonl [--limit N]
+Uso: python -m soupdb_vector.multimedia.manifest {image,audio} RAIZ SALIDA.jsonl [--limit N]
 """
 
 import argparse
@@ -18,7 +18,11 @@ from collections.abc import Iterable, Iterator
 from itertools import islice
 from pathlib import Path
 
-from engine.multimedia.audio_features import SAMPLE_RATE, SEGMENT_SECONDS, iter_audio_segments
+from soupdb_vector.multimedia.audio_features import (
+    SAMPLE_RATE,
+    SEGMENT_SECONDS,
+    iter_audio_segments,
+)
 
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"})
 AUDIO_EXTENSIONS = frozenset({".wav", ".mp3", ".flac", ".ogg", ".au"})

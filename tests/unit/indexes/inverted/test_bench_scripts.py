@@ -9,8 +9,10 @@ from scripts.sample_inverted_corpus import reservoir_sample, write_sample
 
 
 def _lines(count: int) -> list[str]:
-    return [json.dumps({"_id": str(i), "title": "Índice", "text": f"database query {i}"})
-            for i in range(count)]
+    return [
+        json.dumps({"_id": str(i), "title": "Índice", "text": f"database query {i}"})
+        for i in range(count)
+    ]
 
 
 def test_reservoir_reproducible_seeded_and_preserves_schema() -> None:
@@ -23,9 +25,16 @@ def test_reservoir_reproducible_seeded_and_preserves_schema() -> None:
     assert any(int(row["_id"]) >= 10 for row in sample)
 
 
-@pytest.mark.parametrize("line", ['{"_id":"x","text":"missing title"}',
-                                 '{"_id":true,"title":"x","text":"x"}',
-                                 '{"_id":"x","title":3,"text":"x"}', '[]', '{bad'])
+@pytest.mark.parametrize(
+    "line",
+    [
+        '{"_id":"x","text":"missing title"}',
+        '{"_id":true,"title":"x","text":"x"}',
+        '{"_id":"x","title":3,"text":"x"}',
+        "[]",
+        "{bad",
+    ],
+)
 def test_reservoir_rejects_malformed_schema(line: str) -> None:
     with pytest.raises(ValueError, match="line 1"):
         reservoir_sample([line], size=1)
@@ -52,10 +61,13 @@ def test_export_is_reproducible_utf8_and_leaves_no_temporary_files(tmp_path: Pat
 
 def test_benchmark_reopens_source_ids_and_cleans_up(tmp_path: Path, monkeypatch) -> None:
     corpus = tmp_path / "sample.jsonl"
-    write_sample(corpus, [
-        {"_id": "paper-a", "title": "database", "text": "index index"},
-        {"_id": "paper-b", "title": "ocean", "text": "water"},
-    ])
+    write_sample(
+        corpus,
+        [
+            {"_id": "paper-a", "title": "database", "text": "index index"},
+            {"_id": "paper-b", "title": "ocean", "text": "water"},
+        ],
+    )
     created = []
     original = bench_inverted.tempfile.TemporaryDirectory
 

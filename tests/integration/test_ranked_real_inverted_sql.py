@@ -40,7 +40,8 @@ def test_sql_match_filters_nonmatches_but_top_k_preserves_contract(database, met
     assert len(hits) == 3
     result = execute_sql(
         f"SELECT id, SCORE() AS score FROM docs WHERE MATCH(contenido, 'alpha') "
-        f"USING {method} LIMIT 100", catalog,
+        f"USING {method} LIMIT 100",
+        catalog,
     )
     assert len(result.rows) == 1 and result.rows[0][0] == 1
     assert type(result.rows[0][1]) is float
@@ -66,7 +67,8 @@ def test_exhaustive_sql_filters_distinct_reorders_and_offsets(database):
     assert execute_sql(query + " ORDER BY id ASC", catalog).rows == ((1,), (2,))
     assert execute_sql(
         "SELECT DISTINCT id FROM docs WHERE MATCH(contenido, 'common') AND id > 1 "
-        "USING BM25 ORDER BY id ASC LIMIT 1", catalog,
+        "USING BM25 ORDER BY id ASC LIMIT 1",
+        catalog,
     ).rows == ((2,),)
 
 
@@ -80,7 +82,8 @@ def test_tfidf_zero_score_still_matches(tmp_path):
         execute_sql("CREATE INDEX idx ON docs (contenido) USING INVERTED", catalog)
         assert execute_sql(
             "SELECT id, SCORE() FROM docs WHERE MATCH(contenido, 'common') "
-            "USING TF_IDF ORDER BY id ASC", catalog,
+            "USING TF_IDF ORDER BY id ASC",
+            catalog,
         ).rows == ((1, 0.0), (2, 0.0))
     finally:
         catalog.close()
@@ -88,8 +91,11 @@ def test_tfidf_zero_score_still_matches(tmp_path):
 
 def test_sql_reopen_both_methods_drop_and_rebuild(database):
     path, factory, catalog = database
-    queries = [f"SELECT id, SCORE() FROM docs WHERE MATCH(contenido, 'common') "
-               f"USING {method} ORDER BY SCORE() DESC" for method in ("TF_IDF", "BM25")]
+    queries = [
+        f"SELECT id, SCORE() FROM docs WHERE MATCH(contenido, 'common') "
+        f"USING {method} ORDER BY SCORE() DESC"
+        for method in ("TF_IDF", "BM25")
+    ]
     before = [execute_sql(query, catalog).rows for query in queries]
     with pytest.raises(QueryExecutionError, match="blocked"):
         execute_sql("INSERT INTO docs VALUES (5, 'common')", catalog)

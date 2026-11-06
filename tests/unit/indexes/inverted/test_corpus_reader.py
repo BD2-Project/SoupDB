@@ -13,10 +13,13 @@ def _corpus(tmp_path, rows):
 
 
 def test_reads_confirmed_corpus_schema_and_preserves_unicode(tmp_path):
-    path = _corpus(tmp_path, [
-        {"_id": "paper-1", "title": "Índices", "text": "Búsqueda en español."},
-        {"_id": "paper-2", "title": "", "text": "English retrieval."},
-    ])
+    path = _corpus(
+        tmp_path,
+        [
+            {"_id": "paper-1", "title": "Índices", "text": "Búsqueda en español."},
+            {"_id": "paper-2", "title": "", "text": "English retrieval."},
+        ],
+    )
     docs = list(read_corpus(path))
     assert [(doc.source_id, doc.text) for doc in docs] == [
         ("paper-1", "Índices Búsqueda en español."),
@@ -42,7 +45,8 @@ def test_bad_lines_are_logged_and_valid_lines_continue(tmp_path, caplog):
         'invalid json\n[]\n{"_id":"missing"}\n'
         '{"_id":"bad-text","text":42}\n'
         '{"_id":true,"text":"invalid id"}\n'
-        '{"_id":"ok","text":"valid"}\n', encoding="utf-8",
+        '{"_id":"ok","text":"valid"}\n',
+        encoding="utf-8",
     )
     docs = list(read_corpus(path))
     assert [(doc.source_id, doc.text) for doc in docs] == [("ok", "valid")]

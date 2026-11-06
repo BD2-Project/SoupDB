@@ -65,8 +65,11 @@ class PostingsFile:
         if self._file.closed:
             raise ValueError("postings file is closed")
         if (
-            type(offset) is not int or offset < _HEADER.size
-            or type(length) is not int or type(df) is not int or df < 0
+            type(offset) is not int
+            or offset < _HEADER.size
+            or type(length) is not int
+            or type(df) is not int
+            or df < 0
             or length != _COUNT.size + df * _PAIR.size
         ):
             raise ValueError("invalid postings offset, length or document frequency")

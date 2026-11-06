@@ -10,11 +10,11 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 from engine.common.rid import RID
-from engine.indexes.vector._record_file import FixedRecordFile, peek_meta
-from engine.indexes.vector.constants import VECTOR_BUFFER_CAPACITY
-from engine.indexes.vector.metrics import norm
 from engine.storage.buffer_manager import BufferManager
 from engine.storage.disk_manager import DiskManager
+from soupdb_vector.indexes._record_file import FixedRecordFile, peek_meta
+from soupdb_vector.indexes.constants import VECTOR_BUFFER_CAPACITY
+from soupdb_vector.indexes.metrics import norm
 
 _MAGIC = b"SVEC"
 _HEAD = struct.Struct("<qqd")

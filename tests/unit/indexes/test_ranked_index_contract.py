@@ -79,12 +79,16 @@ CASES: dict[str, Callable[[], Case]] = {
     "inverted_tf_idf": lambda: Case(
         build=lambda path, items: InvertedIndex.build(path / "inverted", items),
         reopen=lambda path: InvertedIndex.load(path / "inverted"),
-        items=_texts(), query="vector index", opts={"method": "tf_idf"},
+        items=_texts(),
+        query="vector index",
+        opts={"method": "tf_idf"},
     ),
     "inverted_bm25": lambda: Case(
         build=lambda path, items: InvertedIndex.build(path / "inverted", items),
         reopen=lambda path: InvertedIndex.load(path / "inverted"),
-        items=_texts(), query="vector index", opts={"method": "bm25"},
+        items=_texts(),
+        query="vector index",
+        opts={"method": "bm25"},
     ),
     "fake_vector": lambda: Case(
         build=_fake_build(vector_scorer),

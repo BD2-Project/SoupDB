@@ -9,7 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from engine.multimedia.codebook import (
+from soupdb_vector.multimedia.codebook import (
     assign_words,
     compute_idf,
     count_words,
@@ -17,7 +17,7 @@ from engine.multimedia.codebook import (
     tfidf_vector,
     train_codebook,
 )
-from engine.multimedia.descriptor_cache import cache_path, cached
+from soupdb_vector.multimedia.descriptor_cache import cache_path, cached
 
 SIFT_DIMENSION = 128
 # Lado mayor máximo antes de SIFT: acota el coste por imagen (más píxeles, más keypoints).

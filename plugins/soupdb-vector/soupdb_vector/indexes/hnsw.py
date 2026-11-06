@@ -21,8 +21,10 @@ from pathlib import Path
 
 from engine.common.rid import RID
 from engine.indexes.base import RankedIndex
-from engine.indexes.vector._record_file import FixedRecordFile, peek_meta
-from engine.indexes.vector.constants import (
+from engine.storage.buffer_manager import BufferManager
+from engine.storage.disk_manager import DiskManager
+from soupdb_vector.indexes._record_file import FixedRecordFile, peek_meta
+from soupdb_vector.indexes.constants import (
     DEFAULT_METRIC,
     HNSW_EF_CONSTRUCTION,
     HNSW_EF_SEARCH,
@@ -30,10 +32,8 @@ from engine.indexes.vector.constants import (
     HNSW_MAX_LEVEL,
     VECTOR_BUFFER_CAPACITY,
 )
-from engine.indexes.vector.metrics import METRICS, ScoreFn, norm, score_fn
-from engine.indexes.vector.store import VectorStore
-from engine.storage.buffer_manager import BufferManager
-from engine.storage.disk_manager import DiskManager
+from soupdb_vector.indexes.metrics import METRICS, ScoreFn, norm, score_fn
+from soupdb_vector.indexes.store import VectorStore
 
 _LAYER0_MAGIC = b"SHN0"
 _UPPER_MAGIC = b"SHNU"

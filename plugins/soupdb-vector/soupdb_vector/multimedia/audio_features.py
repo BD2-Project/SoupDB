@@ -11,7 +11,7 @@ from pathlib import Path
 import librosa
 import numpy as np
 
-from engine.multimedia.codebook import (
+from soupdb_vector.multimedia.codebook import (
     assign_words,
     compute_idf,
     count_words,
@@ -19,7 +19,7 @@ from engine.multimedia.codebook import (
     tfidf_vector,
     train_codebook,
 )
-from engine.multimedia.descriptor_cache import cache_path, load_array, save_array
+from soupdb_vector.multimedia.descriptor_cache import cache_path, load_array, save_array
 
 SAMPLE_RATE = 22050
 N_MFCC = 20

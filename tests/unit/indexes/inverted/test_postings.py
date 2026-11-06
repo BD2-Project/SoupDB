@@ -20,8 +20,9 @@ def test_binary_postings_roundtrip_and_multiple_lists(tmp_path: Path) -> None:
     reopened.close()
 
 
-@pytest.mark.parametrize("postings", [[(1, 1), (1, 2)], [(2, 1), (0, 1)],
-                                      [(-1, 1)], [(0, 0)], [(0, True)], [(2**64, 1)]])
+@pytest.mark.parametrize(
+    "postings", [[(1, 1), (1, 2)], [(2, 1), (0, 1)], [(-1, 1)], [(0, 0)], [(0, True)], [(2**64, 1)]]
+)
 def test_invalid_postings_are_rejected_without_writing(tmp_path, postings) -> None:
     file = PostingsFile.create(tmp_path / "postings.bin")
     with pytest.raises(ValueError):
@@ -41,8 +42,11 @@ def test_reject_missing_header_version_and_out_of_bounds(tmp_path: Path) -> None
     path.unlink()
     file = PostingsFile.create(path)
     offset, length = file.append([(0, 1)])
-    for bad_offset, bad_length, df in [(0, length, 1), (offset, length, 2),
-                                       (offset + 100, length, 1)]:
+    for bad_offset, bad_length, df in [
+        (0, length, 1),
+        (offset, length, 2),
+        (offset + 100, length, 1),
+    ]:
         with pytest.raises(ValueError):
             file.read(bad_offset, bad_length, df=df)
     file.close()

@@ -6,6 +6,13 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 
+[manifest]
+members = [
+    "soupdb",
+    "soupdb-inverted",
+    "soupdb-vector",
+]
+
 [[package]]
 name = "audioread"
 version = "3.1.0"
@@ -1719,6 +1726,8 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "soupdb-inverted" },
+    { name = "soupdb-vector" },
 ]
 docs = [
     { name = "mkdocs-material" },
@@ -1744,6 +1753,8 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "soupdb-inverted", editable = "plugins/soupdb-inverted" },
+    { name = "soupdb-vector", editable = "plugins/soupdb-vector" },
 ]
 docs = [
     { name = "mkdocs-material", specifier = ">=9.5" },
@@ -1756,6 +1767,44 @@ multimedia = [
     { name = "opencv-python-headless", specifier = ">=5.0.0.93" },
     { name = "scikit-learn", specifier = ">=1.9.1" },
     { name = "soundfile", specifier = ">=0.14.0" },
+    { name = "threadpoolctl", specifier = ">=3.7.0" },
+]
+
+[[package]]
+name = "soupdb-inverted"
+version = "0.1.0"
+source = { editable = "plugins/soupdb-inverted" }
+dependencies = [
+    { name = "soupdb" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "soupdb", editable = "." }]
+
+[[package]]
+name = "soupdb-vector"
+version = "0.1.0"
+source = { editable = "plugins/soupdb-vector" }
+dependencies = [
+    { name = "librosa", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "librosa", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "opencv-python-headless" },
+    { name = "scikit-learn" },
+    { name = "soundfile" },
+    { name = "soupdb" },
+    { name = "threadpoolctl" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "librosa", specifier = ">=0.11.0" },
+    { name = "numpy", specifier = ">=2.4.6" },
+    { name = "opencv-python-headless", specifier = ">=5.0.0.93" },
+    { name = "scikit-learn", specifier = ">=1.9.1" },
+    { name = "soundfile", specifier = ">=0.14.0" },
+    { name = "soupdb", editable = "." },
     { name = "threadpoolctl", specifier = ">=3.7.0" },
 ]
 

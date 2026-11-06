@@ -7,19 +7,26 @@ from engine.indexes.inverted.tokenizer import Tokenizer, stem, tokenize
 
 def test_unicode_normalization_case_punctuation_and_numbers() -> None:
     assert tokenize("  ¡ÁRBOL, NIÑO! cafe\u0301; ＤＢ_2026  ", stemming=False) == [
-        "árbol", "niño", "café", "db", "2026"
+        "árbol",
+        "niño",
+        "café",
+        "db",
+        "2026",
     ]
 
 
 def test_bilingual_stopwords_preserve_content_words() -> None:
     assert tokenize("El índice y la consulta with the database", stemming=False) == [
-        "índice", "consulta", "database"
+        "índice",
+        "consulta",
+        "database",
     ]
 
 
 def test_custom_stopwords_replace_defaults_and_normalize() -> None:
     assert tokenize("THE árbol consulta", stopwords={" ÁRBOL "}, stemming=False) == [
-        "the", "consulta"
+        "the",
+        "consulta",
     ]
     assert tokenize("El and", stopwords=(), stemming=False) == ["el", "and"]
 
@@ -32,12 +39,24 @@ def test_empty_and_stopword_only_input(text: str) -> None:
 @pytest.mark.parametrize(
     ("word", "expected"),
     [
-        ("acciones", "acción"), ("luces", "luz"), ("árboles", "árbol"),
-        ("libros", "libro"), ("queries", "query"), ("indexes", "index"),
-        ("databases", "database"), ("running", "run"), ("indexed", "index"),
-        ("quickly", "quick"), ("happiness", "happi"), ("claramente", "clara"),
-        ("series", "series"), ("virus", "virus"), ("analysis", "analysis"),
-        ("is", "is"), ("2026", "2026"), ("tree", "tree"),
+        ("acciones", "acción"),
+        ("luces", "luz"),
+        ("árboles", "árbol"),
+        ("libros", "libro"),
+        ("queries", "query"),
+        ("indexes", "index"),
+        ("databases", "database"),
+        ("running", "run"),
+        ("indexed", "index"),
+        ("quickly", "quick"),
+        ("happiness", "happi"),
+        ("claramente", "clara"),
+        ("series", "series"),
+        ("virus", "virus"),
+        ("analysis", "analysis"),
+        ("is", "is"),
+        ("2026", "2026"),
+        ("tree", "tree"),
     ],
 )
 def test_documented_stemming_rules(word: str, expected: str) -> None:

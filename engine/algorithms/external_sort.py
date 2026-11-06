@@ -17,9 +17,7 @@ _LENGTH_FORMAT = "<I"
 _LENGTH_SIZE = struct.calcsize(_LENGTH_FORMAT)
 
 
-def write_sorted_run(
-    path: str | Path, records: Iterable[Record], comparator: Comparator
-) -> Path:
+def write_sorted_run(path: str | Path, records: Iterable[Record], comparator: Comparator) -> Path:
     """Write an already sorted run, rejecting disorder and existing files.
 
     Runs use the same length-prefixed Record payloads as external_sort.
@@ -264,6 +262,7 @@ def _merge_runs(
                         ),
                     )
                     sequence += 1
+
 
 def _read_run(path: Path) -> Iterator[Record]:
     with path.open("rb") as file:

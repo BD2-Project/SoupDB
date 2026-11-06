@@ -26,7 +26,9 @@ def test_store_reopens_complete_statistics_postings_and_analyzer(tmp_path):
         assert terms == [("disk", 2), ("page", 1), ("árbol", 2)]
         # Term enumeration remains valid when lookups seek the same sidecar.
         assert [(term, store.postings(term)) for term, _ in store.terms()] == [
-            ("disk", [(0, 2), (1, 1)]), ("page", [(1, 1)]), ("árbol", [(0, 1), (1, 1)]),
+            ("disk", [(0, 2), (1, 1)]),
+            ("page", [(1, 1)]),
+            ("árbol", [(0, 1), (1, 1)]),
         ]
     finally:
         store.close()
@@ -60,8 +62,7 @@ def test_failed_build_cleans_staging_and_preserves_other_files(tmp_path):
     sentinel.write_text("keep", encoding="utf-8")
     path = tmp_path / "failed"
     with pytest.raises(ValueError, match="duplicate"):
-        InvertedStore.build(path, [("alpha", RID(1, 0)), ("beta", RID(1, 0))],
-                            memory_limit_bytes=1)
+        InvertedStore.build(path, [("alpha", RID(1, 0)), ("beta", RID(1, 0))], memory_limit_bytes=1)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["keep"]
 
 

@@ -138,9 +138,7 @@ def test_discovery_uses_entry_points(monkeypatch):
         def load(self):
             return FakePlugin()
 
-    monkeypatch.setattr(
-        "engine.plugins.registry.entry_points", lambda group: [EntryPoint()]
-    )
+    monkeypatch.setattr("engine.plugins.registry.entry_points", lambda group: [EntryPoint()])
     registry = PluginRegistry()
     assert registry.discover() == ("DUMMY",)
     assert registry.available() == ("DUMMY",)

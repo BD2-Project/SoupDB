@@ -14,8 +14,8 @@ from pathlib import Path
 
 from engine.algorithms.external_sort import write_sorted_run
 from engine.common.rid import RID
-from engine.indexes.inverted.merge import compare_postings, encode_posting
-from engine.indexes.inverted.tokenizer import Tokenizer
+from soupdb_inverted.merge import compare_postings, encode_posting
+from soupdb_inverted.tokenizer import Tokenizer
 
 
 @dataclass(frozen=True)
@@ -68,8 +68,10 @@ def spimi_runs(
         for doc_id, (text, rid) in enumerate(items):
             if (
                 not isinstance(rid, RID)
-                or type(rid.page_id) is not int or rid.page_id < 0
-                or type(rid.slot) is not int or rid.slot < 0
+                or type(rid.page_id) is not int
+                or rid.page_id < 0
+                or type(rid.slot) is not int
+                or rid.slot < 0
             ):
                 raise ValueError("documents require valid storage RIDs")
             if rid in seen_rids:

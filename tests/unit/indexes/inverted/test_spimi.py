@@ -37,8 +37,10 @@ def test_merge_combines_document_frequency_split_across_runs(tmp_path: Path) -> 
 
 def test_empty_and_stopword_documents_are_counted(tmp_path: Path) -> None:
     result = spimi_runs(
-        [("", RID(0, 0)), ("the and", RID(0, 1))], tmp_path,
-        tokenizer=Tokenizer(), memory_limit_bytes=100,
+        [("", RID(0, 0)), ("the and", RID(0, 1))],
+        tmp_path,
+        tokenizer=Tokenizer(),
+        memory_limit_bytes=100,
     )
     assert result.runs == ()
     assert result.doc_lengths == {0: 0, 1: 0}
@@ -59,7 +61,9 @@ def test_failure_cleans_only_owned_runs(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="duplicate"):
         spimi_runs(
             [("first", RID(1, 0)), ("duplicate", RID(1, 0))],
-            tmp_path, tokenizer=TOKENIZER, memory_limit_bytes=1,
+            tmp_path,
+            tokenizer=TOKENIZER,
+            memory_limit_bytes=1,
         )
     assert list(tmp_path.iterdir()) == [sentinel]
     assert sentinel.read_text() == "unchanged"
@@ -69,6 +73,7 @@ def test_input_failure_cleans_written_runs(tmp_path: Path) -> None:
     def documents():
         yield "first", RID(1, 0)
         raise RuntimeError("input failed")
+
     with pytest.raises(RuntimeError, match="input failed"):
         spimi_runs(documents(), tmp_path, tokenizer=TOKENIZER, memory_limit_bytes=1)
     assert list(tmp_path.iterdir()) == []
@@ -76,8 +81,10 @@ def test_input_failure_cleans_written_runs(tmp_path: Path) -> None:
 
 def test_early_close_of_grouped_merge_cleans_temp(tmp_path: Path) -> None:
     result = spimi_runs(
-        [("alpha beta gamma delta", RID(1, 0))], tmp_path,
-        tokenizer=TOKENIZER, memory_limit_bytes=1,
+        [("alpha beta gamma delta", RID(1, 0))],
+        tmp_path,
+        tokenizer=TOKENIZER,
+        memory_limit_bytes=1,
     )
     work = tmp_path / "merge"
     work.mkdir()

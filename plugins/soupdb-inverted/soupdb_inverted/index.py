@@ -9,9 +9,9 @@ from typing import Any
 
 from engine.common.rid import RID
 from engine.indexes.base import RankedIndex
-from engine.indexes.inverted.scoring import bm25_term, cosine, idf, validate_bm25
-from engine.indexes.inverted.store import InvertedStore
-from engine.indexes.inverted.tokenizer import DEFAULT_TOKENIZER, Tokenizer
+from soupdb_inverted.scoring import bm25_term, cosine, idf, validate_bm25
+from soupdb_inverted.store import InvertedStore
+from soupdb_inverted.tokenizer import DEFAULT_TOKENIZER, Tokenizer
 
 
 class InvertedIndex(RankedIndex):
@@ -39,14 +39,25 @@ class InvertedIndex(RankedIndex):
 
     @classmethod
     def build(
-        cls, path: str | Path, items: Iterable[tuple[str, RID]], *,
-        tokenizer: Tokenizer = DEFAULT_TOKENIZER, memory_limit_bytes: int = 8 * 1024 * 1024,
-        page_size: int = 4096, fan_in: int = 8,
+        cls,
+        path: str | Path,
+        items: Iterable[tuple[str, RID]],
+        *,
+        tokenizer: Tokenizer = DEFAULT_TOKENIZER,
+        memory_limit_bytes: int = 8 * 1024 * 1024,
+        page_size: int = 4096,
+        fan_in: int = 8,
     ) -> "InvertedIndex":
-        return cls(InvertedStore.build(
-            path, items, tokenizer=tokenizer, memory_limit_bytes=memory_limit_bytes,
-            page_size=page_size, fan_in=fan_in,
-        ))
+        return cls(
+            InvertedStore.build(
+                path,
+                items,
+                tokenizer=tokenizer,
+                memory_limit_bytes=memory_limit_bytes,
+                page_size=page_size,
+                fan_in=fan_in,
+            )
+        )
 
     @classmethod
     def load(cls, path: str | Path) -> "InvertedIndex":
@@ -95,20 +106,27 @@ class InvertedIndex(RankedIndex):
             if method == "tf_idf":
                 inverse_frequency = idf(store.N, len(postings))
                 query_weight = query_tf * inverse_frequency
-                query_squared_norm += query_weight ** 2
+                query_squared_norm += query_weight**2
             for doc_id, tf in postings:
                 if method == "tf_idf":
                     contribution = query_weight * tf * inverse_frequency
                 else:
                     contribution = query_tf * bm25_term(
-                        tf, n=store.N, df=len(postings), doc_len=store.doc_lengths[doc_id],
-                        avgdl=store.avgdl, k1=k1, b=b,
+                        tf,
+                        n=store.N,
+                        df=len(postings),
+                        doc_len=store.doc_lengths[doc_id],
+                        avgdl=store.avgdl,
+                        k1=k1,
+                        b=b,
                     )
                 scores[doc_id] = scores.get(doc_id, 0.0) + contribution
         if method == "tf_idf":
             query_norm = math.sqrt(query_squared_norm)
-            scores = {doc_id: cosine(dot, query_norm, self._norms[doc_id])
-                      for doc_id, dot in scores.items()}
+            scores = {
+                doc_id: cosine(dot, query_norm, self._norms[doc_id])
+                for doc_id, dot in scores.items()
+            }
         candidates = scores if matches_only else store.rids
         hits = ((store.rids[doc_id], float(scores.get(doc_id, 0.0))) for doc_id in candidates)
         return heapq.nsmallest(k, hits, key=lambda hit: (-hit[1], hit[0]))
