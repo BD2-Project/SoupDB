@@ -32,6 +32,20 @@ CREATE EXTENSION inverted WITH (storage_root = '/app/data/plugins/inverted');
 La configuración queda en `SysPlugins` y el motor la reaplica al abrir la base.
 `DROP EXTENSION inverted` lo desactiva (falla si hay índices dependientes).
 
+Para el plugin vectorial, `profiles` se puede pasar como **JSON** en el `WITH`
+(desde `soupdb-vector 0.1.1`):
+
+```sql
+CREATE EXTENSION ivf WITH (
+  storage_root = '/app/data/plugins/ivf',
+  profiles = '{"img-v1": {"kind": "image", "root": "/datasets/img", "codebook": "/codebooks/img.npz"}}'
+);
+```
+
+Cada plugin vectorial configurado con perfiles distintos implica vectorizadores
+distintos; el motor solo lo rechaza si realmente hay ambigüedad (varios plugins
+configurados con configuraciones incompatibles).
+
 ## Instalación local
 
 ```bash
