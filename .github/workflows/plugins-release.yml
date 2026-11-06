@@ -11,6 +11,12 @@ on:
   push:
     tags: ["plugins-v*"]
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Paquetes a publicar"
+        type: choice
+        options: [all, core, plugins]
+        default: all
 
 permissions:
   contents: read
@@ -21,11 +27,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Build wheels (core + plugins)
+      - name: Build selected packages
         run: |
-          uv build --package soupdb --out-dir dist
-          uv build --package soupdb-inverted --out-dir dist
-          uv build --package soupdb-vector --out-dir dist
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.target }}" = "all" ] || [ "${{ inputs.target }}" = "core" ]; then
+            uv build --package soupdb --out-dir dist
+          fi
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.target }}" = "all" ] || [ "${{ inputs.target }}" = "plugins" ]; then
+            uv build --package soupdb-inverted --out-dir dist
+            uv build --package soupdb-vector --out-dir dist
+          fi
       - name: Publish to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
