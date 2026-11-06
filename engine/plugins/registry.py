@@ -83,6 +83,9 @@ class FactoryPluginAdapter:
     def configure(self, config: Mapping[str, Any]) -> None:
         self._config = dict(config)
 
+    def validate_config(self, config: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(config)
+
     def validate_options(self, options: Mapping[str, Any]) -> dict[str, Any]:
         return dict(options)
 

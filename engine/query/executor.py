@@ -17,9 +17,11 @@ from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.base import Index
 from engine.query.ast import (
     BeginTransactionStatement,
+    CreateExtensionStatement,
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
+    DropExtensionStatement,
     DropIndexStatement,
     DropTableStatement,
     EndTransactionStatement,
@@ -82,6 +84,12 @@ def execute(plan: Plan, catalog: Any) -> ResultSet:
         return ResultSet(columns=())
     if isinstance(statement, DropTableStatement):
         catalog.drop_table(statement.table)
+        return ResultSet(columns=())
+    if isinstance(statement, CreateExtensionStatement):
+        catalog.create_extension(statement.name, dict(statement.options))
+        return ResultSet(columns=())
+    if isinstance(statement, DropExtensionStatement):
+        catalog.drop_extension(statement.name)
         return ResultSet(columns=())
     if isinstance(statement, DropIndexStatement):
         catalog.drop_index(statement.index_name)
