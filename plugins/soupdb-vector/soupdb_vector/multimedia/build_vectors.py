@@ -8,7 +8,7 @@ audio nunca comparten codebook. Los descriptores salen de la caché en disco, as
 repetir el comando tras un corte no recalcula SIFT/MFCC ya guardados.
 
 Uso:
-    python -m engine.multimedia.build_vectors MANIFEST ROOT CACHE CODEBOOK VECTORES \\
+    python -m soupdb_vector.multimedia.build_vectors MANIFEST ROOT CACHE CODEBOOK VECTORES \\
         --k 128 --max-descriptors 50000 --seed 42
 """
 
@@ -18,8 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
-from engine.multimedia.audio_features import extract_mfcc_cached, segment_id
-from engine.multimedia.codebook import (
+from soupdb_vector.multimedia.audio_features import extract_mfcc_cached, segment_id
+from soupdb_vector.multimedia.codebook import (
     assign_words,
     compute_idf,
     count_words,
@@ -28,9 +28,9 @@ from engine.multimedia.codebook import (
     tfidf_vector,
     train_codebook,
 )
-from engine.multimedia.image_features import extract_sift_cached
-from engine.multimedia.manifest import read_manifest
-from engine.multimedia.vector_file import VectorRecord, write_vectors
+from soupdb_vector.multimedia.image_features import extract_sift_cached
+from soupdb_vector.multimedia.manifest import read_manifest
+from soupdb_vector.multimedia.vector_file import VectorRecord, write_vectors
 
 REQUIRED_FIELDS = {
     "image": ("id", "type", "path"),

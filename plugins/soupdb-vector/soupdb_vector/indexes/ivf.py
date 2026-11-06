@@ -21,7 +21,9 @@ from pathlib import Path
 
 from engine.common.rid import RID
 from engine.indexes.base import RankedIndex
-from engine.indexes.vector.constants import (
+from engine.storage.buffer_manager import BufferManager
+from engine.storage.disk_manager import DiskManager
+from soupdb_vector.indexes.constants import (
     DEFAULT_METRIC,
     IVF_KMEANS_ITERATIONS,
     IVF_NLIST,
@@ -29,10 +31,8 @@ from engine.indexes.vector.constants import (
     IVF_TRAIN_SAMPLE,
     VECTOR_BUFFER_CAPACITY,
 )
-from engine.indexes.vector.kmeans import kmeans, nearest, reservoir_sample
-from engine.indexes.vector.metrics import norm, score_fn
-from engine.storage.buffer_manager import BufferManager
-from engine.storage.disk_manager import DiskManager
+from soupdb_vector.indexes.kmeans import kmeans, nearest, reservoir_sample
+from soupdb_vector.indexes.metrics import norm, score_fn
 
 _MAGIC = b"SIVF"
 _VERSION = 1

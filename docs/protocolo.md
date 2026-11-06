@@ -69,3 +69,45 @@ Códigos de tipo de columna: `INT=0x01`, `FLOAT=0x02`, `VARCHAR=0x03`, `TEXT=0x0
 - El gestor responde a cada request con un frame; nunca envía frames no solicitados.
 - `BEGIN/COMMIT/ROLLBACK` mapean al `TransactionalSession` de la conexión; `QUERY` se ejecuta dentro de la transacción activa (o autocommit si no hay una).
 - Versión y magic inválidos se rechazan como `ProtocolError`.
+---
+
+# Protocolo v2 (schema-driven + prepared statements)
+
+La versión `0x02` es retrocompatible a nivel de framing: el header de 8 bytes y
+los opcodes existentes no cambian. El servidor responde con la **misma versión**
+que usó el cliente en el frame de request. La versión `0x01` sigue soportada
+para los seis tipos nativos.
+
+## Header de columnas en RESULT
+
+v1 enviaba un código numérico de tipo. v2 envía el nombre del tipo y cómo debe
+interpretarse el valor:
+
+```
+[ncols u16]
+por columna:
+  [name_len u16][name UTF-8]
+  [type_name_len u16][type_name UTF-8]   # "INT", "TEXT", "POINT", "VECTOR"...
+  [encoding u8]                          # 0 native, 1 fixed, 2 variable, 3 opaque
+  [size u16]                             # bytes fijos (0 si variable/opaco)
+  [length u16]                           # longitud declarada de VARCHAR
+[row_count u32]
+filas: valores con los tags existentes (NULL/INT/FLOAT/TEXT/BOOL/POINT/BYTES)
+```
+
+Un tipo desconocido por el cliente se transporta como `encoding=opaque` y el
+cliente lo expone como bytes + `type_name`; no necesita conocerlo para seguir
+funcionando.
+
+## Prepared statements
+
+| Opcode | Valor | Payload |
+|---|---|---|
+| `PREPARE` | `0x07` | `[name_len u16][name][sql_len u32][sql]` |
+| `EXECUTE` | `0x08` | `[name_len u16][name][nparams u16][tag+valor...]` |
+| `DEALLOCATE` | `0x09` | `[name_len u16][name]` |
+
+- `PREPARE` parsea una sola vez y guarda el AST en la conexión.
+- `EXECUTE` reemplaza `$1..$n` **en el AST** (nunca interpola SQL) y ejecuta con
+  la sesión transaccional de esa conexión.
+- `DEALLOCATE` libera el statement preparado. Cerrar la conexión libera todos.

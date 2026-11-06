@@ -58,7 +58,7 @@ class MultimediaQueryVectorizer:
         """Load and validate the profile codebook; return (centroids, idf)."""
         import numpy as np
 
-        from engine.multimedia.codebook import load_codebook
+        from soupdb_vector.multimedia.codebook import load_codebook
 
         profile = self.profile(profile_id)
         if profile_id in self._codebooks:
@@ -87,7 +87,7 @@ class MultimediaQueryVectorizer:
 
     def vectorize(self, reference: str, *, profile_id: str) -> tuple[float, ...]:
         """Resolve a reference securely, then extract BoW TF-IDF and L2-normalize."""
-        from engine.multimedia.codebook import assign_words, count_words, tfidf_vector
+        from soupdb_vector.multimedia.codebook import assign_words, count_words, tfidf_vector
 
         profile = self.profile(profile_id)
         if not isinstance(reference, str) or not reference.strip():
@@ -113,7 +113,7 @@ class MultimediaQueryVectorizer:
 
         centroids, idf = self.codebook(profile_id)
         if profile.kind == "image":
-            from engine.multimedia.image_features import extract_sift, extract_sift_cached
+            from soupdb_vector.multimedia.image_features import extract_sift, extract_sift_cached
 
             descriptors = (
                 extract_sift_cached(path, profile.cache)
@@ -121,7 +121,7 @@ class MultimediaQueryVectorizer:
                 else extract_sift(path)
             )
         else:
-            from engine.multimedia.audio_features import (
+            from soupdb_vector.multimedia.audio_features import (
                 extract_mfcc_cached,
                 iter_audio_segments,
                 mfcc_from_signal,

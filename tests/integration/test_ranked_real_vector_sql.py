@@ -13,6 +13,7 @@ from engine.indexes.vector.sql_factory import OnDiskVectorFactory
 from engine.multimedia.codebook import save_codebook
 from engine.multimedia.sql_profiles import MultimediaProfile
 from engine.query import execute_sql
+from engine.transactions.session import TransactionalSession
 
 pytestmark = pytest.mark.integration
 
@@ -73,7 +74,7 @@ def test_physical_vector_index_sql_persists_and_drops(tmp_path, monkeypatch, alg
     )
     execute_sql(ddl, catalog)
     binding = catalog.ranked_indexes_for("assets")["idx_media"]
-    assert binding.mutable is False and binding.reversible is False
+    assert binding.mutable is True and binding.reversible is True
     assert binding.item_count == 3
 
     query = (
@@ -86,8 +87,13 @@ def test_physical_vector_index_sql_persists_and_drops(tmp_path, monkeypatch, alg
     assert len(first.rows) == 3
     assert all(type(row[1]) is float for row in first.rows)
     assert [row[1] for row in first.rows] == sorted([row[1] for row in first.rows], reverse=True)
-    with pytest.raises(QueryExecutionError, match="blocked"):
-        execute_sql(f"INSERT INTO assets VALUES (4, 'a.{ext}')", catalog)
+    session = TransactionalSession(catalog)
+    session.execute(f"INSERT INTO assets VALUES (4, 'a.{ext}')")
+    after = execute_sql(query.replace("k=3", "k=4"), catalog)
+    assert 4 in [row[0] for row in after.rows]
+    session.execute("DELETE FROM assets WHERE id = 4")
+    gone = execute_sql(query.replace("k=3", "k=4"), catalog)
+    assert 4 not in [row[0] for row in gone.rows]
     assert len(execute_sql("SELECT * FROM assets", catalog).rows) == 3
     catalog.close()
 

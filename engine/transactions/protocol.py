@@ -42,7 +42,11 @@ from engine.common.schema import ColumnDef, ColumnType
 from engine.query.resultset import ResultSet
 
 MAGIC = b"SP"
-VERSION = 0x01
+#: Wire versions understood by this server. ``VERSION`` is the current one;
+#: ``VERSION_V1`` is kept for drivers that still use numeric type codes.
+VERSION_V1 = 0x01
+VERSION = 0x02
+SUPPORTED_VERSIONS = frozenset({VERSION_V1, VERSION})
 HEADER_SIZE = 8  # magic(2) + version(1) + opcode(1) + length(4)
 
 # Opcodes de request
@@ -51,6 +55,9 @@ OP_BEGIN = 0x03
 OP_COMMIT = 0x04
 OP_ROLLBACK = 0x05
 OP_QUERY = 0x06
+OP_PREPARE = 0x07
+OP_EXECUTE = 0x08
+OP_DEALLOCATE = 0x09
 
 # Opcodes de response
 OP_PONG = 0x02
@@ -65,6 +72,7 @@ TAG_FLOAT = 0x02
 TAG_TEXT = 0x03
 TAG_BOOL = 0x04
 TAG_POINT = 0x05
+TAG_BYTES = 0x06
 
 # Códigos de tipo de columna en RESULT
 TYPE_INT = 0x01
@@ -86,9 +94,11 @@ ERR_CONTRACT = 0x07
 ERR_UNSUPPORTED = 0x08
 
 
-def encode_frame(opcode: int, payload: bytes = b"") -> bytes:
+def encode_frame(opcode: int, payload: bytes = b"", *, version: int = VERSION) -> bytes:
     """Encode a full frame: magic + version + opcode + length + payload."""
-    return MAGIC + struct.pack(">BBI", VERSION, opcode, len(payload)) + payload
+    if version not in SUPPORTED_VERSIONS:
+        raise ProtocolError(f"unsupported protocol version {version}")
+    return MAGIC + struct.pack(">BBI", version, opcode, len(payload)) + payload
 
 
 def decode_frame(data: bytes) -> tuple[int, bytes]:
@@ -98,7 +108,7 @@ def decode_frame(data: bytes) -> tuple[int, bytes]:
     if data[:2] != MAGIC:
         raise ProtocolError(f"bad magic {data[:2]!r}")
     version, opcode, length = struct.unpack_from(">BBI", data, 2)
-    if version != VERSION:
+    if version not in SUPPORTED_VERSIONS:
         raise ProtocolError(f"unsupported protocol version {version}")
     payload = data[HEADER_SIZE : HEADER_SIZE + length]
     if len(payload) != length:
@@ -106,15 +116,21 @@ def decode_frame(data: bytes) -> tuple[int, bytes]:
     return opcode, payload
 
 
-def recv_frame(sock: socket.socket) -> tuple[int, bytes]:
-    """Read exactly one frame from a socket."""
+def recv_frame_versioned(sock: socket.socket) -> tuple[int, int, bytes]:
+    """Read one frame and also report its wire version for the response."""
     header = _recv_exact(sock, HEADER_SIZE)
     if header[:2] != MAGIC:
         raise ProtocolError(f"bad magic {header[:2]!r}")
     version, opcode, length = struct.unpack_from(">BBI", header, 2)
-    if version != VERSION:
+    if version not in SUPPORTED_VERSIONS:
         raise ProtocolError(f"unsupported protocol version {version}")
     payload = _recv_exact(sock, length)
+    return version, opcode, payload
+
+
+def recv_frame(sock: socket.socket) -> tuple[int, bytes]:
+    """Read exactly one frame from a socket (version-agnostic)."""
+    _version, opcode, payload = recv_frame_versioned(sock)
     return opcode, payload
 
 
@@ -141,6 +157,56 @@ def decode_query(payload: bytes) -> str:
     return payload[4 : 4 + length].decode("utf-8")
 
 
+def _encode_name(name: str) -> bytes:
+    data = name.encode("utf-8")
+    return struct.pack(">H", len(data)) + data
+
+
+def _decode_name(payload: bytes, offset: int) -> tuple[str, int]:
+    (length,) = struct.unpack_from(">H", payload, offset)
+    offset += 2
+    return payload[offset : offset + length].decode("utf-8"), offset + length
+
+
+def encode_prepare(name: str, sql: str) -> bytes:
+    data = sql.encode("utf-8")
+    return _encode_name(name) + struct.pack(">I", len(data)) + data
+
+
+def decode_prepare(payload: bytes) -> tuple[str, str]:
+    name, offset = _decode_name(payload, 0)
+    (length,) = struct.unpack_from(">I", payload, offset)
+    offset += 4
+    return name, payload[offset : offset + length].decode("utf-8")
+
+
+def encode_execute(name: str, params: tuple[object, ...] = ()) -> bytes:
+    out = bytearray(_encode_name(name))
+    out += struct.pack(">H", len(params))
+    for value in params:
+        _encode_value(out, value)
+    return bytes(out)
+
+
+def decode_execute(payload: bytes) -> tuple[str, tuple[object, ...]]:
+    name, offset = _decode_name(payload, 0)
+    (count,) = struct.unpack_from(">H", payload, offset)
+    offset += 2
+    params: list[object] = []
+    for _ in range(count):
+        value, offset = _decode_value(payload, offset)
+        params.append(value)
+    return name, tuple(params)
+
+
+def encode_deallocate(name: str) -> bytes:
+    return _encode_name(name)
+
+
+def decode_deallocate(payload: bytes) -> str:
+    return _decode_name(payload, 0)[0]
+
+
 # --- Payloads de response -----------------------------------------------
 
 
@@ -163,8 +229,25 @@ def decode_error(payload: bytes) -> tuple[int, str]:
     return code, payload[3 : 3 + length].decode("utf-8")
 
 
-def encode_resultset(result: ResultSet) -> bytes:
-    """Serialize a ResultSet into a RESULT payload."""
+def encode_resultset(result: ResultSet, *, version: int = VERSION) -> bytes:
+    """Serialize a ResultSet using the requested wire version."""
+    if version == VERSION_V1:
+        return _encode_resultset_v1(result)
+    if version == VERSION:
+        return _encode_resultset_v2(result)
+    raise ProtocolError(f"unsupported protocol version {version}")
+
+
+def decode_resultset(payload: bytes, *, version: int = VERSION) -> ResultSet:
+    if version == VERSION_V1:
+        return _decode_resultset_v1(payload)
+    if version == VERSION:
+        return _decode_resultset_v2(payload)
+    raise ProtocolError(f"unsupported protocol version {version}")
+
+
+def _encode_resultset_v1(result: ResultSet) -> bytes:
+    """Legacy payload: numeric column type codes."""
     out = bytearray()
     out += struct.pack(">H", len(result.columns))
     for column in result.columns:
@@ -178,7 +261,7 @@ def encode_resultset(result: ResultSet) -> bytes:
     return bytes(out)
 
 
-def decode_resultset(payload: bytes) -> ResultSet:
+def _decode_resultset_v1(payload: bytes) -> ResultSet:
     columns, offset = _decode_columns(payload, 0)
     (row_count,) = struct.unpack_from(">I", payload, offset)
     offset += 4
@@ -190,6 +273,65 @@ def decode_resultset(payload: bytes) -> ResultSet:
             row.append(value)
         rows.append(tuple(row))
     return ResultSet(columns=columns, rows=tuple(rows))
+
+
+def _encode_resultset_v2(result: ResultSet) -> bytes:
+    """Schema-driven payload: type name, encoding and size per column."""
+    out = bytearray()
+    out += struct.pack(">H", len(result.columns))
+    for column in result.columns:
+        name = column.name.encode("utf-8")
+        type_name = column.type_name.value.encode("utf-8")
+        encoding, size = _wire_encoding(column.type_name)
+        out += struct.pack(">H", len(name)) + name
+        out += struct.pack(">H", len(type_name)) + type_name
+        out += struct.pack(">BHH", encoding, size, column.length or 0)
+    out += struct.pack(">I", len(result.rows))
+    for row in result.rows:
+        for value in row:
+            _encode_value(out, value)
+    return bytes(out)
+
+
+def _decode_resultset_v2(payload: bytes) -> ResultSet:
+    (count,) = struct.unpack_from(">H", payload, 0)
+    offset = 2
+    columns: list[ColumnDef] = []
+    for _ in range(count):
+        (name_len,) = struct.unpack_from(">H", payload, offset)
+        offset += 2
+        name = payload[offset : offset + name_len].decode("utf-8")
+        offset += name_len
+        (type_len,) = struct.unpack_from(">H", payload, offset)
+        offset += 2
+        type_name = payload[offset : offset + type_len].decode("utf-8")
+        offset += type_len
+        _encoding, _size, length = struct.unpack_from(">BHH", payload, offset)
+        offset += 5
+        columns.append(ColumnDef(name, ColumnType(type_name), length or None))
+    (row_count,) = struct.unpack_from(">I", payload, offset)
+    offset += 4
+    rows: list[tuple[object, ...]] = []
+    for _ in range(row_count):
+        row: list[object] = []
+        for _column in columns:
+            value, offset = _decode_value(payload, offset)
+            row.append(value)
+        rows.append(tuple(row))
+    return ResultSet(columns=tuple(columns), rows=tuple(rows))
+
+
+def _wire_encoding(type_name: ColumnType) -> tuple[int, int]:
+    """Return ``(encoding, size)`` for the schema-driven result header."""
+    sizes = {
+        ColumnType.INT: 4,
+        ColumnType.FLOAT: 8,
+        ColumnType.BOOL: 1,
+        ColumnType.POINT: 16,
+        ColumnType.VARCHAR: 0,
+        ColumnType.TEXT: 0,
+    }
+    return 0, sizes[type_name]
 
 
 def _decode_columns(payload: bytes, offset: int) -> tuple[tuple[ColumnDef, ...], int]:
@@ -224,6 +366,9 @@ def _encode_value(out: bytearray, value: Any) -> None:
     elif _is_point(value):
         # Dos doubles en el mismo orden que Point(x, y): x es longitud, y latitud.
         out += struct.pack(">Bdd", TAG_POINT, float(value[0]), float(value[1]))
+    elif isinstance(value, (bytes, bytearray)):
+        data = bytes(value)
+        out += struct.pack(">BI", TAG_BYTES, len(data)) + data
     else:
         raise ProtocolError(f"cannot encode value {value!r}")
 
@@ -260,6 +405,10 @@ def _decode_value(payload: bytes, offset: int) -> tuple[object, int]:
     if tag == TAG_POINT:
         x, y = struct.unpack_from(">dd", payload, offset)
         return (x, y), offset + 16
+    if tag == TAG_BYTES:
+        (length,) = struct.unpack_from(">I", payload, offset)
+        offset += 4
+        return payload[offset : offset + length], offset + length
     raise ProtocolError(f"unknown value tag {tag}")
 
 

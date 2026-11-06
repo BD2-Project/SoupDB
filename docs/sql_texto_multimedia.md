@@ -1,5 +1,9 @@
 # Consultas SQL textuales y multimedia
 
+> **Actualizado en v0.5.0:** la forma recomendada es `SEARCH(...) USING <plugin>`
+> con `SCORE()` único. Ver [SQL de plugins](sql_plugins.md). `MATCH`/`SIMILAR_TO`
+> siguen funcionando como alias durante una versión.
+
 > **Alcance actual:** integración del lenguaje SQL, planificación, operadores,
 > catálogo, pruebas y protocolo usando proveedores **simulados**. Las consultas
 > siguientes **no son ejecutables con un catálogo nuevo sin una factory de

@@ -18,10 +18,11 @@ from engine.common.ranked import RankedBinding
 from engine.common.ranked_catalog import RankedMetadata
 from engine.common.record import decode_row
 from engine.common.schema import ColumnDef
-from engine.indexes.vector.hnsw import HNSWIndex
-from engine.indexes.vector.ivf import IVFIndex
-from engine.multimedia.sql_profiles import MultimediaProfile, MultimediaQueryVectorizer
 from engine.storage.base import FileOrganization
+from soupdb_vector.indexes.hnsw import HNSWIndex
+from soupdb_vector.indexes.ivf import IVFIndex
+from soupdb_vector.multimedia.sql_profiles import MultimediaProfile, MultimediaQueryVectorizer
+from soupdb_vector.mutable import MutableVectorIndex
 
 _MANIFEST = "sql_index.json"
 _VERSION = 1
@@ -97,8 +98,8 @@ class OnDiskVectorFactory:
             item_count=count,
             exact=False,
             exhaustive=False,
-            mutable=False,
-            reversible=False,
+            mutable=True,
+            reversible=True,
         )
 
     def build(
@@ -212,10 +213,16 @@ class OnDiskVectorFactory:
                     page_size=self.page_size,
                     buffer_capacity=self.buffer_capacity,
                 )
-            if len(index) != stored["count"]:
+            if len(index) < stored["count"]:
                 index.close()
-                raise QueryExecutionError("physical vector count differs from SQL metadata")
-            return self._binding(metadata, index, stored["count"])
+                raise QueryExecutionError("physical vector count is below SQL metadata")
+            mutable_index = MutableVectorIndex(
+                index,
+                directory / "mutations.json",
+                vectorizer=self.query_vectorizer,
+                profile_id=metadata.profile_id,
+            )
+            return self._binding(metadata, mutable_index, stored["count"])
         except (OSError, KeyError, ValueError, TypeError) as exc:
             raise QueryExecutionError(
                 f"failed to reopen ranked index {metadata.name!r}: {exc}"

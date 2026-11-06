@@ -46,7 +46,7 @@ def test_official_bm25_example_with_score_alias() -> None:
 
     assert statement.columns == (
         SelectColumn(StarExpr()),
-        SelectColumn(ScoreExpr(kind="text"), alias="relevancia"),
+        SelectColumn(ScoreExpr(kind="auto"), alias="relevancia"),
     )
     assert statement.where == MatchExpr(ColumnRef("texto"), Literal("machine learning"))
     assert statement.search == SearchOptions(strategy="BM25")
@@ -86,7 +86,7 @@ def test_limit_offset_is_preserved_for_text_search() -> None:
         "WHERE MATCH(contenido, 'index') USING BM25 LIMIT 5 OFFSET 2"
     )
 
-    assert statement.columns == (SelectColumn(ScoreExpr(), alias="relevancia"),)
+    assert statement.columns == (SelectColumn(ScoreExpr(kind="auto"), alias="relevancia"),)
     assert statement.limit == LimitClause(Literal(5), Literal(2))
 
 
@@ -114,7 +114,7 @@ def test_score_can_be_selected_without_star() -> None:
     statement = parse("SELECT id, SCORE() relevancia FROM documentos")
     assert statement.columns == (
         SelectColumn(ColumnRef("id")),
-        SelectColumn(ScoreExpr(), alias="relevancia"),
+        SelectColumn(ScoreExpr(kind="auto"), alias="relevancia"),
     )
 
 
@@ -156,7 +156,7 @@ def test_mixed_star_rejects_unsupported_projections(sql: str) -> None:
 
 @pytest.mark.parametrize(
     "clause",
-    ["USING IVF", "USING HNSW", "USING NO_EXISTE", "USING", "USING BM25 WITH METRIC=cosine"],
+    ["USING", "USING BM25 WITH METRIC=cosine", "USING BTREE WITH METRIC=cosine"],
 )
 def test_text_parser_rejects_unsupported_using_clause(clause: str) -> None:
     with pytest.raises(QueryParseError):

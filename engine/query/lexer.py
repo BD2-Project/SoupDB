@@ -169,6 +169,15 @@ def tokenize(sql: str) -> list[Token]:
             tokens.append(Token(TokenKind.NUMBER, "-" + number, start))
             continue
 
+        if char == "$" and i + 1 < len(sql) and sql[i + 1] in _DIGITS:
+            start = i
+            end = i + 1
+            while end < len(sql) and sql[end] in _DIGITS:
+                end += 1
+            tokens.append(Token(TokenKind.PARAMETER, sql[i + 1 : end], start))
+            i = end
+            continue
+
         two = sql[i : i + 2]
         if two in _OPERATORS:
             tokens.append(Token(TokenKind.OPERATOR, two, i))

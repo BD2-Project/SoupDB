@@ -27,3 +27,19 @@ jobs:
         with:
           name: coverage
           path: coverage.xml
+
+  plugins:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - package: soupdb-inverted
+            paths: tests/unit/indexes/inverted
+          - package: soupdb-vector
+            paths: tests/unit/indexes/test_ivf.py tests/unit/indexes/test_hnsw.py
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --group multimedia
+      - run: uv run pytest ${{ matrix.paths }}
+      - run: uv run python -c "import importlib.metadata as m; print('${{ matrix.package }}', bool(m.entry_points(group='soupdb.plugins')))"

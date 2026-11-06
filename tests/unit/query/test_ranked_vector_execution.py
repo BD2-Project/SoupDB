@@ -260,8 +260,8 @@ def test_nested_similarity_score_rejected(image_case):
     assert index.calls == []
 
 
-def test_vector_score_cannot_be_used_for_text_query(image_case):
+def test_generic_score_works_for_vector_search(image_case):
     cat, _, index, _ = image_case
-    with pytest.raises(QueryExecutionError):
-        run(cat, image_sql().replace("SELECT *", "SELECT SCORE()"))
-    assert index.calls == []
+    result = run(cat, image_sql().replace("SELECT *", "SELECT SCORE()"))
+    assert result.rows
+    assert index.calls

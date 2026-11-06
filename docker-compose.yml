@@ -10,10 +10,13 @@ services:
       HASH_GLOBAL_DEPTH_MAX: ${HASH_GLOBAL_DEPTH_MAX:-16}
       MAX_CONNECTIONS: ${MAX_CONNECTIONS:-100}
       LOCK_TIMEOUT_MS: ${LOCK_TIMEOUT_MS:-5000}
+      SOUPDB_PLUGINS: ${SOUPDB_PLUGINS:-0}
+      SOUPDB_PLUGINS_DIR: /opt/soupdb/plugins
     ports:
       - "${DRIVER_PORT:-55432}:55432"
     volumes:
       - engine-data:/app/data
+      - ./dist/plugins:/opt/soupdb/plugins:ro
 
   postgres:
     # PostGIS sobre PostgreSQL 16: la comparación 2.2.4 necesita distancias en metros

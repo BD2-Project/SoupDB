@@ -19,6 +19,7 @@ from engine.query.ast import (
     MatchExpr,
     OrderByItem,
     ScoreExpr,
+    SearchExpr,
     SelectStatement,
 )
 from engine.query.operators import Distinct, Filter, Limit, Project, Sort
@@ -38,8 +39,8 @@ def _walk_nodes(value: object):
             yield from _walk_nodes(getattr(value, field.name))
 
 
-def _split_match(predicate: Expr | None) -> tuple[MatchExpr, Expr | None]:
-    """Split conjunction into its single MATCH and a residual predicate."""
+def _split_match(predicate: Expr | None) -> tuple[MatchExpr | SearchExpr, Expr | None]:
+    """Split conjunction into its single MATCH/SEARCH and a residual predicate."""
     predicates: list[Expr] = []
 
     def gather(node: Expr) -> None:
@@ -52,11 +53,15 @@ def _split_match(predicate: Expr | None) -> tuple[MatchExpr, Expr | None]:
     if predicate is None:
         raise QueryExecutionError("ranked search requires a MATCH predicate")
     gather(predicate)
-    matches = [value for value in predicates if isinstance(value, MatchExpr)]
+    matches = [value for value in predicates if isinstance(value, (MatchExpr, SearchExpr))]
     if len(matches) != 1:
         raise QueryExecutionError("ranked search requires exactly one MATCH predicate")
-    remaining = [node for node in predicates if not isinstance(node, MatchExpr)]
-    if any(isinstance(expr, MatchExpr) for node in remaining for expr in _walk_nodes(node)):
+    remaining = [node for node in predicates if not isinstance(node, (MatchExpr, SearchExpr))]
+    if any(
+        isinstance(expr, (MatchExpr, SearchExpr))
+        for node in remaining
+        for expr in _walk_nodes(node)
+    ):
         raise QueryExecutionError("MATCH inside OR/NOT is not supported")
     residual: Expr | None = None
     for node in remaining:
@@ -69,7 +74,7 @@ def _validate_scalar(expr: Expr, schema) -> None:
     for node in _walk_nodes(expr):
         if isinstance(node, ColumnRef) and node.name not in names:
             raise QueryExecutionError(f"unknown column {node.name!r}")
-        if isinstance(node, (ScoreExpr, BoundScoreExpr, MatchExpr, FunctionExpr)):
+        if isinstance(node, (ScoreExpr, BoundScoreExpr, MatchExpr, SearchExpr, FunctionExpr)):
             raise QueryExecutionError(
                 "SCORE/MATCH/aggregates cannot be nested in a residual predicate"
             )
@@ -90,7 +95,8 @@ def _order_keys(
         if isinstance(expr, ScoreExpr):
             expr = bind_score(expr, position=position, kind=kind)
         elif any(
-            isinstance(node, (ScoreExpr, BoundScoreExpr, MatchExpr)) for node in _walk_nodes(expr)
+            isinstance(node, (ScoreExpr, BoundScoreExpr, MatchExpr, SearchExpr))
+            for node in _walk_nodes(expr)
         ):
             raise QueryExecutionError("nested SCORE/MATCH ordering is not supported")
         else:
@@ -103,8 +109,22 @@ def _order_keys(
 
 def plan_text_search(statement: SelectStatement, catalog: Any) -> Any:
     """Build a correct ranked plan or fail explicitly on missing capabilities."""
-    if statement.search is None or statement.search.strategy not in ("BM25", "TF_IDF"):
+    options = statement.search
+    if options is None:
         raise QueryExecutionError("MATCH requires USING BM25 or USING TF_IDF")
+    strategy = options.strategy
+    if strategy in ("BM25", "TF_IDF"):
+        algorithm = "INVERTED"
+        method = strategy.lower()
+    else:
+        lookup = getattr(catalog, "plugin_capabilities", None)
+        capabilities = lookup(strategy) if callable(lookup) else None
+        if capabilities is not None and getattr(capabilities, "query_kind", "text") != "text":
+            raise QueryExecutionError(f"{strategy} is not a text search plugin")
+        algorithm = strategy
+        method = str(options.option("method", "tf_idf")).lower()
+        if method not in ("tf_idf", "bm25"):
+            raise QueryExecutionError("text search method must be 'tf_idf' or 'bm25'")
     if statement.group_by or statement.having is not None or statement.joins:
         raise QueryExecutionError("MATCH does not yet support GROUP BY, HAVING or JOIN")
     if any(
@@ -124,12 +144,12 @@ def plan_text_search(statement: SelectStatement, catalog: Any) -> Any:
     candidates = {
         name: binding
         for name, binding in catalog.ranked_indexes_for(statement.table, match.column.name).items()
-        if binding.algorithm == "INVERTED"
+        if binding.algorithm == algorithm
     }
     if not candidates:
-        raise QueryExecutionError(f"no INVERTED index for column {match.column.name!r}")
+        raise QueryExecutionError(f"no {algorithm} index for column {match.column.name!r}")
     if len(candidates) != 1:
-        raise QueryExecutionError(f"ambiguous INVERTED indexes for column {match.column.name!r}")
+        raise QueryExecutionError(f"ambiguous {algorithm} indexes for column {match.column.name!r}")
     binding = next(iter(candidates.values()))
     disk = getattr(catalog, "disk_manager", None)
 
@@ -157,7 +177,7 @@ def plan_text_search(statement: SelectStatement, catalog: Any) -> Any:
         match.query.value,
         schema,
         request=policy.count,
-        method=statement.search.strategy.lower(),
+        method=method,
         disk_manager=disk,
         candidate_policy=policy.policy,
     )

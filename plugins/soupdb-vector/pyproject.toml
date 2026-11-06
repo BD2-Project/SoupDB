@@ -1,0 +1,26 @@
+[project]
+name = "soupdb-vector"
+version = "0.1.0"
+description = "SoupDB vector plugin: persistent IVF/HNSW indices and SIFT/MFCC features."
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "soupdb",
+  "librosa>=0.11.0",
+  "numpy>=2.4.6",
+  "opencv-python-headless>=5.0.0.93",
+  "scikit-learn>=1.9.1",
+  "soundfile>=0.14.0",
+  "threadpoolctl>=3.7.0",
+]
+
+[project.entry-points."soupdb.plugins"]
+ivf = "soupdb_vector.plugin:IVFPlugin"
+hnsw = "soupdb_vector.plugin:HNSWPlugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["soupdb_vector"]

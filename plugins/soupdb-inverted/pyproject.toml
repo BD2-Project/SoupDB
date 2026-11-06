@@ -1,0 +1,17 @@
+[project]
+name = "soupdb-inverted"
+version = "0.1.0"
+description = "SoupDB full-text plugin: persistent SPIMI index with TF-IDF/BM25."
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["soupdb"]
+
+[project.entry-points."soupdb.plugins"]
+inverted = "soupdb_inverted.plugin:InvertedPlugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["soupdb_inverted"]
