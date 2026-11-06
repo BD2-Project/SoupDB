@@ -23,6 +23,8 @@ Convención formalizada el 2026-11-02 tras la auditoría de ramas, tags y milest
 | `v0.2.0` | 2026-10-04 | **Entrega Parcial** (extensión espacial) | #104 | R-Tree persistente, consultas espaciales, gestor ejecutable, plan EXPLAIN |
 | `v0.3.0` | 2026-10-25 | **Avance 3** (índices vectoriales) | #136 | RankedIndex, IVF/HNSW persistentes, multimedia SIFT/MFCC, benches con vectores reales |
 | `v0.4.0` | 2026-11-02 | **SQL de texto y multimedia** | #147 / #149 | MATCH/SIMILAR_TO, SCORE/SIMILARITY_SCORE, índices rankeados transaccionales y revertibles, benchmarks consolidados |
+| `v0.5.0` | 2026-11-06 | **Índice invertido + DML en índices** | #152 | SPIMI/TF-IDF/BM25 reales, mantenimiento por INSERT/DELETE con tombstones, catálogo de plugins y autocarga |
+| `v0.6.0` | 2026-11-06 | **Plugins y protocolo v2** | #152 | `SEARCH(...) USING <plugin>`, `SCORE()` único, DDL genérico, protocolo v2 con tipos por nombre y prepared statements, Docker con instalación en caliente |
 
 Histórico de rescates:
 
@@ -30,8 +32,7 @@ Histórico de rescates:
 
 ## Próxima versión
 
-- **v0.5.0**: índice invertido completo (tokenizador bilingüe + SPIMI, TF-IDF y BM25, postings y diccionario persistentes) y mantenimiento de índices por DML.
-- **v0.6.0**: arquitectura de plugins (`engine/plugins`), catálogo `SysPlugins`/`SysTypes`/`SysPluginIndexes`, SQL uniforme `SEARCH(...) USING <plugin>`, protocolo v2 con tipos por nombre y prepared statements, empaquetado `soupdb-inverted`/`soupdb-vector` y Docker con instalación en caliente. Ver [plugins.md](plugins.md) y [sql_plugins.md](sql_plugins.md).
+- **v0.7.0**: cierre de *Avance 3* — benchmarks de texto contra PostgreSQL GIN (10k/100k) y validación independiente de recall/scores con datos reales (issues #125–#130).
 
 ## Cómo publicar una entrega
 
