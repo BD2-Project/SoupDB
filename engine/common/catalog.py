@@ -268,6 +268,68 @@ class Catalog:
         validator = getattr(plugin, "validate_options", None)
         return validator(options) if callable(validator) else dict(options)
 
+    def extension_configured(self, name: str) -> bool:
+        """Whether ``SysPlugins`` has an enabled row for this plugin."""
+        normalized = name.upper()
+        return any(
+            str(row[0]).upper() == normalized and row[3]
+            for row in self._read_sys_rows("SysPlugins", SYS_PLUGINS_SCHEMA)
+        )
+
+    def create_extension(self, name: str, options: dict[str, object]) -> None:
+        """Activate an installed plugin and persist its configuration."""
+        registry = self._plugin_registry or getattr(self._ranked_factory, "registry", None)
+        if registry is None:
+            raise QueryExecutionError("plugin registry is not available")
+        normalized = name.upper()
+        try:
+            plugin = registry.plugin(normalized)
+        except PluginNotFoundError as exc:
+            raise QueryExecutionError(f"plugin {normalized!r} is not installed") from exc
+        validator = getattr(plugin, "validate_config", None)
+        validated = validator(dict(options)) if callable(validator) else dict(options)
+        config = {**plugin.default_config(), **validated}
+        registry.register(plugin, config, replace=True, source="sql")
+        row = (
+            str(plugin.name).upper(),
+            str(getattr(plugin, "version", "0.0.0")),
+            int(getattr(plugin, "api_version", 1)),
+            True,
+            json_dumps(config, sort_keys=True, default=str),
+        )
+        self._upsert_sys_row(
+            "SysPlugins", SYS_PLUGINS_SCHEMA, row, key=lambda item: str(item[0]).upper() == row[0]
+        )
+        self._plugin_registry = registry
+        self._ranked_factory = DelegatingRankedFactory.from_registry(registry)
+
+    def drop_extension(self, name: str) -> None:
+        """Deactivate a plugin, refusing while indexes still depend on it."""
+        normalized = name.upper()
+        dependent = [
+            row[0]
+            for row in self._read_sys_rows("SysPluginIndexes", SYS_PLUGIN_INDEXES_SCHEMA)
+            if str(row[4] or row[3]).upper() == normalized
+        ]
+        if dependent:
+            raise QueryExecutionError(
+                f"cannot drop extension {normalized!r}: indexes depend on it: {sorted(dependent)}"
+            )
+        self._delete_sys_rows(
+            "SysPlugins", SYS_PLUGINS_SCHEMA, lambda row: str(row[0]).upper() == normalized
+        )
+        registry = self._plugin_registry or getattr(self._ranked_factory, "registry", None)
+        if registry is None:
+            return
+        try:
+            registry.unregister(normalized)
+        except PluginNotFoundError:
+            pass
+        self._plugin_registry = registry
+        self._ranked_factory = (
+            DelegatingRankedFactory.from_registry(registry) if registry.available() else None
+        )
+
     def create_ranked_index(self, metadata: RankedMetadata) -> None:
         """Build first, persist metadata after provider succeeds."""
         if self.is_system_table(metadata.table):

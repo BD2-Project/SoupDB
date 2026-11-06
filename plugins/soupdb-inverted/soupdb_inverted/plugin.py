@@ -58,6 +58,25 @@ class InvertedPlugin:
     def configure(self, config: Mapping[str, Any]) -> None:
         self._config = dict(config)
 
+    def validate_config(self, config: Mapping[str, Any]) -> dict[str, Any]:
+        allowed = {"storage_root", "memory_limit_bytes", "page_size", "fan_in"}
+        unknown = set(config) - allowed
+        if unknown:
+            raise QueryExecutionError(f"unsupported INVERTED extension options: {sorted(unknown)}")
+        result: dict[str, Any] = {}
+        if "storage_root" in config:
+            value = config["storage_root"]
+            if not isinstance(value, str) or not value.strip():
+                raise QueryExecutionError("storage_root must be a non-empty string")
+            result["storage_root"] = value
+        for key in ("memory_limit_bytes", "page_size", "fan_in"):
+            if key in config:
+                value = config[key]
+                if type(value) is not int or value <= 0:
+                    raise QueryExecutionError(f"{key} must be a positive integer")
+                result[key] = value
+        return result
+
     def validate_options(self, options: Mapping[str, Any]) -> dict[str, Any]:
         unknown = set(options) - {"method"}
         if unknown:

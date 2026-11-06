@@ -19,10 +19,12 @@ from engine.query.ast import (
     ColumnRef,
     ColumnType,
     CompareExpr,
+    CreateExtensionStatement,
     CreateIndexStatement,
     CreateTableStatement,
     DeleteStatement,
     DistanceExpr,
+    DropExtensionStatement,
     DropIndexStatement,
     DropTableStatement,
     EndTransactionStatement,
@@ -163,10 +165,14 @@ class _Parser:
         if self._match_keyword("CREATE"):
             if self._match_keyword("INDEX"):
                 return self._parse_create_index()
+            if self._match_keyword("EXTENSION") or self._match_keyword("PLUGIN"):
+                return self._parse_create_extension()
             return self._parse_create_table()
         if self._match_keyword("DROP"):
             if self._match_keyword("INDEX"):
                 return self._parse_drop_index()
+            if self._match_keyword("EXTENSION") or self._match_keyword("PLUGIN"):
+                return self._parse_drop_extension()
             return self._parse_drop_table()
         raise QueryParseError(f"unsupported statement at position {self._peek().position}")
 
@@ -409,6 +415,30 @@ class _Parser:
         index_name = self._expect_kind(TokenKind.IDENTIFIER).value
         self._error_if_not_eof()
         return DropIndexStatement(index_name=index_name)
+
+    def _parse_create_extension(self) -> CreateExtensionStatement:
+        name = self._expect_ident_or_keyword()
+        options: dict[str, object] = {}
+        if self._match_word("WITH"):
+            self._expect_kind(TokenKind.LPAREN)
+            while True:
+                key = self._expect_ident_or_keyword().lower()
+                if key in options:
+                    raise QueryParseError(f"repeated extension option {key!r}")
+                eq = self._expect_kind(TokenKind.OPERATOR)
+                if eq.value != "=":
+                    raise QueryParseError("extension options require '='")
+                options[key] = self._parse_option_value()
+                if not self._match_comma():
+                    break
+            self._expect_kind(TokenKind.RPAREN)
+        self._error_if_not_eof()
+        return CreateExtensionStatement(name=name, options=tuple(options.items()))
+
+    def _parse_drop_extension(self) -> DropExtensionStatement:
+        name = self._expect_ident_or_keyword()
+        self._error_if_not_eof()
+        return DropExtensionStatement(name=name)
 
     def _parse_column_def(self) -> ColumnDef:
         name = self._expect_kind(TokenKind.IDENTIFIER).value
