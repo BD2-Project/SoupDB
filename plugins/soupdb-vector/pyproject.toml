@@ -1,6 +1,6 @@
 [project]
 name = "soupdb-vector"
-version = "0.1.0"
+version = "0.1.1"
 description = "SoupDB vector plugin: persistent IVF/HNSW indices and SIFT/MFCC features."
 requires-python = ">=3.11"
 license = "MIT"

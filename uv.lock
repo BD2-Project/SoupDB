@@ -1783,7 +1783,7 @@ requires-dist = [{ name = "soupdb", editable = "." }]
 
 [[package]]
 name = "soupdb-vector"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "plugins/soupdb-vector" }
 dependencies = [
     { name = "librosa", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
