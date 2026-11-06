@@ -56,7 +56,7 @@ def bind_score(expr: Expr, *, position: int, kind: str) -> Expr:
         raise QueryExecutionError(f"unsupported score kind {kind!r}")
 
     if isinstance(expr, ScoreExpr):
-        if expr.kind != kind:
+        if expr.kind not in ("auto", kind):
             raise QueryExecutionError(
                 f"{expr.kind.upper()} score cannot be used in a {kind} search"
             )

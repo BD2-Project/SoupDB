@@ -57,7 +57,10 @@ def execute(plan: Plan, catalog: Any) -> ResultSet:
             )
         return ResultSet(columns=())
     if isinstance(statement, CreateIndexStatement):
-        if statement.index_type in ("INVERTED", "IVF", "HNSW"):
+        capabilities_fn = getattr(catalog, "plugin_capabilities", None)
+        if statement.index_type in ("INVERTED", "IVF", "HNSW") or (
+            callable(capabilities_fn) and capabilities_fn(statement.index_type) is not None
+        ):
             catalog.create_ranked_index(
                 RankedMetadata(
                     statement.index_name,

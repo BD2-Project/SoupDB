@@ -50,6 +50,7 @@ class _VectorPluginBase:
             approximate=True,
             mutable=False,
             reversible=False,
+            query_kind="vector",
             operators=frozenset({"search"}),
             index_options=frozenset({"metric", "dimension", "profile"}),
         )

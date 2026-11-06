@@ -7,6 +7,8 @@ from engine.query.ast import (
     BoundScoreExpr,
     Expr,
     FunctionExpr,
+    Literal,
+    SearchExpr,
     SelectStatement,
     SimilarToExpr,
 )
@@ -16,10 +18,10 @@ from engine.query.ranked_planning import _order_keys, _validate_scalar, _walk_no
 from engine.query.vector_operators import HNSWSearch, IVFSearch
 
 
-def _get_similarity(predicate: Expr | None) -> SimilarToExpr:
-    if not isinstance(predicate, SimilarToExpr):
+def _get_similarity(predicate: Expr | None) -> SimilarToExpr | SearchExpr:
+    if not isinstance(predicate, (SimilarToExpr, SearchExpr)):
         if predicate is not None and any(
-            isinstance(node, SimilarToExpr) for node in _walk_nodes(predicate)
+            isinstance(node, (SimilarToExpr, SearchExpr)) for node in _walk_nodes(predicate)
         ):
             raise QueryExecutionError("filtered/combined SIMILAR_TO is not supported")
         raise QueryExecutionError("vector search requires exactly one SIMILAR_TO predicate")
@@ -29,8 +31,14 @@ def _get_similarity(predicate: Expr | None) -> SimilarToExpr:
 def plan_vector_search(statement: SelectStatement, catalog: Any):
     """Return a safe ANN top-k over the k *global* matches; no hidden filters."""
     options = statement.search
-    if options is None or options.strategy not in ("IVF", "HNSW"):
+    if options is None:
         raise QueryExecutionError("SIMILAR_TO requires USING IVF or HNSW")
+    strategy = options.strategy
+    if strategy not in ("IVF", "HNSW"):
+        lookup = getattr(catalog, "plugin_capabilities", None)
+        capabilities = lookup(strategy) if callable(lookup) else None
+        if capabilities is None or getattr(capabilities, "query_kind", "text") != "vector":
+            raise QueryExecutionError("SIMILAR_TO requires USING IVF or HNSW")
     if statement.group_by or statement.having is not None or statement.joins:
         raise QueryExecutionError("SIMILAR_TO does not support GROUP BY, HAVING or JOIN")
     if statement.distinct:
@@ -42,7 +50,18 @@ def plan_vector_search(statement: SelectStatement, catalog: Any):
     ):
         raise QueryExecutionError("aggregates are not supported with SIMILAR_TO")
     sim = _get_similarity(statement.where)
-    k = sim.k.value
+    if isinstance(sim, SimilarToExpr):
+        k = sim.k.value
+        source = sim.source.value
+    else:
+        raw_k = options.option("k", 10)
+        try:
+            k = int(raw_k)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            raise QueryExecutionError("vector search k must be an integer") from None
+        if not isinstance(sim.query, Literal) or not isinstance(sim.query.value, str):
+            raise QueryExecutionError("vector search requires a string reference")
+        source = sim.query.value
     if type(k) is not int or k < 0:
         raise QueryExecutionError("SIMILAR_TO k must be a non-negative integer")
     schema = catalog.schema(statement.table)
@@ -50,11 +69,11 @@ def plan_vector_search(statement: SelectStatement, catalog: Any):
     matches = [
         binding
         for binding in catalog.ranked_indexes_for(statement.table).values()
-        if binding.algorithm == options.strategy and binding.metric == metric
+        if binding.algorithm == strategy and binding.metric == metric
     ]
     if not matches:
         raise QueryExecutionError(
-            f"no {options.strategy} index with metric {metric!r} for {statement.table!r}"
+            f"no {strategy} index with metric {metric!r} for {statement.table!r}"
         )
     if len(matches) != 1:
         names = ", ".join(sorted(binding.name for binding in matches))
@@ -70,12 +89,12 @@ def plan_vector_search(statement: SelectStatement, catalog: Any):
             _validate_scalar(selection.expr, schema)
     order_by, _ = _order_keys(statement, schema, kind="vector")
 
-    cls = IVFSearch if options.strategy == "IVF" else HNSWSearch
+    cls = IVFSearch if binding.algorithm == "IVF" else HNSWSearch
     disk = getattr(catalog, "disk_manager", None)
     root = cls(
         binding,
         catalog.file_org(statement.table),
-        sim.source.value,
+        source,
         schema,
         request=k,
         vectorizer=vectorizer,

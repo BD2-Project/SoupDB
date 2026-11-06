@@ -17,7 +17,16 @@ def test_vector_ddl_metadata(kind):
         f"CREATE INDEX idx ON assets (path) USING {kind} "
         "WITH METRIC=cosine, DIMENSION=128, PROFILE='image-v1'"
     )
-    assert stmt == CreateIndexStatement("idx", "assets", "path", kind, "cosine", 128, "image-v1")
+    assert stmt == CreateIndexStatement(
+        "idx",
+        "assets",
+        "path",
+        kind,
+        "cosine",
+        128,
+        "image-v1",
+        (("metric", "cosine"), ("dimension", 128), ("profile", "image-v1")),
+    )
 
 
 def test_option_order_is_irrelevant():
@@ -67,13 +76,20 @@ def test_legacy_ddl_is_unchanged():
             "WITH METRIC=cosine, METRIC=cosine, DIMENSION=3, PROFILE='x'"
         ),
         "CREATE INDEX idx ON docs (texto) USING INVERTED WITH METRIC=cosine",
-        "CREATE INDEX idx ON docs (texto) USING WHATEVER",
         "CREATE INDEX idx ON docs (texto) TYPE HASH USING INVERTED",
     ],
 )
 def test_invalid_ranked_ddl_rejected(sql):
     with pytest.raises(QueryParseError):
         parse(sql)
+
+
+def test_unknown_plugin_is_rejected_at_plan_time():
+    catalog = FakeCatalog()
+    catalog.create_table("docs", (ColumnDef("texto", ColumnType.TEXT),))
+    stmt = parse("CREATE INDEX idx ON docs (texto) USING WHATEVER")
+    with pytest.raises(QueryExecutionError, match="unsupported index type"):
+        plan(stmt, catalog)
 
 
 def test_ddl_has_explicit_guard_before_factories():

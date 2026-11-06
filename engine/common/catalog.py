@@ -246,6 +246,28 @@ class Catalog:
     def ranked_factory(self) -> RankedFactory | None:
         return self._ranked_factory
 
+    def plugin_capabilities(self, name: str):
+        """Declared capabilities of a registered plugin, or None if unknown."""
+        registry = self._plugin_registry or getattr(self._ranked_factory, "registry", None)
+        if registry is None:
+            return None
+        try:
+            return registry.plugin(name).capabilities()
+        except PluginNotFoundError:
+            return None
+
+    def validate_plugin_options(self, name: str, options: dict[str, object]) -> dict[str, object]:
+        """Validate plugin-specific DDL options through the plugin contract."""
+        registry = self._plugin_registry or getattr(self._ranked_factory, "registry", None)
+        if registry is None:
+            return dict(options)
+        try:
+            plugin = registry.plugin(name)
+        except PluginNotFoundError as exc:
+            raise QueryExecutionError(f"plugin {name!r} is not installed") from exc
+        validator = getattr(plugin, "validate_options", None)
+        return validator(options) if callable(validator) else dict(options)
+
     def create_ranked_index(self, metadata: RankedMetadata) -> None:
         """Build first, persist metadata after provider succeeds."""
         if self.is_system_table(metadata.table):

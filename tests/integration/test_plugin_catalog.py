@@ -60,6 +60,29 @@ def test_plugin_config_is_persisted_and_reloaded_without_factory(tmp_path):
         reopened.close()
 
 
+def test_plugin_search_syntax_is_uniform(tmp_path):
+    db_path = tmp_path / "db"
+    catalog = Catalog(db_path, ranked_factory=_inverted_factory(tmp_path))
+    try:
+        execute_sql("CREATE TABLE docs (id INT, contenido TEXT)", catalog)
+        execute_sql("INSERT INTO docs VALUES (1, 'alpha beta')", catalog)
+        execute_sql("INSERT INTO docs VALUES (2, 'gamma delta')", catalog)
+        execute_sql(
+            "CREATE INDEX idx_docs ON docs (contenido) USING INVERTED WITH (method = 'bm25')",
+            catalog,
+        )
+        result = execute_sql(
+            "SELECT id, SCORE() AS relevancia FROM docs "
+            "WHERE SEARCH(contenido, 'alpha') USING INVERTED WITH (method = 'bm25') "
+            "LIMIT 5",
+            catalog,
+        )
+        assert result.rows[0][0] == 1
+        assert result.rows[0][1] > 0
+    finally:
+        catalog.close()
+
+
 def test_metadata_without_stored_plugin_config_stays_metadata_only(tmp_path):
     db_path = tmp_path / "db"
     catalog = Catalog(db_path)

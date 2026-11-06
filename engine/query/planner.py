@@ -61,6 +61,7 @@ from engine.query.ast import (
     PointExpr,
     PolygonExpr,
     ScoreExpr,
+    SearchExpr,
     SelectColumn,
     SelectStatement,
     SimilarToExpr,
@@ -139,7 +140,9 @@ def _contains_unplanned_ranked_expr(value: object) -> bool:
     The old planner must not silently treat MATCH() as a regular predicate or
     expose SCORE() without a ranked source. The C07 planner replaces this guard.
     """
-    if isinstance(value, (MatchExpr, SimilarToExpr, ScoreExpr, BoundScoreExpr, StarExpr)):
+    if isinstance(
+        value, (MatchExpr, SimilarToExpr, SearchExpr, ScoreExpr, BoundScoreExpr, StarExpr)
+    ):
         return True
     if isinstance(value, (tuple, list)):
         return any(_contains_unplanned_ranked_expr(item) for item in value)
@@ -150,12 +153,29 @@ def _contains_unplanned_ranked_expr(value: object) -> bool:
     return False
 
 
+def _is_vector_search(statement: SelectStatement, catalog: Any) -> bool:
+    """Route a search to the vector planner based on the plugin capabilities."""
+    options = statement.search
+    if options is None:
+        return False
+    if options.strategy in ("IVF", "HNSW"):
+        return True
+    if options.strategy in ("TF_IDF", "BM25"):
+        return False
+    lookup = getattr(catalog, "plugin_capabilities", None)
+    if callable(lookup):
+        capabilities = lookup(options.strategy)
+        if capabilities is not None:
+            return getattr(capabilities, "query_kind", "text") == "vector"
+    return False
+
+
 def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
     if statement.search is not None or _contains_unplanned_ranked_expr(statement):
         # Only a catalog exposing ranked bindings may enter the specialized path.
         # Unsupported syntax remains fail-closed, including old C05 guard tests.
         if callable(getattr(catalog, "ranked_indexes_for", None)):
-            if statement.search is not None and statement.search.strategy in ("IVF", "HNSW"):
+            if _is_vector_search(statement, catalog):
                 from engine.query.ranked_vector_planning import plan_vector_search
 
                 root = plan_vector_search(statement, catalog)
@@ -285,7 +305,17 @@ def _plan_create_index(statement: CreateIndexStatement, catalog: Any) -> Plan:
     is_system = getattr(catalog, "is_system_table", None)
     if callable(is_system) and is_system(statement.table):
         raise QueryExecutionError(f"system table {statement.table!r} is read-only")
-    if statement.index_type in ("INVERTED", "IVF", "HNSW"):
+    capabilities_fn = getattr(catalog, "plugin_capabilities", None)
+    plugin_capabilities = (
+        capabilities_fn(statement.index_type) if callable(capabilities_fn) else None
+    )
+    is_plugin = statement.index_type in ("INVERTED", "IVF", "HNSW") or (
+        plugin_capabilities is not None
+    )
+    if is_plugin:
+        validate_options = getattr(catalog, "validate_plugin_options", None)
+        if callable(validate_options):
+            validate_options(statement.index_type, dict(statement.options))
         schema = catalog.schema(statement.table)
         meta = RankedMetadata(
             statement.index_name,

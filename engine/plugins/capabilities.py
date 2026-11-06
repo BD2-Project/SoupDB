@@ -22,5 +22,6 @@ class PluginCapabilities:
     approximate: bool = False
     mutable: bool = False
     reversible: bool = False
+    query_kind: str = "text"
     operators: frozenset[str] = field(default_factory=lambda: frozenset({"search"}))
     index_options: frozenset[str] = field(default_factory=frozenset)

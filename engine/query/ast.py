@@ -120,6 +120,19 @@ class SimilarToExpr(Expr):
 
 
 @dataclass(frozen=True)
+class SearchExpr(Expr):
+    """Generic plugin search predicate ``SEARCH(column, query)``.
+
+    The plugin and its options come from the statement-level
+    ``USING <plugin> WITH (...)`` clause, so the same predicate works for any
+    installed search plugin.
+    """
+
+    column: ColumnRef
+    query: Expr
+
+
+@dataclass(frozen=True)
 class ScoreExpr(Expr):
     """Score of the ranked hit; bound to a temporary slot by the planner."""
 
@@ -227,10 +240,21 @@ class LimitClause:
 
 @dataclass(frozen=True)
 class SearchOptions:
-    """Algorithm (and optional vector metric) selected by USING."""
+    """Algorithm (and optional vector metric) selected by USING.
+
+    ``options`` carries plugin-specific ``WITH (...)`` values as immutable
+    key/value pairs, for example ``method='bm25'`` or ``k=10``.
+    """
 
     strategy: str
     metric: str | None = None
+    options: tuple[tuple[str, object], ...] = ()
+
+    def option(self, key: str, default: object = None) -> object:
+        for name, value in self.options:
+            if name == key:
+                return value
+        return default
 
 
 @dataclass(frozen=True)
@@ -337,6 +361,8 @@ class CreateIndexStatement(Statement):
     metric: str | None = None
     dimension: int | None = None
     profile_id: str | None = None
+    # Generic plugin options from WITH (key = value, ...).
+    options: tuple[tuple[str, object], ...] = ()
 
 
 @dataclass(frozen=True)

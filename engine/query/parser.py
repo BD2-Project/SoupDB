@@ -45,6 +45,7 @@ from engine.query.ast import (
     PointExpr,
     PolygonExpr,
     ScoreExpr,
+    SearchExpr,
     SearchOptions,
     SelectColumn,
     SelectStatement,
@@ -309,40 +310,64 @@ class _Parser:
         metric = None
         dimension = None
         profile_id = None
+        options: dict[str, object] = {}
         if self._match_keyword("TYPE"):
             index_type = self._expect_ident_or_keyword()
             if self._match_word("USING"):
                 raise QueryParseError("CREATE INDEX cannot combine TYPE and USING")
         elif self._match_word("USING"):
             index_type = self._expect_ident_or_keyword()
-            if index_type not in ("INVERTED", "IVF", "HNSW"):
-                raise QueryParseError(f"unsupported specialized index {index_type!r}")
             if self._match_word("WITH"):
-                seen: set[str] = set()
-                while True:
-                    key = self._expect_ident_or_keyword()
-                    if key not in ("METRIC", "DIMENSION", "PROFILE") or key in seen:
-                        raise QueryParseError(f"unsupported or repeated index option {key!r}")
-                    seen.add(key)
-                    eq = self._expect_kind(TokenKind.OPERATOR)
-                    if eq.value != "=":
-                        raise QueryParseError("index options require '='")
-                    if key == "METRIC":
-                        metric = self._expect_ident_or_keyword().lower()
-                        if metric not in ("euclidean", "cosine", "inner_product"):
-                            raise QueryParseError(f"unsupported metric {metric!r}")
-                    elif key == "DIMENSION":
-                        token = self._expect_kind(TokenKind.NUMBER)
-                        if not token.value.isdecimal() or int(token.value) <= 0:
-                            raise QueryParseError("DIMENSION must be a positive integer")
-                        dimension = int(token.value)
-                    else:
-                        token = self._expect_kind(TokenKind.STRING)
-                        if not token.value.strip():
-                            raise QueryParseError("PROFILE must be a non-empty string")
-                        profile_id = token.value
-                    if not self._match_comma():
-                        break
+                if self._match_kind(TokenKind.LPAREN):
+                    while True:
+                        key = self._expect_ident_or_keyword().lower()
+                        if key in options:
+                            raise QueryParseError(f"repeated index option {key!r}")
+                        eq = self._expect_kind(TokenKind.OPERATOR)
+                        if eq.value != "=":
+                            raise QueryParseError("index options require '='")
+                        options[key] = self._parse_option_value()
+                        if not self._match_comma():
+                            break
+                    self._expect_kind(TokenKind.RPAREN)
+                else:
+                    # Legacy option list: WITH METRIC=..., DIMENSION=..., PROFILE=...
+                    while True:
+                        key = self._expect_ident_or_keyword()
+                        if key not in ("METRIC", "DIMENSION", "PROFILE"):
+                            raise QueryParseError(f"unsupported index option {key!r}")
+                        lowered = key.lower()
+                        if lowered in options:
+                            raise QueryParseError(f"repeated index option {key!r}")
+                        eq = self._expect_kind(TokenKind.OPERATOR)
+                        if eq.value != "=":
+                            raise QueryParseError("index options require '='")
+                        if key == "METRIC":
+                            value = self._expect_ident_or_keyword().lower()
+                            if value not in ("cosine", "euclidean", "inner_product"):
+                                raise QueryParseError(f"unsupported metric {value!r}")
+                            options["metric"] = value
+                        elif key == "DIMENSION":
+                            token = self._expect_kind(TokenKind.NUMBER)
+                            if not token.value.isdecimal() or int(token.value) <= 0:
+                                raise QueryParseError("DIMENSION must be a positive integer")
+                            options["dimension"] = int(token.value)
+                        else:
+                            token = self._expect_kind(TokenKind.STRING)
+                            if not token.value.strip():
+                                raise QueryParseError("PROFILE must be a non-empty string")
+                            options["profile"] = token.value
+                        if not self._match_comma():
+                            break
+            raw_metric = options.get("metric")
+            if isinstance(raw_metric, str):
+                metric = raw_metric
+            raw_dimension = options.get("dimension")
+            if type(raw_dimension) is int:
+                dimension = raw_dimension
+            raw_profile = options.get("profile")
+            if isinstance(raw_profile, str):
+                profile_id = raw_profile
             if index_type == "INVERTED" and any(
                 value is not None for value in (metric, dimension, profile_id)
             ):
@@ -351,6 +376,16 @@ class _Parser:
                 metric is None or dimension is None or profile_id is None
             ):
                 raise QueryParseError("IVF/HNSW require METRIC, DIMENSION and PROFILE")
+            if index_type in ("IVF", "HNSW") and metric not in (
+                "cosine",
+                "euclidean",
+                "inner_product",
+            ):
+                raise QueryParseError(f"unsupported metric {metric!r}")
+            if index_type.upper() in ("BTREE", "HASH", "RTREE"):
+                raise QueryParseError(
+                    f"unsupported specialized index {index_type!r}; use TYPE for classic indexes"
+                )
         self._error_if_not_eof()
         return CreateIndexStatement(
             index_name=index_name,
@@ -360,6 +395,7 @@ class _Parser:
             metric=metric,
             dimension=dimension,
             profile_id=profile_id,
+            options=tuple(options.items()),
         )
 
     def _parse_drop_table(self) -> DropTableStatement:
@@ -430,25 +466,48 @@ class _Parser:
         if self._match_word("USING"):
             token = self._peek()
             strategy = self._expect_ident_or_keyword()
-            if strategy not in ("TF_IDF", "BM25", "IVF", "HNSW"):
-                raise QueryParseError(
-                    f"unsupported search strategy {strategy!r} at position {token.position}"
-                )
             metric = None
+            options: dict[str, object] = {}
             if self._match_word("WITH"):
-                if not self._match_word("METRIC"):
-                    raise QueryParseError("WITH requires METRIC=metric")
-                eq = self._expect_kind(TokenKind.OPERATOR)
-                if eq.value != "=":
-                    raise QueryParseError("METRIC requires '='")
-                metric = self._expect_ident_or_keyword().lower()
-                if metric not in ("cosine", "euclidean", "inner_product"):
-                    raise QueryParseError(f"unsupported vector metric {metric!r}")
-                if strategy not in ("IVF", "HNSW"):
+                if self._match_kind(TokenKind.LPAREN):
+                    while True:
+                        key = self._expect_ident_or_keyword().lower()
+                        if key in options:
+                            raise QueryParseError(f"repeated search option {key!r}")
+                        eq = self._expect_kind(TokenKind.OPERATOR)
+                        if eq.value != "=":
+                            raise QueryParseError("search options require '='")
+                        options[key] = self._parse_option_value()
+                        if not self._match_comma():
+                            break
+                    self._expect_kind(TokenKind.RPAREN)
+                else:
+                    # Legacy form kept for compatibility: WITH METRIC=cosine.
+                    if not self._match_word("METRIC"):
+                        raise QueryParseError(
+                            "WITH requires METRIC=metric or a parenthesized option list"
+                        )
+                    eq = self._expect_kind(TokenKind.OPERATOR)
+                    if eq.value != "=":
+                        raise QueryParseError("METRIC requires '='")
+                    metric = self._expect_ident_or_keyword().lower()
+                    options["metric"] = metric
+            option_metric = options.get("metric")
+            if metric is None and isinstance(option_metric, str):
+                metric = option_metric
+            if strategy in ("TF_IDF", "BM25"):
+                if metric is not None:
                     raise QueryParseError("WITH METRIC is only valid for vector search")
             elif strategy in ("IVF", "HNSW"):
-                raise QueryParseError("vector search requires WITH METRIC=metric")
-            search = SearchOptions(strategy=strategy, metric=metric)
+                if metric is None:
+                    raise QueryParseError("vector search requires WITH METRIC=metric")
+                if metric not in ("cosine", "euclidean", "inner_product"):
+                    raise QueryParseError(f"unsupported vector metric {metric!r}")
+            elif strategy.upper() in ("BTREE", "HASH", "RTREE"):
+                raise QueryParseError(f"unsupported search strategy {strategy!r}")
+            elif not strategy.strip():
+                raise QueryParseError(f"unsupported search strategy at position {token.position}")
+            search = SearchOptions(strategy=strategy, metric=metric, options=tuple(options.items()))
         group_by: tuple[Expr, ...] = ()
         if self._match_keyword("GROUP"):
             self._expect_keyword("BY")
@@ -584,7 +643,16 @@ class _Parser:
             return True
         if isinstance(
             expr,
-            (CompareExpr, BetweenExpr, InExpr, LikeExpr, IsNullExpr, IntersectsExpr, MatchExpr),
+            (
+                CompareExpr,
+                BetweenExpr,
+                InExpr,
+                LikeExpr,
+                IsNullExpr,
+                IntersectsExpr,
+                MatchExpr,
+                SearchExpr,
+            ),
         ):
             return True
         if isinstance(expr, Literal) and isinstance(expr.value, bool):
@@ -735,11 +803,36 @@ class _Parser:
             raise QueryParseError(f"MATCH requires a string literal at position {token.position}")
         return MatchExpr(column=column, query=query)
 
+    def _parse_search_expr(self) -> SearchExpr:
+        token = self._advance()
+        self._expect_kind(TokenKind.LPAREN)
+        column = self._parse_expression()
+        self._expect_kind(TokenKind.COMMA)
+        query = self._parse_expression()
+        self._expect_kind(TokenKind.RPAREN)
+        if not isinstance(column, ColumnRef):
+            raise QueryParseError(
+                f"SEARCH requires a column reference at position {token.position}"
+            )
+        if not isinstance(query, Literal) or not isinstance(query.value, str):
+            raise QueryParseError(f"SEARCH requires a string literal at position {token.position}")
+        return SearchExpr(column=column, query=query)
+
+    def _parse_option_value(self) -> object:
+        token = self._peek()
+        if self._match_kind(TokenKind.NUMBER):
+            return _number_value(token.value)
+        if self._match_kind(TokenKind.STRING):
+            return token.value
+        if token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD):
+            return self._advance().value
+        raise QueryParseError(f"unsupported search option value at position {token.position}")
+
     def _parse_score_expr(self) -> ScoreExpr:
         self._advance()
         self._expect_kind(TokenKind.LPAREN)
         self._expect_kind(TokenKind.RPAREN)
-        return ScoreExpr(kind="text")
+        return ScoreExpr(kind="auto")
 
     def _parse_point_expr(self) -> PointExpr:
         """``POINT(latitud, longitud)``, el orden que fija el enunciado (2.2.3).
@@ -852,6 +945,13 @@ class _Parser:
             and self._checks_lparen_next()
         ):
             return self._parse_similarity_score_expr()
+
+        if (
+            token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD)
+            and token.value.upper() == "SEARCH"
+            and self._checks_lparen_next()
+        ):
+            return self._parse_search_expr()
 
         if (
             token.kind in (TokenKind.IDENTIFIER, TokenKind.KEYWORD)

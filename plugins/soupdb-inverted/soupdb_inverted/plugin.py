@@ -42,6 +42,7 @@ class InvertedPlugin:
             exhaustive=True,
             mutable=False,
             reversible=False,
+            query_kind="text",
             operators=frozenset({"search"}),
             index_options=frozenset({"method"}),
         )
