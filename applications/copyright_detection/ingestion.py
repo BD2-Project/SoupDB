@@ -149,6 +149,11 @@ def ingest_song(
     _require_positive_id("first_segment_id", first_segment_id)
     path = resolve_dataset_path(dataset_root, metadata.audio_path)
 
+    if catalog.has_vector_index():
+        raise AudioIngestionError(
+            "audio_segments ya tiene índice vectorial: el motor bloquea nuevas filas fuera "
+            "de una transacción; ingestar todo el catálogo antes de crear el índice"
+        )
     if catalog.get_song(metadata.song_id) is not None:
         raise AudioIngestionError(f"la canción song_id={metadata.song_id} ya está registrada")
     same_path = [s.song_id for s in catalog.list_songs() if s.audio_path == metadata.audio_path]
