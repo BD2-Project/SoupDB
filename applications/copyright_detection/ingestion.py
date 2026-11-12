@@ -53,15 +53,16 @@ if SEGMENT_SECONDS != PIPELINE_SEGMENT_SECONDS:
 #: comprueba antes de escribir para no fallar a mitad de la ingesta.
 _MAX_INT = 2**31 - 1
 
-# Errores de decodificación de librosa: soundfile siempre; audioread solo si
-# está instalado (el lock lo instala para Python < 3.12).
-_DECODE_ERRORS: tuple[type[Exception], ...] = (soundfile.SoundFileError, EOFError)
+#: Errores de decodificación de librosa: soundfile siempre; audioread solo si
+#: está instalado (el lock lo instala para Python < 3.12). Público: la búsqueda
+#: de candidatos decodifica igual y traduce los mismos errores.
+AUDIO_DECODE_ERRORS: tuple[type[Exception], ...] = (soundfile.SoundFileError, EOFError)
 try:
     from audioread.exceptions import DecodeError as _AudioreadDecodeError
 except ImportError:
     pass
 else:
-    _DECODE_ERRORS += (_AudioreadDecodeError,)
+    AUDIO_DECODE_ERRORS += (_AudioreadDecodeError,)
 
 
 class AudioIngestionError(Exception):
@@ -165,7 +166,7 @@ def ingest_song(
     try:
         duration_seconds = len(load_audio(path)) / SAMPLE_RATE
         pieces = [(index, len(samples)) for index, samples in iter_audio_segments(path)]
-    except _DECODE_ERRORS as exc:
+    except AUDIO_DECODE_ERRORS as exc:
         raise AudioIngestionError(f"no se pudo decodificar {metadata.audio_path!r}: {exc}") from exc
     if not pieces:
         raise AudioIngestionError(

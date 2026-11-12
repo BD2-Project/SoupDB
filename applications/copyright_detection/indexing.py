@@ -198,6 +198,35 @@ def open_catalog(db_path: str | Path, config: CopyrightIndexConfig) -> Catalog:
         ) from exc
 
 
+def require_index(catalog: Catalog, profile_id: str = PROFILE_ID) -> None:
+    """Comprueba que el HNSW de copyright existe, está cargado y tiene la configuración acordada.
+
+    Solo usa APIs públicas del ``Catalog``. Nunca crea ni reconstruye el índice.
+    """
+    if AUDIO_SEGMENTS not in catalog.tables():
+        raise CopyrightIndexError(f"no existe la tabla {AUDIO_SEGMENTS!r}")
+    existing = catalog.ranked_metadata_for(AUDIO_SEGMENTS).get(INDEX_NAME)
+    if existing is None:
+        raise CopyrightIndexError(f"no existe el índice {INDEX_NAME!r}")
+    expected = (AUDIO_SEGMENTS, INDEXED_COLUMN, INDEX_KIND, METRIC, VECTOR_DIMENSION, profile_id)
+    actual = (
+        existing.table,
+        existing.column,
+        existing.algorithm,
+        existing.metric,
+        existing.dimension,
+        existing.profile_id,
+    )
+    if actual != expected:
+        raise CopyrightIndexError(
+            f"el índice {INDEX_NAME!r} ya existe con otra configuración: {existing}"
+        )
+    if INDEX_NAME not in catalog.ranked_indexes_for(AUDIO_SEGMENTS):
+        raise CopyrightIndexError(
+            f"el índice {INDEX_NAME!r} existe pero no está cargado; abrir con open_catalog"
+        )
+
+
 def ensure_index(catalog: Catalog, config: CopyrightIndexConfig) -> bool:
     """Crea el HNSW de copyright si no existe; devuelve si lo creó.
 
@@ -208,19 +237,8 @@ def ensure_index(catalog: Catalog, config: CopyrightIndexConfig) -> bool:
     copyright_catalog = CopyrightCatalog(catalog)
     copyright_catalog.initialize()
 
-    existing = catalog.ranked_metadata_for(AUDIO_SEGMENTS).get(INDEX_NAME)
-    if existing is not None:
-        expected = (AUDIO_SEGMENTS, INDEXED_COLUMN, INDEX_KIND, METRIC, VECTOR_DIMENSION)
-        actual = (existing.table, existing.column, existing.algorithm, existing.metric)
-        actual += (existing.dimension,)
-        if actual != expected or existing.profile_id != config.profile_id:
-            raise CopyrightIndexError(
-                f"el índice {INDEX_NAME!r} ya existe con otra configuración: {existing}"
-            )
-        if INDEX_NAME not in catalog.ranked_indexes_for(AUDIO_SEGMENTS):
-            raise CopyrightIndexError(
-                f"el índice {INDEX_NAME!r} existe pero no está cargado; abrir con open_catalog"
-            )
+    if INDEX_NAME in catalog.ranked_metadata_for(AUDIO_SEGMENTS):
+        require_index(catalog, config.profile_id)
         return False
 
     if not any(copyright_catalog.list_segments(s.song_id) for s in copyright_catalog.list_songs()):
