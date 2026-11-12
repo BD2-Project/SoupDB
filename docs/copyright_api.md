@@ -167,3 +167,63 @@ result = ingest_song(
   transaccional; un fallo a mitad puede dejar la canción con parte de sus segmentos.
 
 Esta capa todavía **no extrae MFCC, no genera vectores ni construye HNSW**.
+
+## Índice HNSW del catálogo
+
+`applications/copyright_detection/indexing.py` indexa `audio_segments.audio_ref`
+con el **HNSW real de SoupDB**, usando la integración SQL de `soupdb-vector`
+(`MultimediaProfile` + `OnDiskVectorFactory` + `Catalog(..., ranked_factory=...)`):
+
+```
+audio_ref → MFCC (por segmento de 5 s) → codebook K=128 → TF-IDF L2 → HNSW (euclidean)
+```
+
+Orden de construcción, con rutas que da el caller (`CopyrightIndexConfig`:
+raíz del dataset, `codebook.npz`, caché de descriptores y carpeta del índice):
+
+1. Ingestar **todo** el catálogo (sección anterior).
+2. `train_codebook(...)`: genera desde el catálogo un manifest `audio_segment`
+   (rutas relativas, ordenado por `segment_id`; solo artefacto de construcción) y
+   entrena con `build_vectors.train_from_manifest` un codebook de **K=128**
+   palabras acústicas, que se guarda una vez y nunca se sobrescribe.
+3. `open_catalog(db_path, config)`: abre la base con el perfil
+   `copyright-audio-v1` (`kind="audio_segment"`) y valida que el codebook dé
+   vectores de dimensión 128.
+4. `ensure_index(catalog, config)`: si no existe, ejecuta
+
+   ```sql
+   CREATE INDEX copyright_audio_hnsw ON audio_segments (audio_ref) USING HNSW
+   WITH METRIC=euclidean, DIMENSION=128, PROFILE='copyright-audio-v1'
+   ```
+
+   Si ya existe con esa configuración lo reutiliza sin reconstruirlo; si existe
+   con otra, falla.
+
+No se genera `vectores.bin`: la factoría vectoriza cada fila al crear el índice.
+El HNSW guarda el **RID** de cada fila; una consulta resuelve cada hit a su fila
+real de `audio_segments`, de donde salen `segment_id` y `song_id`:
+
+```sql
+SELECT segment_id, song_id, audio_ref, SCORE() AS score FROM audio_segments
+WHERE SIMILAR_TO('tracks/a.wav#segment=000001', k=3) USING HNSW WITH METRIC=euclidean
+ORDER BY score DESC
+```
+
+Con métrica euclidean, `SCORE()` es `1 / (1 + distancia)`: mayor es más parecido
+y el propio segmento da 1.0. Es una similitud, no una probabilidad de copyright.
+
+**Persistencia:** el HNSW y su metadata (`sql_index.json`, con la huella del
+codebook, la raíz del dataset y el perfil) quedan en disco. Al reabrir con
+`open_catalog` y la misma configuración se recargan sin reconstruir; si el
+codebook, la raíz o el perfil cambiaron, la apertura falla.
+
+**Limitaciones:**
+
+- Con el índice creado, el motor bloquea `INSERT`/`DELETE` en `audio_segments`
+  fuera de una `TransactionalSession`, así que la ingesta rechaza canciones
+  nuevas. Para ampliar el catálogo habrá que integrar la ingesta con
+  transacciones o reconstruir el índice.
+- La base indexada debe abrirse siempre con `open_catalog`.
+
+Todavía **no hay detector de un archivo completo, agregación temporal ni umbral
+de copyright**; `/api/v1/analyze` sigue respondiendo 501.

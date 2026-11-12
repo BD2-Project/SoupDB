@@ -194,6 +194,15 @@ class CopyrightCatalog:
                     if not self._catalog.indexes_for(table, column):
                         self._run(f"CREATE INDEX {table}_{column} ON {table} ({column}) TYPE BTREE")
 
+    def has_vector_index(self) -> bool:
+        """Si ``audio_segments`` tiene un índice vectorial (ranked) registrado.
+
+        Con uno, el motor bloquea ``INSERT``/``DELETE`` en esa tabla fuera de una
+        ``TransactionalSession``: la ingesta lo consulta para fallar antes de
+        escribir la canción en vez de dejarla sin segmentos.
+        """
+        return bool(self._catalog.ranked_metadata_for(AUDIO_SEGMENTS))
+
     # --- songs ------------------------------------------------------------
 
     def add_song(self, song: Song) -> None:

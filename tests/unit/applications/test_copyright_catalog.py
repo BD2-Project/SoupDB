@@ -63,6 +63,7 @@ def test_initialize_creates_tables_with_expected_schema(tmp_path):
         assert catalog.indexes_for(SONGS, "song_id")
         assert catalog.indexes_for(AUDIO_SEGMENTS, "segment_id")
         assert catalog.indexes_for(AUDIO_SEGMENTS, "song_id")
+        assert CopyrightCatalog(catalog).has_vector_index() is False
     finally:
         catalog.close()
 
