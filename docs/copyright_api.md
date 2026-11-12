@@ -275,3 +275,44 @@ result = search_audio(catalog, config, "queries/remix.wav", k=5)
 
 Todavía no hay umbral, agregación temporal por canción ni decisión de copyright,
 y `/api/v1/analyze` sigue respondiendo 501.
+
+## Evidencia temporal
+
+`applications/copyright_detection/evidence.py` convierte el resultado de la
+búsqueda por segmentos en evidencia temporal por canción. Es una transformación
+pura: no lee audio, no ejecuta SQL y no vuelve a buscar.
+
+```python
+from applications.copyright_detection.evidence import build_temporal_evidence
+
+evidence = build_temporal_evidence(search_audio(catalog, config, "queries/remix.wav", k=5))
+```
+
+- **Alineamiento:** para cada match,
+  `alignment_offset_segments = source_segment_index - query_segment_index`.
+- **Agrupación:** por canción (`song_id`) y, dentro de ella, por offset.
+- **Runs:** dentro de cada grupo, ordenado por `query_segment_index`, una run
+  continúa solo si el siguiente segmento de consulta es el inmediato (`+1`), y
+  con él el de origen; un hueco o un cambio de offset empiezan otra run.
+- **Intervalos:** candidato desde el inicio del primer punto hasta el fin del
+  último; igual en el original. Los segmentos finales cortos conservan su fin
+  real (por ejemplo 10–13 s, no 10–15).
+- **Métricas por run:** `segment_count`, `mean_score` (media aritmética),
+  `min_score` y `max_score`, sin redondear.
+- **`best_run` de cada canción:** mayor `segment_count`; luego mayor
+  `mean_score`; mayor `min_score`; menor `query_start_seconds`; menor
+  `source_start_seconds`. La continuidad pesa más que un pico de score aislado.
+- **Orden de canciones:** por su `best_run` (`segment_count`, `mean_score`,
+  `min_score` descendentes) y luego `song_id`. Significa "evidencia temporal más
+  coherente primero", **no** "más probable que infrinja".
+- Las runs de una canción van en orden temporal del candidato.
+
+Ejemplo: matches `q0→A#10 (0.94)`, `q1→A#11 (0.92)`, `q2→A#12 (0.95)` forman una
+run de la canción A con offset 10: candidato 0–15 s ↔ original 50–65 s,
+`segment_count=3`, `mean_score≈0.9367`, `min_score=0.92`, `max_score=0.95`.
+
+**Sin umbral, a propósito.** Se usan todos los matches recibidos, también los de
+score bajo; una run con scores bajos sigue siendo una run estructural. La
+decisión de qué evidencia es significativa (y cualquier umbral, que habrá que
+calibrar experimentalmente) pertenece a una capa posterior. `score` sigue siendo
+la similitud del motor, no una probabilidad de copyright.
