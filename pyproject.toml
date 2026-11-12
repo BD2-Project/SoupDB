@@ -21,7 +21,16 @@ Homepage = "https://github.com/BD2-Project/SoupBD"
 Documentation = "https://BD2-Project.github.io/SoupBD"
 
 [dependency-groups]
+# Aplicación de la Parte 5 (detección de copyright/remixes de audio). No es
+# dependencia del núcleo: el paquete `soupdb` sigue sin dependencias externas.
+copyright-api = [
+  "fastapi>=0.162.5",
+  "python-multipart>=0.0.33",
+  "uvicorn>=0.54.0",
+]
 dev = [
+  { include-group = "copyright-api" },
+  "httpx>=0.28.1",
   "hypothesis>=6.0",
   "pytest>=8.0",
   "pytest-cov>=5.0",
