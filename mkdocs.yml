@@ -49,6 +49,7 @@ nav:
   - Plugins: plugins.md
   - Índices vectoriales: vectores.md
   - Datasets multimedia: datasets_multimedia.md
+  - API de copyright: copyright_api.md
   - Protocolo: protocolo.md
   - Driver: driver.md
   - Transacciones: transacciones.md
