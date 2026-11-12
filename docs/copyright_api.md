@@ -78,3 +78,50 @@ issues; ningún endpoint la usa todavía:
 | `SEGMENT_SECONDS` | `5.0` | Segmentación de audio de la Parte 4 (un test verifica que coincide con `soupdb_vector`) |
 | `INDEX_KIND` | `HNSW` | Benchmarks de la Parte 4 sobre 100 000 segmentos |
 | `METRIC` | `euclidean` | Recall@10 ≈ 0.990, ≈ 12.3 ms/consulta |
+
+## Catálogo relacional
+
+`applications/copyright_detection/catalog.py` (`CopyrightCatalog`) guarda el
+catálogo en el **motor relacional real de SoupDB**: un `engine.common.catalog.Catalog`
+abierto sobre una ruta explícita, que persiste en disco y se recarga al reabrir.
+No usa otra base de datos. Ningún endpoint lo usa todavía.
+
+```python
+from pathlib import Path
+
+from engine.common.catalog import Catalog
+from applications.copyright_detection.catalog import CopyrightCatalog, Song
+
+catalog = Catalog(Path("data/copyright"))
+db = CopyrightCatalog(catalog)
+db.initialize()  # crea las tablas que falten; nunca borra datos
+db.add_song(Song(1, "Canción", "Artista", "tracks/song001.mp3", 183.5))
+catalog.close()
+```
+
+| Tabla | Columnas |
+|---|---|
+| `songs` | `song_id INT`, `title TEXT`, `artist TEXT`, `audio_path TEXT`, `duration_seconds FLOAT` |
+| `audio_segments` | `segment_id INT`, `song_id INT`, `segment_index INT`, `start_seconds FLOAT`, `end_seconds FLOAT`, `audio_ref TEXT` |
+
+Hay índices B+ sobre `songs.song_id`, `audio_segments.segment_id` y
+`audio_segments.song_id`. Los ids los asigna quien llama (SoupDB no tiene
+autoincremento).
+
+`audio_ref` identifica un segmento con la misma convención que la Parte 4
+(`soupdb_vector.multimedia.audio_features.segment_id`):
+`<audio_path>#segment=NNNNNN`, por ejemplo `tracks/song001.mp3#segment=000001`.
+`audio_path` es relativo a la raíz del dataset. Esa columna es la que usará el
+pipeline multimedia; **todavía no hay índice HNSW ni vectores sobre la tabla**.
+
+SoupDB no tiene `UNIQUE`, `FOREIGN KEY`, `IF NOT EXISTS` ni `UPDATE` ejecutable,
+y su `PRIMARY KEY` no impide duplicados. Por eso `CopyrightCatalog` comprueba
+antes de cada inserción que los ids no estén repetidos, que el segmento apunte a
+una canción existente, que una canción no repita `segment_index` y que
+`audio_ref` sea la referencia canónica del segmento. Si una tabla ya existe con
+otro schema, `initialize()` falla con `IncompatibleSchemaError`.
+
+Limitación actual: esas comprobaciones se serializan con un lock de la propia
+instancia, que solo protege un proceso. No sustituye restricciones del motor, no
+coordina varios procesos y registrar una canción con sus segmentos no es atómico;
+se resolverá al integrar la ingesta con transacciones.
