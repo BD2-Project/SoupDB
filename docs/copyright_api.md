@@ -125,3 +125,45 @@ Limitación actual: esas comprobaciones se serializan con un lock de la propia
 instancia, que solo protege un proceso. No sustituye restricciones del motor, no
 coordina varios procesos y registrar una canción con sus segmentos no es atómico;
 se resolverá al integrar la ingesta con transacciones.
+
+## Ingesta de canciones
+
+`applications/copyright_detection/ingestion.py` registra una canción original del
+dataset en el catálogo. Requiere `soupdb-vector` (librosa), incluido en el grupo
+`dev`; la API REST no importa este módulo.
+
+```python
+from applications.copyright_detection.ingestion import SongMetadata, ingest_song
+
+result = ingest_song(
+    db,  # CopyrightCatalog ya inicializado
+    Path("datasets/originales"),  # raíz del dataset
+    SongMetadata(1, "Canción", "Artista", "tracks/song001.wav"),
+    first_segment_id=1,
+)
+```
+
+- **Raíz del dataset:** `audio_path` es relativo a ella, con `/` y en forma
+  canónica. Se rechazan rutas absolutas, `#`, `..` u otras rutas que salgan de la
+  raíz, archivos inexistentes y directorios.
+- **Segmentación:** la misma de la Parte 4, `iter_audio_segments` de
+  `soupdb_vector.multimedia.audio_features`: bloques consecutivos de 5 s sin
+  solapamiento, audio en mono a 22 050 Hz. El último bloque solo se conserva si
+  dura al menos `MIN_SEGMENT_RATIO` (la mitad, 2.5 s): una pista de 13 s da
+  0–5, 5–10 y 10–13; una de 12 s da 0–5 y 5–10, y la cola de 2 s no tiene fila.
+  Si no sale ningún segmento, la ingesta falla y no registra la canción.
+- **Intervalos:** `start_seconds = segment_index × 5.0` y
+  `end_seconds = start_seconds + muestras_del_segmento / 22050`.
+- **Duración:** `songs.duration_seconds` es la duración real decodificada
+  (`len(load_audio(path)) / 22050`), incluida la cola descartada; no la suma de
+  segmentos. El archivo se decodifica dos veces (duración y segmentos) porque la
+  API pública del plugin no da ambos a la vez.
+- **Ids:** el caller da `song_id` y `first_segment_id`; cada segmento recibe
+  `first_segment_id + segment_index`. Antes de escribir se comprueba que ningún id
+  esté ocupado, que la canción y su `audio_path` no estén ya registrados y que el
+  audio se decodifique. Si algo falla no se escribe nada: `AudioIngestionError`
+  (o `ValueError` si los metadatos o `first_segment_id` no son válidos).
+- **Atomicidad:** la escritura posterior (canción y luego cada segmento) no es
+  transaccional; un fallo a mitad puede dejar la canción con parte de sus segmentos.
+
+Esta capa todavía **no extrae MFCC, no genera vectores ni construye HNSW**.
