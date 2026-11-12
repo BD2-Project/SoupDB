@@ -227,3 +227,51 @@ codebook, la raíz o el perfil cambiaron, la apertura falla.
 
 Todavía **no hay detector de un archivo completo, agregación temporal ni umbral
 de copyright**; `/api/v1/analyze` sigue respondiendo 501.
+
+## Búsqueda por segmentos de un candidato
+
+`applications/copyright_detection/search.py` busca un audio candidato contra el
+catálogo indexado:
+
+```python
+from applications.copyright_detection.indexing import open_catalog
+from applications.copyright_detection.search import search_audio
+
+catalog = open_catalog(db_path, config)  # índice ya creado (sección anterior)
+result = search_audio(catalog, config, "queries/remix.wav", k=5)
+```
+
+- **Ubicación del candidato:** en esta etapa, `audio_path` es relativo a la raíz
+  del perfil (`config.dataset_root`), porque el vectorizador del perfil solo
+  resuelve rutas ahí. Se valida igual que los originales (relativo, `/`, sin `#`,
+  dentro de la raíz, archivo existente). El candidato **no** se inserta en
+  `songs`, `audio_segments` ni en el HNSW. Cada candidato distinto debe tener su
+  propia ruta: la caché de descriptores usa la ruta como clave.
+- **Segmentación:** la misma que los originales (`iter_audio_segments`): bloques
+  de 5 s y el último solo si dura al menos 2.5 s. Un candidato de 13 s da 0–5,
+  5–10 y 10–13; uno de 12 s da 0–5 y 5–10. Si no hay ningún segmento, falla
+  antes de consultar.
+- **Una consulta HNSW por segmento**, por SQL y el planner real:
+
+  ```sql
+  SELECT segment_id, song_id, segment_index, start_seconds, end_seconds, audio_ref,
+         SCORE() AS score FROM audio_segments
+  WHERE SIMILAR_TO('queries/remix.wav#segment=000000', k=5) USING HNSW WITH METRIC=euclidean
+  ORDER BY score DESC
+  ```
+
+  El vectorizador aplica al segmento el mismo MFCC → codebook → TF-IDF L2 del
+  índice, y cada hit se resuelve por RID a su fila real de `audio_segments`.
+- **Resultado:** `AudioSearchResult(audio_path, k, segments)`. Cada
+  `QuerySegmentResult` tiene `query_segment_index`, `query_start_seconds`,
+  `query_end_seconds` y sus `matches` propios (no se mezclan entre segmentos).
+  Cada `SegmentMatch` tiene `segment_id`, `song_id`, `title`, `artist`,
+  `source_segment_index`, `source_start_seconds`, `source_end_seconds`,
+  `audio_ref` y `score`.
+- **`k`:** entero positivo; son los vecinos por segmento, no un número de
+  detecciones. Si el catálogo tiene menos segmentos, se devuelven los que haya.
+- **`score`:** `1 / (1 + distancia euclidiana)`; mayor es más parecido y un
+  segmento idéntico da ≈ 1.0. **No es una probabilidad de copyright.**
+
+Todavía no hay umbral, agregación temporal por canción ni decisión de copyright,
+y `/api/v1/analyze` sigue respondiendo 501.
