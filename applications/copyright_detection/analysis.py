@@ -46,12 +46,22 @@ from applications.copyright_detection.search import (
     SearchUnavailableError,
     search_audio,
 )
+from applications.copyright_detection.settings import (
+    DEFAULT_SEARCH_K,
+    DEFAULT_STAGING_DIR,
+    validate_staging_dir,
+)
 from engine.common.catalog import Catalog
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SEARCH_K = 5
-DEFAULT_STAGING_DIR = "queries"
+__all__ = [
+    "DEFAULT_SEARCH_K",
+    "DEFAULT_STAGING_DIR",
+    "CopyrightAnalyzer",
+    "display_filename",
+]
+
 #: Extensiones que se conservan para el decodificador; el resto se escribe sin extensión.
 _AUDIO_EXTENSIONS = frozenset({".wav", ".mp3", ".flac", ".ogg", ".au"})
 _CHUNK_BYTES = 1024 * 1024
@@ -84,17 +94,7 @@ class CopyrightAnalyzer:
     ) -> None:
         if type(search_k) is not int or search_k <= 0:
             raise ValueError(f"search_k debe ser un entero positivo, no {search_k!r}")
-        parts = PurePosixPath(staging_dir).parts
-        if (
-            not staging_dir
-            or PurePosixPath(staging_dir).is_absolute()
-            or PureWindowsPath(staging_dir).drive
-            or PurePosixPath(staging_dir).as_posix() != staging_dir
-            or any(part in (".", "..") for part in parts)
-            or "\\" in staging_dir
-            or "#" in staging_dir
-        ):
-            raise ValueError(f"staging_dir debe ser una ruta relativa canónica: {staging_dir!r}")
+        validate_staging_dir(staging_dir)
         self._catalog = catalog
         self._config = config
         self._search_k = search_k

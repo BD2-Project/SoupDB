@@ -1982,6 +1982,7 @@ source = { editable = "." }
 copyright-api = [
     { name = "fastapi" },
     { name = "python-multipart" },
+    { name = "soupdb-vector" },
     { name = "uvicorn" },
 ]
 dev = [
@@ -2018,6 +2019,7 @@ multimedia = [
 copyright-api = [
     { name = "fastapi", specifier = ">=0.162.5" },
     { name = "python-multipart", specifier = ">=0.0.33" },
+    { name = "soupdb-vector", editable = "plugins/soupdb-vector" },
     { name = "uvicorn", specifier = ">=0.54.0" },
 ]
 dev = [

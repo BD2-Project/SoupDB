@@ -3,20 +3,25 @@
 La API REST es la frontera de la aplicación: el frontend solo consume
 ``/api/v1/...`` y nunca accede al ``Catalog`` ni a los archivos internos.
 
-``create_app(analyzer)`` recibe un ``CopyrightAnalyzer`` ya configurado (con un
-``Catalog`` abierto por ``open_catalog``). Sin analizador, ``/health`` responde y
-``/analyze`` devuelve 503. Importar este módulo no abre bases, no entrena
+``create_app`` solo construye la aplicación HTTP. El analizador se lee de
+``app.state.analyzer`` en cada petición: puede pasarse ya creado
+(``create_app(analyzer)``) o instalarlo un ``lifespan``, que es lo que hace el
+servidor real (:mod:`applications.copyright_detection.runtime`). Sin analizador,
+``/health`` responde y ``/analyze`` devuelve 503.
+
+Importar este módulo no abre bases, no lee variables de entorno, no entrena
 codebooks ni carga el pipeline multimedia: ``analysis`` solo se importa para tipos.
-
-Arranque local (sin analizador; ``/analyze`` responde 503)::
-
-    uv run --group copyright-api uvicorn applications.copyright_detection.app:app --reload
+La ``app`` global de este módulo no tiene analizador; el servidor ejecutable es
+``python -m applications.copyright_detection.runtime``.
 """
 
 import logging
+from collections.abc import Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from applications.copyright_detection.config import API_PREFIX, SERVICE_NAME
@@ -34,10 +39,28 @@ logger = logging.getLogger(__name__)
 
 ANALYZER_NOT_CONFIGURED = "El servicio de análisis no está configurado."
 INTERNAL_ERROR = "Error interno del análisis."
+#: Lo necesario para ``GET /health`` y ``POST /analyze`` multipart desde el navegador.
+CORS_METHODS = ("GET", "POST")
+CORS_HEADERS = ("Accept", "Content-Type")
+
+Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 
 
-def create_app(analyzer: "CopyrightAnalyzer | None" = None) -> FastAPI:
+def create_app(
+    analyzer: "CopyrightAnalyzer | None" = None,
+    *,
+    lifespan: Lifespan | None = None,
+    cors_origins: Sequence[str] = (),
+) -> FastAPI:
+    """Construye la API.
+
+    - ``analyzer``: servicio ya configurado, o ``None`` (lo instala ``lifespan``
+      en ``app.state.analyzer``, o ``/analyze`` responde 503).
+    - ``lifespan``: ciclo de vida de FastAPI (abrir/cerrar recursos).
+    - ``cors_origins``: orígenes del frontend permitidos. Vacío: sin CORS.
+    """
     app = FastAPI(
+        lifespan=lifespan,
         title=SERVICE_NAME,
         description=(
             "API de análisis de similitud acústica y temporal sobre SoupDB. Devuelve "
@@ -45,6 +68,15 @@ def create_app(analyzer: "CopyrightAnalyzer | None" = None) -> FastAPI:
         ),
         version="0.2.0",
     )
+    app.state.analyzer = analyzer
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(cors_origins),
+            allow_methods=list(CORS_METHODS),
+            allow_headers=list(CORS_HEADERS),
+            allow_credentials=False,
+        )
     router = APIRouter(prefix=API_PREFIX)
 
     @app.exception_handler(Exception)
@@ -80,8 +112,10 @@ def create_app(analyzer: "CopyrightAnalyzer | None" = None) -> FastAPI:
         },
     )
     def analyze(
+        request: Request,
         file: UploadFile = File(description="Archivo de audio a analizar."),  # noqa: B008
     ) -> AnalysisResult:
+        analyzer: CopyrightAnalyzer | None = request.app.state.analyzer
         if analyzer is None:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, ANALYZER_NOT_CONFIGURED)
         try:
