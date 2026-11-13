@@ -1,7 +1,6 @@
-"""Configuración prevista del análisis de copyright.
+"""Configuración del análisis de copyright.
 
-Son decisiones ya tomadas para las siguientes issues, **no** una implementación:
-ningún endpoint usa todavía el índice ni la métrica.
+La usan la ingesta, el índice HNSW y ``POST /api/v1/analyze``.
 
 - ``SEGMENT_SECONDS``: duración de los bloques de audio. Debe coincidir con
   ``soupdb_vector.multimedia.audio_features.SEGMENT_SECONDS`` (un test lo

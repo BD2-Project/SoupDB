@@ -62,6 +62,14 @@ class CopyrightSearchError(Exception):
     """La búsqueda del candidato no se pudo realizar; el mensaje indica la causa."""
 
 
+class CandidateAudioError(CopyrightSearchError):
+    """El audio candidato no se puede decodificar o no produce ningún segmento."""
+
+
+class SearchUnavailableError(CopyrightSearchError):
+    """Falta infraestructura: índice HNSW, perfil o vectorizador no disponibles."""
+
+
 @dataclass(frozen=True, slots=True)
 class SegmentMatch:
     """Un segmento original vecino de un segmento del candidato."""
@@ -111,7 +119,7 @@ def search_audio(
     try:
         require_index(catalog, config.profile_id)
     except CopyrightIndexError as exc:
-        raise CopyrightSearchError(f"índice de copyright no disponible: {exc}") from exc
+        raise SearchUnavailableError(f"índice de copyright no disponible: {exc}") from exc
     _check_profile_root(catalog, config)
     try:
         path = resolve_dataset_path(config.dataset_root, audio_path)
@@ -121,9 +129,9 @@ def search_audio(
     try:
         pieces = [(index, len(samples)) for index, samples in iter_audio_segments(path)]
     except AUDIO_DECODE_ERRORS as exc:
-        raise CopyrightSearchError(f"no se pudo decodificar {audio_path!r}: {exc}") from exc
+        raise CandidateAudioError(f"no se pudo decodificar {audio_path!r}: {exc}") from exc
     if not pieces:
-        raise CopyrightSearchError(
+        raise CandidateAudioError(
             f"{audio_path!r} no produce ningún segmento de {SEGMENT_SECONDS} s; no se busca"
         )
 
@@ -148,13 +156,13 @@ def _check_profile_root(catalog: Catalog, config: CopyrightIndexConfig) -> None:
     # contra la raíz de su perfil: deben ser la misma carpeta.
     vectorizer = catalog.query_vectorizer
     if vectorizer is None:
-        raise CopyrightSearchError("el Catalog no tiene vectorizador; abrir con open_catalog")
+        raise SearchUnavailableError("el Catalog no tiene vectorizador; abrir con open_catalog")
     try:
         profile = vectorizer.profile(config.profile_id)
     except QueryExecutionError as exc:
-        raise CopyrightSearchError(f"perfil {config.profile_id!r} no cargado: {exc}") from exc
+        raise SearchUnavailableError(f"perfil {config.profile_id!r} no cargado: {exc}") from exc
     if Path(profile.root).resolve() != config.dataset_root.resolve():
-        raise CopyrightSearchError(
+        raise SearchUnavailableError(
             f"dataset_root {config.dataset_root} no es la raíz del perfil ({profile.root})"
         )
 

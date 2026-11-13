@@ -1,32 +1,57 @@
 """Aplicación FastAPI del detector de copyright/remixes de audio.
 
-Arranque local::
+La API REST es la frontera de la aplicación: el frontend solo consume
+``/api/v1/...`` y nunca accede al ``Catalog`` ni a los archivos internos.
+
+``create_app(analyzer)`` recibe un ``CopyrightAnalyzer`` ya configurado (con un
+``Catalog`` abierto por ``open_catalog``). Sin analizador, ``/health`` responde y
+``/analyze`` devuelve 503. Importar este módulo no abre bases, no entrena
+codebooks ni carga el pipeline multimedia: ``analysis`` solo se importa para tipos.
+
+Arranque local (sin analizador; ``/analyze`` responde 503)::
 
     uv run --group copyright-api uvicorn applications.copyright_detection.app:app --reload
-
-``/analyze`` define el contrato pero responde ``501`` hasta que exista el motor
-de detección: no devuelve coincidencias simuladas.
 """
 
-from fastapi import APIRouter, FastAPI, File, HTTPException, UploadFile, status
+import logging
+from typing import TYPE_CHECKING
+
+from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile, status
+from fastapi.responses import JSONResponse
 
 from applications.copyright_detection.config import API_PREFIX, SERVICE_NAME
+from applications.copyright_detection.errors import AnalysisUnavailableError, InvalidAudioError
 from applications.copyright_detection.schemas import (
     AnalysisResult,
     ErrorResponse,
     HealthResponse,
 )
 
-ANALYZE_NOT_IMPLEMENTED = "El motor de detección de copyright aún no está implementado."
+if TYPE_CHECKING:
+    from applications.copyright_detection.analysis import CopyrightAnalyzer
+
+logger = logging.getLogger(__name__)
+
+ANALYZER_NOT_CONFIGURED = "El servicio de análisis no está configurado."
+INTERNAL_ERROR = "Error interno del análisis."
 
 
-def create_app() -> FastAPI:
+def create_app(analyzer: "CopyrightAnalyzer | None" = None) -> FastAPI:
     app = FastAPI(
         title=SERVICE_NAME,
-        description="API de detección de copyright/remixes de audio sobre SoupDB.",
-        version="0.1.0",
+        description=(
+            "API de análisis de similitud acústica y temporal sobre SoupDB. Devuelve "
+            "evidencia de similitud; no determina copyright."
+        ),
+        version="0.2.0",
     )
     router = APIRouter(prefix=API_PREFIX)
+
+    @app.exception_handler(Exception)
+    async def _unexpected(_request: Request, exc: Exception) -> JSONResponse:
+        # Sin traceback para el cliente; queda en el log del servidor.
+        logger.exception("error inesperado en la API de copyright", exc_info=exc)
+        return JSONResponse(status_code=500, content={"detail": INTERNAL_ERROR})
 
     @router.get("/health", response_model=HealthResponse, tags=["health"])
     def health() -> HealthResponse:
@@ -36,20 +61,35 @@ def create_app() -> FastAPI:
         "/analyze",
         response_model=AnalysisResult,
         tags=["analysis"],
-        summary="Analizar un audio contra el catálogo",
+        summary="Analizar la similitud de un audio con el catálogo",
         responses={
-            status.HTTP_501_NOT_IMPLEMENTED: {
+            422: {
+                "description": (
+                    "Falta el campo `file`, o el audio está vacío, no se puede "
+                    "decodificar o es demasiado corto para producir segmentos."
+                ),
+            },
+            status.HTTP_503_SERVICE_UNAVAILABLE: {
                 "model": ErrorResponse,
-                "description": "El motor de detección aún no está implementado.",
-            }
+                "description": "Análisis no configurado o índice/perfil no disponible.",
+            },
+            status.HTTP_500_INTERNAL_SERVER_ERROR: {
+                "model": ErrorResponse,
+                "description": "Error interno inesperado.",
+            },
         },
     )
     def analyze(
         file: UploadFile = File(description="Archivo de audio a analizar."),  # noqa: B008
     ) -> AnalysisResult:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=ANALYZE_NOT_IMPLEMENTED
-        )
+        if analyzer is None:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, ANALYZER_NOT_CONFIGURED)
+        try:
+            return analyzer.analyze(file.file, file.filename)
+        except InvalidAudioError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except AnalysisUnavailableError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
     app.include_router(router)
     return app

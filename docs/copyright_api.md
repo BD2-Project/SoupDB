@@ -23,55 +23,137 @@ uv run --group copyright-api uvicorn applications.copyright_detection.app:app --
 ```
 
 Por defecto escucha en `http://127.0.0.1:8000`. La documentación interactiva
-queda en `/docs` y el esquema en `/openapi.json`.
+queda en `/docs` y el esquema en `/openapi.json`. La `app` global no tiene
+analizador configurado (no abre bases al importarse), así que `/analyze` responde
+`503`; para analizar se usa `create_app(CopyrightAnalyzer(...))`.
+
+## Frontera REST de la aplicación
+
+La API REST es la frontera de integración de la aplicación demo: el frontend
+solo consume `/api/v1/...` por HTTP. No accede al `Catalog`, a los archivos del
+dataset ni al índice; SoupDB sigue siendo la base multimodal subyacente
+(relacional `songs`/`audio_segments` + HNSW vectorial) detrás de la API.
 
 ## Endpoints
 
-| Método | Ruta | Estado |
+| Método | Ruta | Respuesta |
 |---|---|---|
-| `GET` | `/api/v1/health` | Funcional: `200 {"status": "ok", "service": "soupdb-copyright-api"}` |
-| `POST` | `/api/v1/analyze` | Contrato definido; responde `501` (ver abajo) |
+| `GET` | `/api/v1/health` | `200 {"status": "ok", "service": "soupdb-copyright-api"}` |
+| `POST` | `/api/v1/analyze` | `200 AnalysisResult` con la evidencia temporal (ver abajo) |
 
 ### `POST /api/v1/analyze`
 
-Recibe un archivo de audio como `multipart/form-data` en el campo `file`.
+Recibe un archivo de audio como `multipart/form-data` en el campo `file`:
 
-!!! warning "Todavía no ejecuta detección"
-    Mientras no exista el motor de detección responde
-    `501 Not Implemented` con
-    `{"detail": "El motor de detección de copyright aún no está implementado."}`.
-    No devuelve coincidencias simuladas. Sin el campo `file` responde `422`.
+```bash
+curl -F "file=@remix.wav" http://127.0.0.1:8000/api/v1/analyze
+```
 
-La respuesta satisfactoria futura (`AnalysisResult`, documentada en OpenAPI):
+Flujo:
+
+```
+POST multipart
+→ staging único  <dataset_root>/queries/<analysis_id>/candidate.wav
+→ segmentación 5 s (iter_audio_segments)
+→ una consulta HNSW euclidean por segmento (k vecinos)
+→ evidencia temporal (runs por canción)
+→ JSON AnalysisResult
+→ borrado del archivo y de su carpeta
+```
+
+La lógica vive en `applications/copyright_detection/analysis.py`
+(`CopyrightAnalyzer`); FastAPI solo recibe el multipart, llama al servicio y
+traduce errores. `create_app(analyzer)` recibe el servicio ya configurado con un
+`Catalog` abierto por `open_catalog`, la configuración del índice, `search_k`
+(vecinos por segmento, por defecto 5; no es un umbral) y la carpeta de staging.
+
+Respuesta real (candidato idéntico a una canción de 13 s del catálogo, `search_k=2`):
 
 ```json
 {
-  "analysis_id": "string",
-  "filename": "query.mp3",
+  "analysis_id": "4ff2b1526cd0458085ecc0f4720271b6",
+  "filename": "remix.wav",
   "segment_seconds": 5.0,
   "matches": [
     {
-      "query_start": 0.0,
-      "query_end": 15.0,
-      "song_id": 1,
-      "title": "Canción",
-      "artist": "Artista",
-      "source_start": 35.0,
-      "source_end": 50.0,
-      "score": 0.94
+      "query_start": 0.0, "query_end": 13.0,
+      "song_id": 1, "title": "Alpha", "artist": "Ana",
+      "source_start": 0.0, "source_end": 13.0,
+      "score": 0.9999999752196517,
+      "segment_count": 3,
+      "min_score": 0.9999999708697074, "max_score": 0.9999999794376813,
+      "alignment_offset_seconds": 0.0,
+      "is_best_run": true
+    },
+    {
+      "query_start": 0.0, "query_end": 5.0,
+      "song_id": 1, "title": "Alpha", "artist": "Ana",
+      "source_start": 5.0, "source_end": 10.0,
+      "score": 0.41421356298841117,
+      "segment_count": 1,
+      "min_score": 0.41421356298841117, "max_score": 0.41421356298841117,
+      "alignment_offset_seconds": 5.0,
+      "is_best_run": false
     }
   ]
 }
 ```
 
-`score` es un **score de similitud** en `[0, 1]` (mayor = más parecido). **No**
-es una probabilidad de plagio, copyright ni infracción: todavía no hay un umbral
-de copyright validado experimentalmente.
+(Recortado: la respuesta real trae dos runs más de un segmento con score ≈ 0.414.)
+
+Cada elemento de `matches` es una **run de evidencia temporal** (ver "Evidencia
+temporal"):
+
+| Campo | Significado |
+|---|---|
+| `query_start`, `query_end` | Tramo del audio subido (s); el último segmento puede durar menos de 5 s |
+| `song_id`, `title`, `artist` | Canción del catálogo |
+| `source_start`, `source_end` | Tramo alineado de la canción (s) |
+| `score` | **Media de los scores de similitud** de los segmentos de la run (euclidean: `1 / (1 + distancia)`, en `[0, 1]`) |
+| `segment_count` | Segmentos consecutivos de 5 s que forman la run |
+| `min_score`, `max_score` | Menor y mayor score de similitud de la run |
+| `alignment_offset_seconds` | `source_start - query_start` |
+| `is_best_run` | `true` en exactamente una run por canción: la de más evidencia temporal |
+
+Se devuelven **todas** las runs, sin filtrar por score ni por número de
+segmentos: canciones de más a menos coherentes y, dentro de cada una, en orden
+temporal del audio subido. Si no hay evidencia, `matches` es `[]` (HTTP 200).
+
+`analysis_id` es un `uuid4` y es el mismo de la carpeta de staging; `filename`
+es solo el nombre presentado por el cliente, sin componentes de ruta
+(`../../x.wav` → `x.wav`), y nunca decide dónde se escribe el archivo.
+
+!!! warning "Evidencia, no veredicto"
+    La API devuelve evidencia de similitud acústica y temporal. **No determina
+    copyright**, no prueba una infracción ni da una probabilidad. No hay umbral:
+    cuál evidencia es significativa se decidirá aparte y deberá calibrarse
+    experimentalmente. El frontend puede mostrar `score * 100` siempre como
+    "similitud", no como probabilidad.
+
+**Errores:**
+
+| Código | Cuándo |
+|---|---|
+| `422` | Falta `file` (detalle de validación de FastAPI), o el audio está vacío, no se puede decodificar o no produce ningún segmento (≥ 2.5 s) |
+| `503` | Análisis no configurado (`create_app()` sin analizador) o índice/perfil no disponible |
+| `500` | Error interno inesperado; respuesta genérica sin traceback (el detalle queda en el log) |
+
+**Staging y limpieza.** Cada análisis escribe el upload por bloques en una
+carpeta nueva `queries/<analysis_id>/`, porque la caché de MFCC del perfil usa la
+ruta absoluta como clave: reutilizar una ruta devolvería descriptores de un audio
+anterior. El archivo y su carpeta se borran siempre al terminar, también si el
+audio es inválido o la búsqueda falla. La carpeta raíz `queries/`, la caché, el
+codebook y el índice no se tocan. La caché conserva entradas de esas rutas
+temporales ya borradas (nunca se reutilizan); limpiarlas es una mejora futura.
+El candidato nunca se inserta en `songs`, `audio_segments` ni en el HNSW.
+
+**Concurrencia.** El `Catalog` compartido no está documentado como thread-safe:
+el servicio serializa la búsqueda y la evidencia con un `RLock`. Las escrituras de
+staging de análisis simultáneos van en paralelo y nunca colisionan.
 
 ## Configuración prevista
 
-Definida en `applications/copyright_detection/config.py` para las siguientes
-issues; ningún endpoint la usa todavía:
+Definida en `applications/copyright_detection/config.py`:
 
 | Parámetro | Valor | Origen |
 |---|---|---|
@@ -84,7 +166,7 @@ issues; ningún endpoint la usa todavía:
 `applications/copyright_detection/catalog.py` (`CopyrightCatalog`) guarda el
 catálogo en el **motor relacional real de SoupDB**: un `engine.common.catalog.Catalog`
 abierto sobre una ruta explícita, que persiste en disco y se recarga al reabrir.
-No usa otra base de datos. Ningún endpoint lo usa todavía.
+No usa otra base de datos.
 
 ```python
 from pathlib import Path
@@ -112,7 +194,7 @@ autoincremento).
 (`soupdb_vector.multimedia.audio_features.segment_id`):
 `<audio_path>#segment=NNNNNN`, por ejemplo `tracks/song001.mp3#segment=000001`.
 `audio_path` es relativo a la raíz del dataset. Esa columna es la que usará el
-pipeline multimedia; **todavía no hay índice HNSW ni vectores sobre la tabla**.
+pipeline multimedia; el índice HNSW se crea aparte (ver "Índice HNSW del catálogo").
 
 SoupDB no tiene `UNIQUE`, `FOREIGN KEY`, `IF NOT EXISTS` ni `UPDATE` ejecutable,
 y su `PRIMARY KEY` no impide duplicados. Por eso `CopyrightCatalog` comprueba
@@ -166,7 +248,7 @@ result = ingest_song(
 - **Atomicidad:** la escritura posterior (canción y luego cada segmento) no es
   transaccional; un fallo a mitad puede dejar la canción con parte de sus segmentos.
 
-Esta capa todavía **no extrae MFCC, no genera vectores ni construye HNSW**.
+Esta capa **no extrae MFCC, no genera vectores ni construye HNSW**.
 
 ## Índice HNSW del catálogo
 
@@ -225,8 +307,8 @@ codebook, la raíz o el perfil cambiaron, la apertura falla.
   transacciones o reconstruir el índice.
 - La base indexada debe abrirse siempre con `open_catalog`.
 
-Todavía **no hay detector de un archivo completo, agregación temporal ni umbral
-de copyright**; `/api/v1/analyze` sigue respondiendo 501.
+El índice no aplica umbral ni decide copyright; el análisis completo de un
+archivo se expone en `POST /api/v1/analyze`.
 
 ## Búsqueda por segmentos de un candidato
 
@@ -273,8 +355,8 @@ result = search_audio(catalog, config, "queries/remix.wav", k=5)
 - **`score`:** `1 / (1 + distancia euclidiana)`; mayor es más parecido y un
   segmento idéntico da ≈ 1.0. **No es una probabilidad de copyright.**
 
-Todavía no hay umbral, agregación temporal por canción ni decisión de copyright,
-y `/api/v1/analyze` sigue respondiendo 501.
+Esta capa no aplica umbral ni agrega por canción (eso lo hace la evidencia
+temporal) y no decide copyright.
 
 ## Evidencia temporal
 
