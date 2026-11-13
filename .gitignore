@@ -267,3 +267,6 @@ Thumbs.db
 # Datos multimedia generados (manifests, caché de descriptores, codebooks, vectores.bin).
 # Se regeneran con benchmarks/scripts/{prepare_multimedia_datasets,build_multimedia_vectors}.py
 benchmarks/data/
+
+# Demo de la API de copyright (python -m applications.copyright_detection.demo prepare).
+.demo/

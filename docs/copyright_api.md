@@ -1,45 +1,203 @@
-# API de detección de copyright (Parte 5)
+# Aplicación de similitud de audio (Parte 5)
 
-API REST de la aplicación de la Parte 5 (opción C): detectar fragmentos de un
-audio que coinciden con canciones de un catálogo (copyright/remixes). El
-frontend la consume por HTTP.
+## Propósito
 
-Es una **capa de aplicación** (`applications/copyright_detection/`), separada
-del núcleo:
+La aplicación de la Parte 5 (opción C) analiza la **similitud entre un audio consultado
+y las canciones originales del catálogo** para detectar posibles coincidencias
+(copyright/remixes). Para cada tramo del audio subido indica qué canciones y qué tramos
+de ellas se parecen, con qué similitud y con qué coherencia temporal.
 
-- no forma parte del wheel `soupdb` (que solo empaqueta `engine`) y el núcleo
-  sigue sin dependencias externas;
-- no toca el servidor TCP (`python -m engine`), el protocolo binario ni `rsoup`.
+!!! warning "Evidencia, no veredicto"
+    La aplicación devuelve **similitud acústica y evidencia temporal**. No determina
+    copyright, no prueba una infracción, no da probabilidades y no aplica ningún umbral.
+    Qué evidencia es significativa se decidirá aparte y deberá calibrarse
+    experimentalmente.
 
-## Instalación y arranque
+Integra dos capacidades de SoupDB:
 
-Las dependencias (FastAPI, python-multipart, uvicorn) están en el grupo
-opcional `copyright-api` de `pyproject.toml`. El grupo `dev` lo incluye, así
-que `uv sync` ya basta para correr los tests.
+- **Relacional:** tablas `songs` y `audio_segments` en el motor SoupDB.
+- **Multimedia/vectorial:** audio → MFCC → codebook K=128 → TF-IDF L2 → HNSW (euclidean)
+  sobre `audio_segments.audio_ref`.
+
+## Arquitectura
+
+```mermaid
+flowchart TD
+    FE["Frontend"] -->|"HTTP REST: multipart / JSON<br/>/api/v1/..."| API["FastAPI (app.py)"]
+    API --> AN["CopyrightAnalyzer (analysis.py)"]
+    AN --> SE["search_audio: una consulta SQL SIMILAR_TO por segmento"]
+    AN --> EV["build_temporal_evidence: runs por canción"]
+    SE --> CAT[("SoupDB Catalog<br/>songs / audio_segments")]
+    SE --> HN[("HNSW sobre audio_ref<br/>MFCC → K=128 → TF-IDF L2")]
+```
+
+La API FastAPI es el adaptador REST de la aplicación sobre las capacidades relacionales y
+vectoriales de SoupDB.
+
+- El **núcleo SoupDB** (`engine/`) no tiene REST ni GraphQL. Su interfaz remota nativa es
+  el protocolo binario sobre TCP/IP en el puerto `55432` (`python -m engine`), que usa el
+  driver `rsoup`; ver [Driver](driver.md) y [Protocolo](protocolo.md). La aplicación no
+  lo modifica.
+- La **aplicación de la Parte 5** (`applications/copyright_detection/`) usa SoupDB dentro
+  del mismo proceso (`Catalog` + SQL + HNSW) y publica una API REST. Esa API es la única
+  frontera del frontend: solo consume `/api/v1/...` y nunca toca el `Catalog`, el HNSW,
+  los archivos internos, el protocolo TCP ni SQL.
+
+La aplicación no forma parte del wheel `soupdb`, que solo empaqueta `engine`, y el núcleo
+sigue sin dependencias externas.
+
+| Módulo | Papel |
+|---|---|
+| `settings.py` | Variables `COPYRIGHT_*` → `RuntimeSettings` (solo parsing, stdlib) |
+| `runtime.py` | Servidor ejecutable: `lifespan` que abre y cierra el `Catalog` |
+| `app.py` | `create_app`: rutas, errores HTTP y CORS (import ligero) |
+| `analysis.py` | `CopyrightAnalyzer`: staging → búsqueda → evidencia → JSON |
+| `catalog.py`, `ingestion.py` | Catálogo relacional e ingesta de originales |
+| `indexing.py` | Codebook K=128 y HNSW por SQL |
+| `search.py`, `evidence.py` | Búsqueda por segmentos y evidencia temporal |
+| `demo.py` | Preparación de una demo sintética |
+
+## Instalación
 
 ```bash
 uv sync --group copyright-api
-uv run --group copyright-api uvicorn applications.copyright_detection.app:app --reload
 ```
 
-Por defecto escucha en `http://127.0.0.1:8000`. La documentación interactiva
-queda en `/docs` y el esquema en `/openapi.json`. La `app` global no tiene
-analizador configurado (no abre bases al importarse), así que `/analyze` responde
-`503`; para analizar se usa `create_app(CopyrightAnalyzer(...))`.
+El grupo `copyright-api` instala todo lo que necesita el servidor real: FastAPI,
+python-multipart, uvicorn y `soupdb-vector`, que a su vez trae librosa, numpy,
+scikit-learn, soundfile y el resto. No depende del grupo `dev`:
+`uv sync --no-dev --group copyright-api` instala solo el runtime. El grupo `dev` incluye
+`copyright-api`, así que `uv sync` basta para correr los tests.
 
-## Frontera REST de la aplicación
+## Preparar la demo
 
-La API REST es la frontera de integración de la aplicación demo: el frontend
-solo consume `/api/v1/...` por HTTP. No accede al `Catalog`, a los archivos del
-dataset ni al índice; SoupDB sigue siendo la base multimodal subyacente
-(relacional `songs`/`audio_segments` + HNSW vectorial) detrás de la API.
+La demo es autocontenida. Genera en runtime tres canciones sintéticas deterministas
+(Alpha 20 s, Beta 15 s y Gamma 12.5 s), sin material con copyright y sin WAV
+versionados, y prepara la base con las APIs reales:
 
-## Endpoints
+```
+WAV originales → CopyrightCatalog.initialize() → ingest_song()
+→ train_codebook(K=128) → open_catalog() → ensure_index(HNSW euclidean) → close()
+```
+
+```bash
+uv run --group copyright-api python -m applications.copyright_detection.demo prepare --root .demo/copyright
+```
+
+Estructura (`.demo/` está en `.gitignore`):
+
+```
+.demo/copyright/
+  dataset/tracks/{alpha,beta,gamma}.wav   originales
+  dataset/queries/                        staging de uploads (vacío)
+  db/                                     base SoupDB (songs: 3, audio_segments: 10)
+  artifacts/codebook.npz                  codebook K=128 + IDF
+  artifacts/cache/                        caché de MFCC
+  artifacts/vectors/                      HNSW persistente
+  artifacts/training_manifest.jsonl       manifest de entrenamiento
+  sample_query.wav                        audio de prueba (idéntico a Alpha)
+  demo.json                               marca de demo completa
+```
+
+`sample_query.wav` es solo un input de usuario: está fuera del dataset y no se registra
+en SoupDB. El comando imprime las rutas y las variables `COPYRIGHT_*` listas para copiar.
+
+Si `--root` ya contiene una demo completa, se reutiliza sin modificarla. Si existe con
+otro contenido o con una preparación interrumpida, el comando falla y pide borrarlo a
+mano: la herramienta nunca borra directorios.
+
+## Ejecutar el servidor
+
+El runtime asume una base ya preparada: **no entrena el codebook ni crea o reconstruye
+el índice**.
+
+- **Al arrancar** (`lifespan` de FastAPI) abre el `Catalog` con `open_catalog`, comprueba
+  con `require_index` que el HNSW existe y está cargado, crea el `CopyrightAnalyzer` y lo
+  instala en la app.
+- **Al apagar** cierra el `Catalog` una sola vez.
+- **Si falta** una variable, un directorio o el índice, el servidor no arranca y cierra lo
+  que hubiera abierto.
+
+Bash:
+
+```bash
+export COPYRIGHT_DB_PATH=.demo/copyright/db
+export COPYRIGHT_DATASET_ROOT=.demo/copyright/dataset
+export COPYRIGHT_CODEBOOK_PATH=.demo/copyright/artifacts/codebook.npz
+export COPYRIGHT_DESCRIPTOR_CACHE=.demo/copyright/artifacts/cache
+export COPYRIGHT_VECTOR_STORAGE=.demo/copyright/artifacts/vectors
+uv run --group copyright-api python -m applications.copyright_detection.runtime
+```
+
+PowerShell:
+
+```powershell
+$env:COPYRIGHT_DB_PATH=".demo/copyright/db"
+$env:COPYRIGHT_DATASET_ROOT=".demo/copyright/dataset"
+$env:COPYRIGHT_CODEBOOK_PATH=".demo/copyright/artifacts/codebook.npz"
+$env:COPYRIGHT_DESCRIPTOR_CACHE=".demo/copyright/artifacts/cache"
+$env:COPYRIGHT_VECTOR_STORAGE=".demo/copyright/artifacts/vectors"
+uv run --group copyright-api python -m applications.copyright_detection.runtime
+```
+
+También se puede arrancar con uvicorn. En ese caso el host y el puerto salen de las
+opciones de uvicorn, no de `COPYRIGHT_HOST`/`COPYRIGHT_PORT`:
+
+```bash
+uv run --group copyright-api uvicorn applications.copyright_detection.runtime:app --port 8000
+```
+
+Prueba:
+
+```bash
+curl -F "file=@.demo/copyright/sample_query.wav" http://127.0.0.1:8000/api/v1/analyze
+```
+
+Responde HTTP 200. La primera run es la de Alpha (0–20 s del audio ↔ 0–20 s de la
+canción), con `segment_count=4`, `is_best_run=true` y score ≈ 1.0; ver el ejemplo de la
+sección API.
+
+**Variables de entorno.** Las rutas relativas se resuelven contra el directorio de
+trabajo del proceso. Una variable opcional vacía o ausente toma su valor por defecto. Un
+valor inválido detiene el arranque; nunca se sustituye en silencio por el valor por
+defecto.
+
+| Variable | Por defecto | Validación |
+|---|---|---|
+| `COPYRIGHT_DB_PATH` | obligatoria | directorio existente con la base |
+| `COPYRIGHT_DATASET_ROOT` | obligatoria | directorio del dataset (escribible: ahí va el staging) |
+| `COPYRIGHT_CODEBOOK_PATH` | obligatoria | `.npz` existente que produzca vectores de dimensión 128 |
+| `COPYRIGHT_DESCRIPTOR_CACHE` | obligatoria | carpeta de la caché de MFCC |
+| `COPYRIGHT_VECTOR_STORAGE` | obligatoria | directorio existente con el HNSW |
+| `COPYRIGHT_SEARCH_K` | `5` | entero decimal entre 1 y 1000 |
+| `COPYRIGHT_STAGING_DIR` | `queries` | ruta relativa canónica con `/` |
+| `COPYRIGHT_HOST` | `127.0.0.1` | interfaz de escucha (solo con `python -m ...runtime`) |
+| `COPYRIGHT_PORT` | `8000` | entero entre 1 y 65535 (solo con `python -m ...runtime`) |
+| `COPYRIGHT_CORS_ORIGINS` | vacío | orígenes `http(s)://host[:puerto]` separados por comas |
+
+**CORS.** Con la variable vacía no se habilita CORS. Para un frontend de desarrollo en
+otro origen:
+
+```bash
+export COPYRIGHT_CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
+```
+
+Se permiten los métodos `GET` y `POST` y las cabeceras `Accept` y `Content-Type`, que es
+lo que necesita `POST multipart /api/v1/analyze`. El valor `*` se rechaza: los orígenes
+se enumeran uno a uno.
+
+`applications.copyright_detection.app:app` sigue existiendo como app sin analizador: al
+importarse no lee el entorno ni abre nada, y responde 503 en `/analyze`. El servidor
+ejecutable es `runtime`.
+
+## API
+
+La documentación interactiva está en `/docs` y el esquema en `/openapi.json`.
 
 | Método | Ruta | Respuesta |
 |---|---|---|
 | `GET` | `/api/v1/health` | `200 {"status": "ok", "service": "soupdb-copyright-api"}` |
-| `POST` | `/api/v1/analyze` | `200 AnalysisResult` con la evidencia temporal (ver abajo) |
+| `POST` | `/api/v1/analyze` | `200 AnalysisResult` con la evidencia temporal |
 
 ### `POST /api/v1/analyze`
 
@@ -63,43 +221,45 @@ POST multipart
 
 La lógica vive en `applications/copyright_detection/analysis.py`
 (`CopyrightAnalyzer`); FastAPI solo recibe el multipart, llama al servicio y
-traduce errores. `create_app(analyzer)` recibe el servicio ya configurado con un
-`Catalog` abierto por `open_catalog`, la configuración del índice, `search_k`
-(vecinos por segmento, por defecto 5; no es un umbral) y la carpeta de staging.
+traduce errores. `search_k` (vecinos por segmento, `COPYRIGHT_SEARCH_K`, por
+defecto 5) no es un umbral.
 
-Respuesta real (candidato idéntico a una canción de 13 s del catálogo, `search_k=2`):
+Respuesta real del servidor de la demo (`sample_query.wav`, idéntico a Alpha,
+`search_k=5`), recortada a la primera run de dos canciones:
 
 ```json
 {
-  "analysis_id": "4ff2b1526cd0458085ecc0f4720271b6",
-  "filename": "remix.wav",
+  "analysis_id": "aeb1eb30c00940d196be845ac2adf00f",
+  "filename": "sample_query.wav",
   "segment_seconds": 5.0,
   "matches": [
     {
-      "query_start": 0.0, "query_end": 13.0,
-      "song_id": 1, "title": "Alpha", "artist": "Ana",
-      "source_start": 0.0, "source_end": 13.0,
-      "score": 0.9999999752196517,
-      "segment_count": 3,
-      "min_score": 0.9999999708697074, "max_score": 0.9999999794376813,
+      "query_start": 0.0, "query_end": 20.0,
+      "song_id": 1, "title": "Alpha", "artist": "Demo Ensemble",
+      "source_start": 0.0, "source_end": 20.0,
+      "score": 0.999999976788879,
+      "segment_count": 4,
+      "min_score": 0.9999999735362719, "max_score": 0.9999999802395061,
       "alignment_offset_seconds": 0.0,
       "is_best_run": true
     },
     {
-      "query_start": 0.0, "query_end": 5.0,
-      "song_id": 1, "title": "Alpha", "artist": "Ana",
-      "source_start": 5.0, "source_end": 10.0,
-      "score": 0.41421356298841117,
-      "segment_count": 1,
-      "min_score": 0.41421356298841117, "max_score": 0.41421356298841117,
-      "alignment_offset_seconds": 5.0,
-      "is_best_run": false
+      "query_start": 0.0, "query_end": 10.0,
+      "song_id": 3, "title": "Gamma", "artist": "Demo Ensemble",
+      "source_start": 0.0, "source_end": 10.0,
+      "score": 0.41421356292998734,
+      "segment_count": 2,
+      "min_score": 0.41421356229651984, "max_score": 0.4142135635634548,
+      "alignment_offset_seconds": 0.0,
+      "is_best_run": true
     }
   ]
 }
 ```
 
-(Recortado: la respuesta real trae dos runs más de un segmento con score ≈ 0.414.)
+(La respuesta completa trae 13 runs: las de Alpha con otros offsets y las de Gamma y
+Beta, todas con score ≈ 0.414. Ese valor es `1 / (1 + √2)`, la distancia entre vectores
+TF-IDF L2 sin palabras acústicas en común. Aparecen porque no hay umbral.)
 
 Cada elemento de `matches` es una **run de evidencia temporal** (ver "Evidencia
 temporal"):
@@ -135,7 +295,7 @@ es solo el nombre presentado por el cliente, sin componentes de ruta
 | Código | Cuándo |
 |---|---|
 | `422` | Falta `file` (detalle de validación de FastAPI), o el audio está vacío, no se puede decodificar o no produce ningún segmento (≥ 2.5 s) |
-| `503` | Análisis no configurado (`create_app()` sin analizador) o índice/perfil no disponible |
+| `503` | Análisis no configurado (app sin analizador, como `app.py:app`) o índice/perfil no disponible |
 | `500` | Error interno inesperado; respuesta genérica sin traceback (el detalle queda en el log) |
 
 **Staging y limpieza.** Cada análisis escribe el upload por bloques en una
@@ -150,16 +310,6 @@ El candidato nunca se inserta en `songs`, `audio_segments` ni en el HNSW.
 **Concurrencia.** El `Catalog` compartido no está documentado como thread-safe:
 el servicio serializa la búsqueda y la evidencia con un `RLock`. Las escrituras de
 staging de análisis simultáneos van en paralelo y nunca colisionan.
-
-## Configuración prevista
-
-Definida en `applications/copyright_detection/config.py`:
-
-| Parámetro | Valor | Origen |
-|---|---|---|
-| `SEGMENT_SECONDS` | `5.0` | Segmentación de audio de la Parte 4 (un test verifica que coincide con `soupdb_vector`) |
-| `INDEX_KIND` | `HNSW` | Benchmarks de la Parte 4 sobre 100 000 segmentos |
-| `METRIC` | `euclidean` | Recall@10 ≈ 0.990, ≈ 12.3 ms/consulta |
 
 ## Catálogo relacional
 
@@ -208,11 +358,11 @@ instancia, que solo protege un proceso. No sustituye restricciones del motor, no
 coordina varios procesos y registrar una canción con sus segmentos no es atómico;
 se resolverá al integrar la ingesta con transacciones.
 
-## Ingesta de canciones
+## Pipeline multimedia: ingesta y segmentación
 
 `applications/copyright_detection/ingestion.py` registra una canción original del
-dataset en el catálogo. Requiere `soupdb-vector` (librosa), incluido en el grupo
-`dev`; la API REST no importa este módulo.
+dataset en el catálogo. Requiere `soupdb-vector` (librosa), incluido en los grupos
+`copyright-api` y `dev`; `app.py` no importa este módulo.
 
 ```python
 from applications.copyright_detection.ingestion import SongMetadata, ingest_song
@@ -323,7 +473,7 @@ catalog = open_catalog(db_path, config)  # índice ya creado (sección anterior)
 result = search_audio(catalog, config, "queries/remix.wav", k=5)
 ```
 
-- **Ubicación del candidato:** en esta etapa, `audio_path` es relativo a la raíz
+- **Ubicación del candidato:** `audio_path` es relativo a la raíz
   del perfil (`config.dataset_root`), porque el vectorizador del perfil solo
   resuelve rutas ahí. Se valida igual que los originales (relativo, `/`, sin `#`,
   dentro de la raíz, archivo existente). El candidato **no** se inserta en
@@ -398,3 +548,35 @@ score bajo; una run con scores bajos sigue siendo una run estructural. La
 decisión de qué evidencia es significativa (y cualquier umbral, que habrá que
 calibrar experimentalmente) pertenece a una capa posterior. `score` sigue siendo
 la similitud del motor, no una probabilidad de copyright.
+
+## Decisiones técnicas
+
+| Decisión | Valor |
+|---|---|
+| Segmentación | 5 s, sin solapamiento; el último bloque se conserva solo si dura ≥ 2.5 s |
+| Sample rate | 22 050 Hz, mono |
+| MFCC | 20 coeficientes |
+| Codebook | K=128 (K-Means) |
+| Representación | TF-IDF con normalización L2 |
+| Índice | HNSW |
+| Métrica | euclidean |
+| Búsqueda | k vecinos por segmento, configurable con `COPYRIGHT_SEARCH_K` (por defecto 5) |
+| Score | `1 / (1 + d)`: similitud, no probabilidad |
+
+HNSW se eligió por el benchmark de audio de la Parte 4 sobre 100 000 segmentos:
+Recall@10 ≈ 0.990 y ≈ 12.3 ms por consulta. Son cifras de ese benchmark, no de la demo,
+y no significan que HNSW supere siempre a IVF: fue la mejor opción en esas condiciones.
+
+## Limitaciones
+
+- No hay un umbral calibrado: se devuelven todas las runs.
+- `score` es una similitud, no una probabilidad, y la respuesta no es un veredicto
+  jurídico.
+- Como los segmentos no se solapan, la resolución temporal es de 5 s.
+- Las búsquedas de un mismo proceso se ejecutan de una en una, protegidas por un `RLock`,
+  porque el `Catalog` no está documentado como thread-safe.
+- La caché de MFCC conserva las entradas de los uploads ya borrados; no se limpian.
+- Con la API actual no se pueden añadir canciones una vez creado el HNSW: haría falta
+  integrar la ingesta con transacciones o reconstruir el índice.
+- No hay límite de tamaño para los uploads.
+- El frontend se desarrolla por separado y solo consume la API REST.

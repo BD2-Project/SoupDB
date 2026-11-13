@@ -1,7 +1,7 @@
 site_name: SoupDB
-site_description: Motor de base de datos multimodal con RAG sobre papers académicos
-repo_url: https://github.com/BD2-Project/SoupBD
-site_url: https://BD2-Project.github.io/SoupBD
+site_description: Motor de base de datos multimodal (relacional, espacial y vectorial) y aplicación de similitud de audio
+repo_url: https://github.com/BD2-Project/SoupDB
+site_url: https://BD2-Project.github.io/SoupDB
 
 theme:
   name: material

@@ -1,23 +1,29 @@
 # SoupDB
 
-[![ci](https://github.com/BD2-Project/SoupBD/actions/workflows/ci.yml/badge.svg)](https://github.com/BD2-Project/SoupBD/actions/workflows/ci.yml)
-[![coverage](https://img.shields.io/badge/coverage-pending-orange)](https://github.com/BD2-Project/SoupBD/actions/workflows/ci.yml)
+[![ci](https://github.com/BD2-Project/SoupDB/actions/workflows/ci.yml/badge.svg)](https://github.com/BD2-Project/SoupDB/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/badge/coverage-pending-orange)](https://github.com/BD2-Project/SoupDB/actions/workflows/ci.yml)
 [![pypi](https://img.shields.io/badge/pypi-0.1.0-blue)]()
-[![license](https://img.shields.io/github/license/BD2-Project/SoupBD)](LICENSE)
+[![license](https://img.shields.io/github/license/BD2-Project/SoupDB)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)]()
 
-Motor de base de datos **multimodal** (relacional, espacial y vectorial) construido desde cero en Python, con integración de IA. La aplicación final es un **RAG sobre documentos académicos**: indexa, recupera y genera respuestas sobre el contenido de papers, informes y otros materiales académicos.
+Motor de base de datos **multimodal** (relacional, espacial y vectorial) construido desde cero en Python, con integración de IA.
+
+La aplicación final (Parte 5) es una **aplicación de análisis de similitud de audio** para
+detectar posibles coincidencias entre un audio consultado y las canciones originales del
+catálogo (copyright/remixes). Combina el catálogo relacional, el pipeline multimedia
+MFCC/TF-IDF y el índice HNSW de SoupDB, y se expone al frontend por una API REST. Devuelve
+**similitud acústica y evidencia temporal**, no un veredicto jurídico de infracción.
 
 ## IA aplicada
 
-- **RAG** (retrieval-augmented generation) sobre documentos académicos.
-- **Búsqueda vectorial** (embeddings, HNSW) para similitud semántica.
-- **Recuperación léxica** (BM25) y fusión con la búsqueda vectorial.
-- **Extracción de características multimodales** (SIFT, MFCC, K-Means).
+- **Búsqueda vectorial** (HNSW, IVF) para similitud entre descriptores.
+- **Recuperación léxica** (índice invertido, BM25) con el plugin `soupdb-inverted`.
+- **Extracción de características multimodales** (SIFT, MFCC, K-Means, bag of words TF-IDF).
+- **Similitud de audio por segmentos** con evidencia temporal (aplicación de la Parte 5).
 
 <p align="center"><sub>Proyecto académico · UTEC · Base de Datos 2 · ciclo 2026-2</sub></p>
 
-## Arquitectura
+## Arquitectura del gestor
 
 **Arquitectura de plugins:** el núcleo (storage, tipos base, B+/hash/R-tree,
 SQL y transacciones) se mantiene nativo. Full-text (`soupdb-inverted`) y
@@ -52,6 +58,45 @@ Trabajo **multirepo**: `SoupDB` (gestor de base de datos), desarrollado en este 
 
 El **driver `rsoup`** es el cliente Rust que los consumidores usan para conectarse al pool del gestor (TCP/IP, protocolo binario v1/v2, puerto `DRIVER_PORT`); el frontend SoupChef lo integra vía Tauri. Ver [docs/driver.md](docs/driver.md) y el protocolo en [docs/protocolo.md](docs/protocolo.md).
 
+El protocolo binario TCP (puerto `55432`) es la **interfaz remota general del gestor**.
+El núcleo `engine/` no expone REST ni GraphQL.
+
+## Aplicación de la Parte 5: similitud de audio (copyright/remixes)
+
+Código en [`applications/copyright_detection/`](applications/copyright_detection/);
+guía completa (instalación, demo, API, decisiones y limitaciones) en
+[docs/copyright_api.md](docs/copyright_api.md).
+
+**Modalidades integradas:**
+
+- **Relacional:** tablas `songs` y `audio_segments` en el motor SoupDB (B+ sobre los ids).
+- **Multimedia/vectorial:** audio → MFCC → codebook K=128 → TF-IDF L2 → HNSW (euclidean)
+  sobre `audio_segments.audio_ref`; cada hit del HNSW se resuelve por RID a su fila relacional.
+
+```mermaid
+flowchart TD
+    FE["Frontend"] -->|"HTTP REST: multipart / JSON<br/>/api/v1/..."| API["FastAPI<br/>(adaptador REST de la aplicación)"]
+    API --> AN["CopyrightAnalyzer"]
+    AN -->|"SQL"| REL[("songs / audio_segments<br/>catálogo relacional")]
+    AN -->|"SQL SIMILAR_TO ... USING HNSW"| HN[("HNSW sobre audio_ref")]
+    HN --- PIPE["MFCC → codebook K=128 → TF-IDF L2"]
+```
+
+La API FastAPI es el adaptador REST de la aplicación sobre las capacidades relacionales y
+vectoriales de SoupDB. El frontend solo consume `/api/v1/...`; nunca toca el `Catalog`, el
+HNSW, los archivos internos, el protocolo TCP ni SQL. El gestor sigue ofreciendo su propio
+protocolo TCP (`rsoup`, puerto `55432`) para los clientes generales; son dos fronteras distintas.
+
+Demo autocontenida (audio sintético generado en runtime, sin descargas):
+
+```bash
+uv sync --group copyright-api
+uv run --group copyright-api python -m applications.copyright_detection.demo prepare --root .demo/copyright
+# exporta las variables COPYRIGHT_* que imprime el comando anterior, y luego:
+uv run --group copyright-api python -m applications.copyright_detection.runtime
+curl -F "file=@.demo/copyright/sample_query.wav" http://127.0.0.1:8000/api/v1/analyze
+```
+
 ## Dependencias
 
 | Dependencia | Uso | Instalación |
@@ -67,6 +112,9 @@ El **driver `rsoup`** es el cliente Rust que los consumidores usan para conectar
 ```bash
 # Instalar dependencias y crear el entorno
 uv sync --all-groups
+
+# Solo lo necesario para el servidor de la Parte 5 (FastAPI + soupdb-vector)
+uv sync --group copyright-api
 
 # Tests y lint
 uv run pytest
@@ -105,8 +153,8 @@ Configuración por variables de entorno: `SOUPDB_DATA` (directorio de datos),
 
 ## Documentación
 
-- API reference y guías: https://BD2-Project.github.io/SoupBD
-- Informe técnico (typst): se publica como **PDF** en las [Releases](https://github.com/BD2-Project/SoupBD/releases).
+- API reference y guías: https://BD2-Project.github.io/SoupDB
+- Informe técnico (typst): se publica como **PDF** en las [Releases](https://github.com/BD2-Project/SoupDB/releases).
 - Estrategia de versionado de releases: `docs/estrategia-release.md`.
 
 ## Licencia
