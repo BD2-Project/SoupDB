@@ -10,7 +10,11 @@ traduce errores. Este servicio:
    una ruta devolvería descriptores de un audio anterior.
 2. Llama a ``search_audio`` y ``build_temporal_evidence`` (sin copiar su lógica).
 3. Convierte cada ``TemporalRun`` en un ``CopyrightMatch``.
-4. Borra siempre el archivo y su carpeta del análisis (``try``/``finally``).
+4. Si hay historial (:class:`~applications.copyright_detection.history.AnalysisHistory`),
+   persiste el resultado en SoupDB **antes** de devolverlo. Se guardan el resultado y
+   la metadata, nunca el audio subido.
+5. Borra siempre el archivo y su carpeta del análisis (``try``/``finally``), también
+   cuando el resultado se guarda en el historial.
 
 El candidato es solo una consulta: no se registra en ``songs``,
 ``audio_segments`` ni en el HNSW. La caché de MFCC conserva entradas de rutas
@@ -18,8 +22,9 @@ temporales ya borradas; no hay riesgo de reutilizarlas (la ruta no se repite) y
 limpiarlas queda como mejora futura.
 
 Concurrencia: el ``Catalog`` compartido no está documentado como thread-safe, así
-que la búsqueda y la evidencia se serializan con un ``RLock`` del servicio. La
-escritura del staging va fuera del lock. El servicio no abre ni cierra el
+que la búsqueda, la evidencia y el historial se serializan con un ``RLock``. Se puede
+inyectar (``lock=``) para compartirlo con las lecturas del catálogo y del historial
+que hace el API. La escritura del staging va fuera del lock. El servicio no abre ni cierra el
 ``Catalog``: lo hace quien lo creó con ``open_catalog``.
 
 El resultado es evidencia de similitud acústica y temporal; no determina copyright.
@@ -31,7 +36,7 @@ import shutil
 import threading
 import uuid
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
 from applications.copyright_detection.config import SEGMENT_SECONDS
 from applications.copyright_detection.errors import AnalysisUnavailableError, InvalidAudioError
@@ -52,6 +57,9 @@ from applications.copyright_detection.settings import (
     validate_staging_dir,
 )
 from engine.common.catalog import Catalog
+
+if TYPE_CHECKING:
+    from applications.copyright_detection.history import AnalysisHistory
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +99,8 @@ class CopyrightAnalyzer:
         *,
         search_k: int = DEFAULT_SEARCH_K,
         staging_dir: str = DEFAULT_STAGING_DIR,
+        history: "AnalysisHistory | None" = None,
+        lock: "threading.RLock | None" = None,
     ) -> None:
         if type(search_k) is not int or search_k <= 0:
             raise ValueError(f"search_k debe ser un entero positivo, no {search_k!r}")
@@ -99,7 +109,16 @@ class CopyrightAnalyzer:
         self._config = config
         self._search_k = search_k
         self._staging_dir = staging_dir
-        self._lock = threading.RLock()
+        self._history = history
+        self._lock = lock if lock is not None else threading.RLock()
+
+    @property
+    def lock(self) -> "threading.RLock":
+        return self._lock
+
+    @property
+    def history(self) -> "AnalysisHistory | None":
+        return self._history
 
     @property
     def search_k(self) -> int:
@@ -130,7 +149,11 @@ class CopyrightAnalyzer:
             if target.stat().st_size == 0:
                 raise InvalidAudioError("el archivo subido está vacío")
             evidence = self._search(relative)
-            return _to_analysis_result(analysis_id, name, evidence)
+            result = _to_analysis_result(analysis_id, name, evidence)
+            if self._history is not None:
+                # Antes de devolver; el finally borra el upload igualmente.
+                result = self._history.save(result)
+            return result
         finally:
             target.unlink(missing_ok=True)
             try:

@@ -86,6 +86,72 @@ class AnalysisResult(BaseModel):
     )
 
 
+class StoredAnalysis(AnalysisResult):
+    """Análisis persistido en SoupDB: resultado y metadata, nunca el audio subido."""
+
+    created_at: str = Field(description="Instante del análisis, ISO 8601 en UTC.")
+
+
+class AnalysisSummary(BaseModel):
+    """Fila del historial de análisis."""
+
+    analysis_id: str = Field(description="Identificador del análisis.")
+    filename: str = Field(description="Nombre del archivo subido (solo el nombre, sin ruta).")
+    created_at: str = Field(description="Instante del análisis, ISO 8601 en UTC.")
+    segment_seconds: float = Field(gt=0, description="Duración de cada segmento analizado (s).")
+    match_count: int = Field(ge=0, description="Runs de evidencia guardadas.")
+    song_count: int = Field(ge=0, description="Canciones distintas del catálogo con alguna run.")
+    best_score: float | None = Field(
+        ge=0,
+        le=1,
+        description=(
+            "Mayor score medio de una run (similitud, no probabilidad). "
+            "``null`` si el análisis no tiene runs."
+        ),
+    )
+
+
+class CatalogSegment(BaseModel):
+    """Segmento indexado de una canción del catálogo."""
+
+    segment_id: int
+    segment_index: int = Field(ge=0)
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(gt=0)
+
+
+class CatalogSong(BaseModel):
+    """Canción original del catálogo (sin rutas internas)."""
+
+    song_id: int
+    title: str
+    artist: str
+    duration_seconds: float = Field(gt=0)
+    segment_count: int = Field(ge=0, description="Segmentos de 5 s indexados en el HNSW.")
+    audio_url: str = Field(description="Ruta del API que sirve el audio original.")
+
+
+class CatalogSongDetail(CatalogSong):
+    """Canción del catálogo con sus segmentos indexados."""
+
+    segments: list[CatalogSegment]
+
+
+class CatalogResponse(BaseModel):
+    """Catálogo de canciones originales, de solo lectura en runtime."""
+
+    song_count: int = Field(ge=0)
+    segment_count: int = Field(ge=0)
+    catalog_mutable: Literal[False] = Field(
+        default=False,
+        description=(
+            "Siempre false: el HNSW se construye antes de arrancar el servidor y el "
+            "runtime no puede añadir ni quitar canciones."
+        ),
+    )
+    songs: list[CatalogSong]
+
+
 class ErrorResponse(BaseModel):
     """Error devuelto por el API (formato estándar de FastAPI)."""
 

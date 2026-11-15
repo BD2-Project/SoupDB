@@ -29,6 +29,11 @@ flowchart TD
     AN --> EV["build_temporal_evidence: runs por canción"]
     SE --> CAT[("SoupDB Catalog<br/>songs / audio_segments")]
     SE --> HN[("HNSW sobre audio_ref<br/>MFCC → K=128 → TF-IDF L2")]
+    AN -->|"guarda el resultado"| HI["AnalysisHistory (history.py)"]
+    HI --> HT[("SoupDB Catalog<br/>analyses / analysis_matches")]
+    API --> LI["CatalogLibrary (library.py)<br/>solo lectura + audio original"]
+    LI --> CAT
+    API --> EX["export.py: JSON / CSV"]
 ```
 
 La API FastAPI es el adaptador REST de la aplicación sobre las capacidades relacionales y
@@ -51,11 +56,15 @@ sigue sin dependencias externas.
 | `settings.py` | Variables `COPYRIGHT_*` → `RuntimeSettings` (solo parsing, stdlib) |
 | `runtime.py` | Servidor ejecutable: `lifespan` que abre y cierra el `Catalog` |
 | `app.py` | `create_app`: rutas, errores HTTP y CORS (import ligero) |
-| `analysis.py` | `CopyrightAnalyzer`: staging → búsqueda → evidencia → JSON |
+| `analysis.py` | `CopyrightAnalyzer`: staging → búsqueda → evidencia → historial → JSON |
+| `history.py` | `AnalysisHistory`: tablas `analyses`/`analysis_matches` en SoupDB |
+| `library.py` | `CatalogLibrary`: catálogo de solo lectura y resolución segura del audio |
+| `export.py` | Exportación de un análisis guardado a JSON o CSV |
 | `catalog.py`, `ingestion.py` | Catálogo relacional e ingesta de originales |
 | `indexing.py` | Codebook K=128 y HNSW por SQL |
 | `search.py`, `evidence.py` | Búsqueda por segmentos y evidencia temporal |
 | `demo.py` | Preparación de una demo sintética |
+| `fma_catalog.py` | Preparación del catálogo real FMA Small |
 
 ## Instalación
 
@@ -243,9 +252,11 @@ El runtime asume una base ya preparada: **no entrena el codebook ni crea o recon
 el índice**.
 
 - **Al arrancar** (`lifespan` de FastAPI) abre el `Catalog` con `open_catalog`, comprueba
-  con `require_index` que el HNSW existe y está cargado, crea el `CopyrightAnalyzer` y lo
-  instala en la app.
-- **Al apagar** cierra el `Catalog` una sola vez.
+  con `require_index` que el HNSW existe y está cargado, crea si faltan las tablas del
+  historial (`analyses`, `analysis_matches`) y construye el `CopyrightAnalyzer`, el
+  catálogo de solo lectura y el historial, que comparten un único `RLock`.
+- **Al apagar** cierra el `Catalog` una sola vez; al cerrarse, escribe en disco el
+  historial pendiente.
 - **Si falta** una variable, un directorio o el índice, el servidor no arranca y cierra lo
   que hubiera abierto.
 
@@ -328,7 +339,16 @@ La documentación interactiva está en `/docs` y el esquema en `/openapi.json`.
 | Método | Ruta | Respuesta |
 |---|---|---|
 | `GET` | `/api/v1/health` | `200 {"status": "ok", "service": "soupdb-copyright-api"}` |
-| `POST` | `/api/v1/analyze` | `200 AnalysisResult` con la evidencia temporal |
+| `POST` | `/api/v1/analyze` | `200 AnalysisResult` con la evidencia temporal; se guarda en el historial |
+| `GET` | `/api/v1/catalog` | `200 CatalogResponse`: canciones del catálogo (solo lectura) |
+| `GET` | `/api/v1/catalog/{song_id}` | `200 CatalogSongDetail`: canción y sus segmentos; `404` si no existe |
+| `GET` | `/api/v1/catalog/{song_id}/audio` | `200`/`206` audio original (admite `Range`); `404` si no existe |
+| `GET` | `/api/v1/analyses` | `200 AnalysisSummary[]`: historial, el más reciente primero |
+| `GET` | `/api/v1/analyses/{analysis_id}` | `200 StoredAnalysis`: resultado guardado; `404` si no existe |
+| `GET` | `/api/v1/analyses/{analysis_id}/export?format=json\|csv` | descarga JSON o CSV; `404` si no existe |
+
+Todos los endpoints nuevos son de lectura. Sin servicio configurado (la `app` de
+`app.py` sin `lifespan`) responden `503`. Ver [API para el frontend](#api-para-el-frontend).
 
 ### `POST /api/v1/analyze`
 
@@ -441,6 +461,150 @@ El candidato nunca se inserta en `songs`, `audio_segments` ni en el HNSW.
 **Concurrencia.** El `Catalog` compartido no está documentado como thread-safe:
 el servicio serializa la búsqueda y la evidencia con un `RLock`. Las escrituras de
 staging de análisis simultáneos van en paralelo y nunca colisionan.
+
+## API para el frontend
+
+Lo que el frontend puede hacer con capacidades reales del backend:
+
+| Función del frontend | Cómo |
+|---|---|
+| Escuchar el audio analizado | Con el `File` local que eligió el usuario (`URL.createObjectURL`). El backend no lo guarda. |
+| Comparar con la canción original | `<audio src="/api/v1/catalog/{song_id}/audio">` y posicionar en `source_start`…`source_end` de cada run. |
+| Historial | `GET /analyses` y `GET /analyses/{analysis_id}`. |
+| Exportar | `GET /analyses/{analysis_id}/export?format=json` o `format=csv`. |
+| Consultar el catálogo | `GET /catalog` y `GET /catalog/{song_id}`. |
+
+### Catálogo (solo lectura)
+
+`GET /api/v1/catalog` devuelve las canciones que hay realmente en `songs`:
+
+```json
+{
+  "song_count": 80,
+  "segment_count": 480,
+  "catalog_mutable": false,
+  "songs": [
+    {"song_id": 2, "title": "...", "artist": "...", "duration_seconds": 29.98,
+     "segment_count": 6, "audio_url": "/api/v1/catalog/2/audio"}
+  ]
+}
+```
+
+`GET /api/v1/catalog/{song_id}` añade `segments` (`segment_id`, `segment_index`,
+`start_seconds`, `end_seconds`). No se exponen `audio_path`, `audio_ref` ni rutas
+internas.
+
+**El catálogo es de solo lectura durante el runtime** (`catalog_mutable: false`). El HNSW
+se construye antes de arrancar el servidor (ingesta → codebook → índice) y, con el
+índice creado, el motor bloquea `INSERT`/`DELETE` en `audio_segments`. Para cambiar el
+catálogo se prepara de nuevo con `fma_catalog prepare` (o la demo) en otro directorio. No
+hay endpoints para añadir o quitar canciones.
+
+### Audio de referencia
+
+`GET /api/v1/catalog/{song_id}/audio` sirve el archivo original de una canción
+catalogada con `FileResponse` de Starlette:
+
+- admite `Range` (`206 Partial Content`, `416` si el rango no es satisfacible) y
+  anuncia `Accept-Ranges: bytes`, así que el `<audio>` del navegador puede saltar a
+  `source_start` sin descargar el archivo entero;
+- `Content-Type` según la extensión (`audio/mpeg`, `audio/wav`, `audio/flac`,
+  `audio/ogg`, `audio/basic`) y `Content-Disposition: inline` con el nombre del archivo;
+- no se generan recortes: el frontend posiciona el reproductor con `source_start` y
+  `source_end` del resultado.
+
+Medidas contra path traversal:
+
+- el endpoint recibe un **entero** (`song_id`, validado entre 1 y 2³¹−1; si no, `422`);
+  nunca acepta una ruta del cliente y cualquier parámetro extra se ignora;
+- la ruta sale de `songs.audio_path` y se valida con `resolve_dataset_path`, el mismo
+  validador de la ingesta: relativa, canónica, sin `..`, sin salir de
+  `COPYRIGHT_DATASET_ROOT` al resolver enlaces, archivo existente;
+- solo se sirven extensiones de audio conocidas;
+- si algo falla (fila manipulada, archivo ausente) responde `404` sin revelar la ruta.
+
+Con CORS configurado se permite la cabecera `Range` y se exponen `Accept-Ranges`,
+`Content-Range`, `Content-Length` y `Content-Disposition`.
+
+### Historial de análisis
+
+Cada `POST /api/v1/analyze` correcto se guarda en SoupDB **antes** de responder, en dos
+tablas de la misma base, independientes de `songs`/`audio_segments`:
+
+```
+analyses (analysis_id TEXT, filename TEXT, created_at TEXT,
+          segment_seconds FLOAT, match_count INT)
+analysis_matches (analysis_id TEXT, match_order INT, song_id INT,
+                  query_start FLOAT, query_end FLOAT, source_start FLOAT, source_end FLOAT,
+                  score FLOAT, segment_count INT, min_score FLOAT, max_score FLOAT,
+                  alignment_offset_seconds FLOAT, is_best_run BOOL)
+```
+
+- El servidor crea las tablas (y un índice B+ sobre `analysis_id` en cada una) al
+  arrancar si faltan; si existen con otro schema, no arranca.
+- `filename` es solo el nombre mostrado (sin ruta); `created_at` es ISO 8601 en UTC.
+- `title` y `artist` no se duplican: se leen de `songs` al reconstruir.
+- **No se guarda el audio subido.** El upload sigue la política de siempre: staging
+  temporal → análisis → borrado al terminar. Un análisis histórico conserva el
+  resultado y la metadata, pero el audio ya no existe en el servidor: para volver a
+  escucharlo, el usuario necesita su archivo.
+- Atomicidad: SoupDB no tiene `UNIQUE` ni transacciones durables entre tablas. Se
+  insertan primero las runs y al final la fila de `analyses`, que actúa como marca de
+  commit; las lecturas solo ven análisis con esa fila y comprueban `match_count`. Si la
+  escritura falla, se borran las runs escritas y el `POST` responde `500`.
+- Durabilidad: el `Catalog` escribe las páginas a disco al cerrarse (y al desalojarlas
+  del buffer). Con un apagado normal del servidor el historial persiste; matar el
+  proceso de golpe puede perder los análisis más recientes (el motor aún no tiene WAL).
+
+`GET /api/v1/analyses` lista los análisis del más reciente al más antiguo:
+
+```json
+[{"analysis_id": "7f3c…", "filename": "remix.mp3", "created_at": "2026-11-15T10:42:07.123456Z",
+  "segment_seconds": 5.0, "match_count": 9, "song_count": 4, "best_score": 0.94}]
+```
+
+`best_score` es el mayor `score` medio de una run (similitud, no probabilidad) y vale
+`null` si el análisis no tiene runs. `GET /api/v1/analyses/{analysis_id}` devuelve el
+`AnalysisResult` completo más `created_at`. Un id inexistente o mal formado da `404`.
+
+### Exportación
+
+`GET /api/v1/analyses/{analysis_id}/export?format=json|csv` (por defecto `json`; otro
+formato da `422`) responde con `Content-Disposition: attachment;
+filename="analysis-<id>.<ext>"`.
+
+- **JSON**: el mismo cuerpo que `GET /analyses/{analysis_id}`.
+- **CSV** (UTF-8): una fila por run, en el orden del resultado; sin runs, solo la
+  cabecera. Columnas: `analysis_id, created_at, filename, match_order, song_id, title,
+  artist, query_start, query_end, source_start, source_end, duration, score,
+  segment_count, min_score, max_score, alignment_offset_seconds, is_best_run`.
+  `duration` es `query_end - query_start`. Los textos que empiezan por `= + - @` se
+  prefijan con `'` para que una hoja de cálculo no los ejecute como fórmula.
+
+No hay exportación a PDF.
+
+### Valores reales del sistema
+
+Para cualquier texto o pantalla del frontend:
+
+| Concepto | Valor real |
+|---|---|
+| Catálogo académico | 80 canciones de FMA Small (10 por género) y 480 segmentos indexados |
+| Segmentos | 5 s **sin solapamiento**; resolución temporal de 5 s |
+| Descriptor de entrada | MFCC de **20 coeficientes** por frame (22 050 Hz, mono) |
+| Codebook | K-Means con **K=128** |
+| Vector final | histograma TF-IDF de **128 dimensiones**, normalizado L2 |
+| Índice | **HNSW** |
+| Métrica | **euclidean** |
+| Score | `1 / (1 + distancia)`: similitud en `(0, 1]`, no probabilidad |
+| Umbral de copyright | **no existe** un umbral validado |
+| Dictamen | **no existe** dictamen jurídico automático |
+
+**No implementado** (no debe presentarse como funcionalidad): vectores MFCC de 1024
+dimensiones, métrica cosine, solapamiento de segmentos del 10/50/75 %, umbrales del
+tipo "≥ 80 %" u "≥ 85 %", cumplimiento ISO 27037, cadena de custodia, dictamen pericial,
+reparación por FFT, auto-reparación de audio, procesamiento forense y actualización
+inmediata del HNSW al subir canciones.
 
 ## Catálogo relacional
 
@@ -708,6 +872,12 @@ y no significan que HNSW supere siempre a IVF: fue la mejor opción en esas cond
   porque el `Catalog` no está documentado como thread-safe.
 - La caché de MFCC conserva las entradas de los uploads ya borrados; no se limpian.
 - Con la API actual no se pueden añadir canciones una vez creado el HNSW: haría falta
-  integrar la ingesta con transacciones o reconstruir el índice.
+  integrar la ingesta con transacciones o reconstruir el índice. El catálogo es de solo
+  lectura en runtime (`catalog_mutable: false`).
+- El historial no guarda el audio subido: un análisis antiguo no se puede volver a
+  escuchar desde el servidor.
+- El historial es durable tras un apagado normal; si el proceso muere de golpe se
+  pueden perder los análisis más recientes (sin WAL en el motor).
+- El historial no tiene paginación ni borrado.
 - No hay límite de tamaño para los uploads.
 - El frontend se desarrolla por separado y solo consume la API REST.

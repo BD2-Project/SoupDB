@@ -87,6 +87,13 @@ vectoriales de SoupDB. El frontend solo consume `/api/v1/...`; nunca toca el `Ca
 HNSW, los archivos internos, el protocolo TCP ni SQL. El gestor sigue ofreciendo su propio
 protocolo TCP (`rsoup`, puerto `55432`) para los clientes generales; son dos fronteras distintas.
 
+Además de `POST /api/v1/analyze`, el API ofrece al frontend el catálogo de solo lectura
+(`GET /catalog`, `/catalog/{song_id}`), el audio original con soporte `Range`
+(`/catalog/{song_id}/audio`), el historial de análisis guardado en SoupDB (`GET /analyses`,
+`/analyses/{analysis_id}`) y su exportación a JSON/CSV. El historial guarda resultados y
+metadata, nunca el audio subido. Detalle en
+[docs/copyright_api.md](docs/copyright_api.md#api-para-el-frontend).
+
 Demo autocontenida (audio sintético generado en runtime, sin descargas):
 
 ```bash
