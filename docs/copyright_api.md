@@ -106,6 +106,137 @@ Si `--root` ya contiene una demo completa, se reutiliza sin modificarla. Si exis
 otro contenido o con una preparación interrumpida, el comando falla y pide borrarlo a
 mano: la herramienta nunca borra directorios.
 
+## Catálogo real: FMA Small
+
+Hay dos fuentes de canciones con propósitos distintos:
+
+| Uso | Audio | Comando |
+|---|---|---|
+| Tests automáticos | sintético (Alpha/Beta/Gamma), generado en runtime | `...demo prepare` |
+| Demo académica | real: subconjunto balanceado de **FMA Small** | `...fma_catalog prepare` |
+
+La demo sintética sigue siendo la base determinista de los tests; el catálogo FMA es una
+capa adicional (`applications/copyright_detection/fma_catalog.py`) que reutiliza las mismas APIs (`ingest_song`, `train_codebook`, `open_catalog`,
+`ensure_index`, `require_index`) sin reimplementar MFCC, K-Means, TF-IDF ni HNSW.
+
+### Dataset
+
+[Free Music Archive](https://github.com/mdeff/fma) (FMA) es un dataset de investigación
+musical con audio publicado bajo licencias Creative Commons; la licencia **varía por
+pista** (columna `track/license` de `tracks.csv`, que el manifest conserva). Se usa
+**FMA Small**: 8 000 clips de ≈30 s repartidos en 8 géneros balanceados (Electronic,
+Experimental, Folk, Hip-Hop, Instrumental, International, Pop, Rock).
+
+El dataset **no se versiona ni se descarga automáticamente**. Hay que bajar de la fuente
+oficial (repositorio `mdeff/fma`) y descomprimir:
+
+- `fma_small.zip` (≈7.2 GiB): audio en `fma_small/<3 dígitos>/<track_id de 6 dígitos>.mp3`
+  (`track_id=2` → `000/000002.mp3`).
+- `fma_metadata.zip`: `tracks.csv`, con cabecera doble (`header=[0, 1]` en pandas).
+
+`--audio-root` es la carpeta que contiene `000/`, `001/`, ...; esa misma carpeta es el
+`dataset_root` del perfil y la variable `COPYRIGHT_DATASET_ROOT` del servidor. Los MP3
+no se copian.
+
+### Selección balanceada
+
+Por defecto se seleccionan **10 pistas de cada uno de los 8 géneros (80 pistas)**;
+`--per-genre` lo cambia. Es nuestra configuración de demo, no un requisito del
+enunciado. La selección es determinista (sin azar):
+
+1. se leen las filas de `tracks.csv` con `set/subset == small` (módulo `csv` de la stdlib);
+2. se agrupan por `track/genre_top` y se ordenan por `track_id`;
+3. en cada género se toman las primeras pistas cuyo MP3 existe **y** se ingesta bien.
+
+Una pista cuyo MP3 falta (`missing_file`) o no se decodifica (`ingestion_failed`) se
+registra en `skipped_tracks` y se prueba la siguiente del mismo género. `ingest_song`
+valida y decodifica antes del primer `INSERT`, así que una pista descartada no deja
+filas. Si un género no llega a `per_genre` pistas válidas, el comando aborta con un
+mensaje claro.
+
+`song_id` es el `track_id` de FMA (trazabilidad; cabe en el `INT` de 32 bits). Los
+`segment_id` son un contador global desde 1: tras cada pista,
+`next_segment_id = último segment_id + 1`, sin suponer 6 segmentos por pista.
+
+### Preparar el catálogo
+
+Las canciones se cargan **antes** de arrancar el backend:
+
+```bash
+uv run --group copyright-api python -m applications.copyright_detection.fma_catalog prepare \
+  --audio-root D:/datasets/fma_small \
+  --tracks-csv D:/datasets/fma_metadata/tracks.csv \
+  --output-root .demo/fma --per-genre 10
+```
+
+```
+FMA catalog prepared
+Songs: 80
+Segments: ~480
+Genres: 8
+Skipped tracks: 0
+HNSW: ready
+DB: ...
+```
+
+Un clip de ≈30 s da 6 segmentos de 5 s, así que 80 pistas dan **≈480 segmentos**; el
+número exacto depende de la duración real de cada clip y aparece en el resumen y en el
+manifest. Tras el resumen se imprimen las variables `COPYRIGHT_*` para Bash y
+PowerShell. `--seed` (por defecto 0) solo afecta a K-Means.
+
+Estructura (`.demo/` ya está en `.gitignore`):
+
+```
+.demo/fma/
+  db/                                 base SoupDB (songs, audio_segments)
+  artifacts/codebook.npz              codebook K=128 + IDF
+  artifacts/cache/                    caché de MFCC
+  artifacts/vectors/                  HNSW persistente
+  artifacts/training_manifest.jsonl   manifest de entrenamiento
+  catalog_manifest.json               resumen (se escribe al final)
+  sample_query.mp3                    solo tras make-query
+```
+
+`catalog_manifest.json` no guarda rutas absolutas. Incluye `dataset`, `source`,
+`number_of_songs`, `number_of_segments`, `genres`, `per_genre`, `segment_seconds`,
+`index`, `metric`, `codebook_k`, `skipped_tracks` y, por pista seleccionada, `track_id`,
+`song_id`, `title`, `artist`, `genre`, `audio_path`, `duration_seconds`,
+`segment_count`, el rango de `segment_id` y `license`. Si `--output-root` ya tiene un
+catálogo completo con el mismo `--per-genre`, se reutiliza; con otro contenido el
+comando falla y pide borrarlo a mano.
+
+El HNSW contiene los segmentos de esas canciones. Como el índice bloquea nuevas
+inserciones (ver Limitaciones), cambiar el catálogo exige prepararlo de nuevo en otro
+`--output-root`.
+
+### Consultas: smoke test y demo real
+
+Cada upload a `POST /api/v1/analyze` se segmenta y se compara contra los segmentos ya
+indexados del catálogo. El staging de uploads se escribe en
+`<COPYRIGHT_DATASET_ROOT>/queries/` (configurable con `COPYRIGHT_STAGING_DIR`), así que
+la carpeta de FMA debe ser escribible.
+
+**Smoke test.** `make-query` copia una pista del catálogo a `output_root/sample_query.mp3`
+(fuera del `dataset_root`; no se registra en SoupDB). Por defecto usa la primera pista
+seleccionada; `--track-id` elige otra y `--overwrite` reemplaza un `sample_query.mp3`
+existente:
+
+```bash
+uv run --group copyright-api python -m applications.copyright_detection.fma_catalog make-query \
+  --audio-root D:/datasets/fma_small --output-root .demo/fma
+curl -F "file=@.demo/fma/sample_query.mp3" http://127.0.0.1:8000/api/v1/analyze
+```
+
+Esperado: esa canción sale primera, con score muy alto y una run temporal continua
+(offset ≈ 0). Es una comprobación de que el pipeline funciona, **no** una evaluación de
+copyright: la consulta es idéntica a una pista indexada.
+
+**Demo real.** Se sube una canción, remix o cover externo que **no** está registrado
+(también puede sustituirse `sample_query.mp3` por un archivo propio). El sistema compara
+sus segmentos contra las pistas indexadas. No hay garantía de coincidencia: si el audio
+no contiene material del catálogo, los resultados serán solo los vecinos más cercanos,
+con scores bajos.
+
 ## Ejecutar el servidor
 
 El runtime asume una base ya preparada: **no entrena el codebook ni crea o reconstruye

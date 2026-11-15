@@ -97,6 +97,17 @@ uv run --group copyright-api python -m applications.copyright_detection.runtime
 curl -F "file=@.demo/copyright/sample_query.wav" http://127.0.0.1:8000/api/v1/analyze
 ```
 
+La demo académica puede prepararse con un subconjunto balanceado de FMA Small. Por defecto
+se seleccionan 10 pistas de cada uno de sus 8 géneros (80 pistas), configurable por CLI.
+Los tests automáticos usan solo el audio sintético; FMA no se versiona y se descarga a
+mano de la fuente oficial (ver [docs/copyright_api.md](docs/copyright_api.md#catalogo-real-fma-small)):
+
+```bash
+uv run --group copyright-api python -m applications.copyright_detection.fma_catalog prepare \
+  --audio-root D:/datasets/fma_small --tracks-csv D:/datasets/fma_metadata/tracks.csv \
+  --output-root .demo/fma --per-genre 10
+```
+
 ## Dependencias
 
 | Dependencia | Uso | Instalación |
