@@ -44,6 +44,7 @@ Estructura creada en ``--output-root`` (los MP3 originales no se copian)::
 import argparse
 import csv
 import json
+import re
 import shlex
 import shutil
 import sys
@@ -428,9 +429,45 @@ def _try_ingest(
             raise FmaCatalogError(
                 f"la ingesta de track_id={track.track_id} falló tras escribir filas: {exc}"
             ) from exc
-        if isinstance(exc, AudioIngestionError):
-            return str(exc)
-        return f"{type(exc).__name__}: {exc}"
+        return _safe_error_detail(exc, track.source_path)
+
+
+#: Rutas absolutas dentro de mensajes de excepción: entre comillas (pueden tener
+#: espacios) o sueltas. Unidad Windows (``C:\``, ``C:/``), UNC (``\\server``) o POSIX
+#: (``/tmp/...``). Las barras pueden venir duplicadas por ``repr`` (``C:\\Users``).
+_ABSOLUTE = r"(?:[A-Za-z]:[\\/]|\\\\|/(?=[^\s'\"/]))"
+_QUOTED_PATH = re.compile(rf"(['\"])({_ABSOLUTE}[^'\"]*)\1")
+_BARE_PATH = re.compile(rf"(?<![\w.:/\\]){_ABSOLUTE}[^\s'\"]*")
+REDACTED_PATH = "<path>"
+
+
+def _safe_error_detail(exc: BaseException, relative_path: str) -> str:
+    """Mensaje de ``exc`` apto para el manifest: sin rutas absolutas del sistema.
+
+    Las librerías (libsndfile, audioread...) incluyen la ruta absoluta del archivo en
+    sus mensajes, con formato distinto según la plataforma. Cada ruta absoluta se
+    sustituye por ``relative_path`` si apunta a la pista (termina en ella) y por
+    ``<path>`` en cualquier otro caso. Conserva el tipo de excepción cuando no es
+    una :class:`AudioIngestionError` (cuyo mensaje ya describe la causa).
+    """
+    message = str(exc)
+    if not isinstance(exc, AudioIngestionError):
+        message = f"{type(exc).__name__}: {message}"
+
+    def replacement(path: str) -> str:
+        normalized = re.sub(r"[\\/]+", "/", path)
+        if normalized == relative_path or normalized.endswith("/" + relative_path):
+            return relative_path
+        return REDACTED_PATH
+
+    def bare(match: re.Match[str]) -> str:
+        # Una ruta sin comillas no se lleva la puntuación que la sigue: "(/a/b)." → "(<path>).".
+        path = match[0]
+        core = path.rstrip(".,;:)]}>")
+        return replacement(core) + path[len(core) :]
+
+    message = _QUOTED_PATH.sub(lambda m: m[1] + replacement(m[2]) + m[1], message)
+    return _BARE_PATH.sub(bare, message)
 
 
 def _ingest_balanced(

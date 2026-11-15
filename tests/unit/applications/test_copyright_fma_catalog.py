@@ -7,6 +7,7 @@ generan en runtime con libsndfile; ninguno sale del ``tmp_path``.
 
 import csv
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +34,7 @@ from applications.copyright_detection.indexing import (
     open_catalog,
     require_index,
 )
+from applications.copyright_detection.ingestion import AudioIngestionError
 from applications.copyright_detection.settings import RuntimeSettings
 from engine.common.catalog import Catalog
 
@@ -98,6 +100,27 @@ def balanced_rows(per_genre: int, genres=FMA_SMALL_GENRES, start: int = 2) -> li
             rows.append({"id": track_id, "genre": genre})
             track_id += 1
     return rows
+
+
+#: Cualquier ruta absoluta Windows (unidad o UNC) o POSIX de varios niveles.
+ABSOLUTE_PATH = re.compile(r"[A-Za-z]:[\\/]|\\\\|(?<![\w.])/[^\s/'\"]+/")
+
+
+def manifest_strings(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for item in value.values() for s in manifest_strings(item)]
+    if isinstance(value, list):
+        return [s for item in value for s in manifest_strings(item)]
+    return []
+
+
+def assert_no_absolute_paths(manifest: dict, audio_root: Path) -> None:
+    variants = {str(audio_root), audio_root.as_posix(), str(audio_root).replace("\\", "\\\\")}
+    for text in manifest_strings(manifest):
+        assert not any(v in text for v in variants), text
+        assert not ABSOLUTE_PATH.search(text), text
 
 
 # --------------------------------------------------------------------------- rutas
@@ -342,6 +365,102 @@ def test_ingestion_skips_undecodable_tracks_without_partial_rows(tmp_path):
         catalog.close()
 
 
+LINUX_ROOT = "/tmp/pytest-of-runner/pytest-0/fma0/fma_small"
+WINDOWS_ROOT = r"C:\Users\runner\AppData\Local\Temp\pytest-0\fma0\fma_small"
+TRACK = "000/000002.mp3"
+UNKNOWN = "File contains data in an unknown format."
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        # libsndfile en Linux (el fallo de CI).
+        (f"Error opening '{LINUX_ROOT}/{TRACK}': {UNKNOWN}", f"Error opening '{TRACK}': {UNKNOWN}"),
+        (f"cannot read {LINUX_ROOT}/{TRACK} now", f"cannot read {TRACK} now"),
+        (f"see ({LINUX_ROOT}/{TRACK}), retry.", f"see ({TRACK}), retry."),
+        # libsndfile en Windows: repr con barras duplicadas, y variantes.
+        (
+            "Error opening " + repr(WINDOWS_ROOT + r"\000\000002.mp3") + ": bad",
+            f"Error opening '{TRACK}': bad",
+        ),
+        (f"failed: {WINDOWS_ROOT}" + r"\000\000002.mp3", f"failed: {TRACK}"),
+        (f"failed: C:/data/fma_small/{TRACK}", f"failed: {TRACK}"),
+        (r"failed: 'C:\Users\BREYSI~1\Temp\fma\000\000002.mp3'", f"failed: '{TRACK}'"),
+        (r'open "D:\My Music\fma small\000\000002.mp3" failed', f'open "{TRACK}" failed'),
+        (r"open \\nas\share\fma\000\000002.mp3 failed", f"open {TRACK} failed"),
+        # Rutas absolutas ajenas a la pista: se redactan.
+        (f"cache {LINUX_ROOT}/other.bin missing", "cache <path> missing"),
+        (r"temp 'C:\Windows\Temp\x y.tmp' locked", "temp '<path>' locked"),
+        # Sin rutas absolutas: el mensaje no cambia.
+        ("bad header in 000/000002.mp3 (MPEG Layer I/II), ratio 1/2", None),
+    ],
+)
+def test_safe_error_detail_strips_absolute_paths(message, expected):
+    detail = fma_catalog._safe_error_detail(RuntimeError(message), "000/000002.mp3")
+    assert detail == "RuntimeError: " + (message if expected is None else expected)
+    assert "runner" not in detail and "BREYSI" not in detail and "My Music" not in detail
+
+
+def test_safe_error_detail_keeps_ingestion_error_message():
+    exc = AudioIngestionError(
+        f"no se pudo decodificar '000/000002.mp3': Error opening '{LINUX_ROOT}/000/000002.mp3'"
+    )
+    assert fma_catalog._safe_error_detail(exc, "000/000002.mp3") == (
+        "no se pudo decodificar '000/000002.mp3': Error opening '000/000002.mp3'"
+    )
+
+
+def test_manifest_never_stores_absolute_paths_from_exceptions(tmp_path, monkeypatch):
+    """Excepciones con rutas absolutas Linux y Windows no llegan a catalog_manifest.json."""
+    audio = tmp_path / "fma_small"
+    for track_id in (2, 3, 4):
+        touch_mp3(audio, track_id)
+    root = audio.resolve()
+    failures = {
+        2: AudioIngestionError(
+            f"no se pudo decodificar '000/000002.mp3': Error opening "
+            f"'{LINUX_ROOT}/000/000002.mp3': File contains data in an unknown format."
+        ),
+        3: OSError(
+            f"[Errno 5] I/O error: {str(root / fma_audio_relative_path(3))!r} ({WINDOWS_ROOT})"
+        ),
+    }
+    real_ingest = fma_catalog.ingest_song
+
+    def flaky_ingest(db, dataset_root, metadata, first_segment_id):
+        if metadata.song_id in failures:
+            raise failures[metadata.song_id]
+        write_mp3(audio, metadata.song_id, 6.0)
+        return real_ingest(db, dataset_root, metadata, first_segment_id)
+
+    monkeypatch.setattr(fma_catalog, "ingest_song", flaky_ingest)
+    rows = [{"id": i, "genre": "Pop"} for i in (2, 3, 4)]
+    grouped = fma_catalog.group_by_genre(
+        read_fma_small_tracks(write_tracks_csv(tmp_path / "tracks.csv", rows)), ("Pop",)
+    )
+    catalog = Catalog(tmp_path / "db")
+    try:
+        db = CopyrightCatalog(catalog)
+        db.initialize()
+        selected, skipped = fma_catalog._ingest_balanced(db, root, grouped, 1)
+    finally:
+        catalog.close()
+
+    assert [t.track_id for t in selected] == [4]
+    manifest = fma_catalog.build_manifest(1, ("Pop",), selected, skipped)
+    text = json.dumps(manifest, ensure_ascii=False)
+    for leaked in (LINUX_ROOT, "/tmp/", WINDOWS_ROOT, "runner", str(root), root.as_posix()):
+        assert leaked not in text
+    assert_no_absolute_paths(manifest, root)
+    details = {s["track_id"]: s["detail"] for s in manifest["skipped_tracks"]}
+    assert details[2] == (
+        "no se pudo decodificar '000/000002.mp3': Error opening '000/000002.mp3': "
+        "File contains data in an unknown format."
+    )
+    assert details[3] == "OSError: [Errno 5] I/O error: '000/000003.mp3' (<path>)"
+    assert {s["reason"] for s in manifest["skipped_tracks"]} == {"ingestion_failed"}
+
+
 def test_ingestion_fails_when_corrupt_tracks_exhaust_a_genre(tmp_path):
     audio = tmp_path / "fma_small"
     write_mp3(audio, 2, 6.0)
@@ -446,6 +565,10 @@ def test_manifest_contents(prepared):
     text = prepared.paths.manifest.read_text(encoding="utf-8")
     assert str(prepared.paths.output_root) not in text
     assert str(prepared.paths.audio_root) not in text
+    # En el JSON las barras de Windows van escapadas: se comprueban también los valores.
+    assert_no_absolute_paths(manifest, prepared.paths.audio_root)
+    corrupt = next(s for s in manifest["skipped_tracks"] if s["track_id"] == 2)
+    assert "000/000002.mp3" in corrupt["detail"]
 
 
 def test_prepare_does_not_touch_audio_root(prepared):
