@@ -9,7 +9,7 @@
 | Avance 1 | 17/09/2026 | `v0.1.0` | Parte 1: almacenamiento, contratos, fakes |
 | Entrega Parcial | 01/10/2026 | `v0.2.0` | Partes 2–3: índices espaciales/vectoriales |
 | Avance 3 | 29/10/2026 | `v0.3.0` | Parte 4: extracción de características |
-| Entrega Final | 19/11/2026 | `v1.0.0` | Parte 5: RAG completo |
+| Entrega Final | 19/11/2026 | `v1.0.0` | Parte 5: aplicación de similitud de audio (copyright/remixes) |
 
 - **PATCH** para fixes entre hitos (ej. `v0.1.1`).
 - **MINOR** para features nuevas dentro de un avance.

@@ -1,12 +1,12 @@
 [project]
 name = "soupdb"
 version = "0.7.1"
-description = "Motor de base de datos multimodal (relacional, espacial, vectorial) con RAG sobre papers académicos."
+description = "Motor de base de datos multimodal: relacional, espacial y vectorial."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "BD2-Project" }]
-keywords = ["database", "sql", "rag", "spatial", "vector", "storage"]
+keywords = ["database", "sql", "spatial", "vector", "multimedia", "storage"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
@@ -17,11 +17,23 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/BD2-Project/SoupBD"
-Documentation = "https://BD2-Project.github.io/SoupBD"
+Homepage = "https://github.com/BD2-Project/SoupDB"
+Documentation = "https://BD2-Project.github.io/SoupDB"
 
 [dependency-groups]
+# Aplicación de la Parte 5 (similitud/copyright/remixes de audio): todo lo que
+# necesita el servidor real. `soupdb-vector` trae HNSW y el pipeline MFCC (y con
+# él librosa, numpy, scikit-learn, soundfile...). No es dependencia del núcleo:
+# el paquete `soupdb` sigue sin dependencias externas.
+copyright-api = [
+  "fastapi>=0.162.5",
+  "python-multipart>=0.0.33",
+  "soupdb-vector",
+  "uvicorn>=0.54.0",
+]
 dev = [
+  { include-group = "copyright-api" },
+  "httpx>=0.28.1",
   "hypothesis>=6.0",
   "pytest>=8.0",
   "pytest-cov>=5.0",

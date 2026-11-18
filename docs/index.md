@@ -1,6 +1,9 @@
 # SoupDB
 
-Motor de base de datos **multimodal** (relacional, espacial, vectorial) con integración de IA, construido desde cero en Python. La aplicación final es un **RAG sobre papers académicos**.
+Motor de base de datos **multimodal** (relacional, espacial, vectorial) con integración de IA, construido desde cero en Python. La aplicación final (Parte 5) es una
+**aplicación de análisis de similitud de audio**: busca posibles coincidencias entre un audio
+consultado y las canciones originales de un catálogo (copyright/remixes). Ver
+[API de copyright](copyright_api.md).
 
 ## Repositorios
 
