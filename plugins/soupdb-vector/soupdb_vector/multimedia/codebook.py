@@ -1,8 +1,4 @@
-"""Bag of words sobre descriptores locales: codebook K-Means, histograma y tf-idf.
-
-No depende del tipo de medio: recibe descriptores (una fila por descriptor), así
-que imagen (SIFT) y audio (MFCC) comparten estas mismas funciones.
-"""
+"""Bag of words sobre descriptores locales: codebook K-Means, histograma y tf-idf."""
 
 from collections.abc import Iterable
 from pathlib import Path

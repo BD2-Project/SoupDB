@@ -1,27 +1,4 @@
-"""Query planner: resolves SQL statements into volcano execution plans.
-
-The planner consumes a catalog by *duck typing*: both the persistent
-:class:`engine.common.catalog.Catalog` and the tests fake satisfy the same
-interface. It expects the injected object to provide:
-
-- ``schema(name)`` returning the table schema and raising
-  ``QueryExecutionError`` for unknown tables.
-- ``file_org(name)`` returning the table file organization.
-- ``indexes(name)`` returning a mapping ``index name -> Index`` (possibly
-  empty) with every physical index on the table.
-- ``indexes_for(name, column)`` returning the indexes that cover a specific
-  column (``column name -> Index`` is NOT the contract: a table may carry
-  several differently-structured indexes on the same column).
-- ``create_table(name, columns, engine)`` used by the executor for DDL.
-- ``create_index(index_name, table, column, index_type)`` for index DDL.
-- ``index_location(index_name)`` returning ``(table, column)`` or None.
-
-Access-path selection picks the index best suited to the predicate: a HASH
-index is preferred for point lookups and a BTREE index for inclusive ranges.
-A spatial index (an :class:`engine.indexes.rtree.RTree`) is picked only for the
-radius predicate it can answer, and never for a scalar ``=``/``BETWEEN``
-access path, because its key is a location and not a scalar value.
-"""
+"""Query planner: resolves SQL statements into volcano execution plans."""
 
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
@@ -205,9 +182,7 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
         raise QueryExecutionError(
             "SELECT * cannot be combined with GROUP BY or aggregate functions"
         )
-    # El ORDER BY se resuelve antes de elegir la hoja: el camino de acceso
-    # depende de la primera clave (un ORDER BY por distance abre la vía del k-NN
-    # sobre el índice espacial).
+    # La primera clave de ORDER BY determina si se puede usar k-NN espacial.
     order_by: tuple[OrderByItem, ...] = ()
     if statement.order_by:
         aliases = _projection_aliases(statement.columns)
@@ -225,14 +200,8 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
     if statement.where is not None:
         _validate_columns(statement.where, schema)
         root = Filter(root, statement.where, schema, disk_manager)
-    # Una fila sin coordenada no tiene distancia: se filtra antes del Sort para
-    # que NULL nunca llegue a ordenar (no son ordenables) y para que el camino con
-    # índice y el escaneo completo coincidan tambien con coordenadas nulas.
-    #
-    # El filtro es hoy un no-op: `distance` lanza ante un operando NULL en vez de
-    # devolver NULL, asi que el predicado nunca ve una distancia desconocida. No es
-    # un filtro decorativo: es el sitio exacto donde el motor distinguira NULL de
-    # FALSE, y anadirlo mas tarde cambiaria la forma del plan.
+    # Filtra distancias nulas antes de ordenar para igualar el ?ndice y el escaneo.
+    # Actualmente distance() falla ante un operando NULL.
     for expression in _distance_order_keys(order_by):
         root = Filter(root, _is_not_null(expression), schema, disk_manager)
     if grouped:

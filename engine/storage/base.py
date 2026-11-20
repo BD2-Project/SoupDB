@@ -1,8 +1,4 @@
-"""Frozen contract for every file organization.
-
-All file organizations return RIDs. Every implementation of
-:class:`FileOrganization` must pass the conformance suite.
-"""
+"""Frozen contract for every file organization."""
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator

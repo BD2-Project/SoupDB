@@ -1,15 +1,4 @@
-"""Manifest del dataset multimedia: una línea JSON por objeto, con IDs reproducibles.
-
-Imagen:            {"id": 0, "type": "image", "path": "gatos/001.jpg"}
-Segmento de audio: {"id": 0, "type": "audio_segment", "path": "rock/a.mp3",
-                    "segment": 1, "start": 5.0, "end": 10.0}
-
-``path`` es relativa a la carpeta raíz y con "/", así el manifest es el mismo en
-cualquier máquina. Los archivos se ordenan antes de numerar: mismos archivos, mismo
-manifest. Para un dataset de 1k/10k/100k basta con ``limit``.
-
-Uso: python -m soupdb_vector.multimedia.manifest {image,audio} RAIZ SALIDA.jsonl [--limit N]
-"""
+"""Manifest del dataset multimedia: una línea JSON por objeto, con IDs reproducibles."""
 
 import argparse
 import json

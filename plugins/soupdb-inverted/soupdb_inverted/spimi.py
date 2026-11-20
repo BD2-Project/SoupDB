@@ -1,9 +1,4 @@
-"""Build SPIMI blocks and sorted intermediate runs with a soft memory budget.
-
-The budget estimates UTF-8 terms and dictionary postings, not Python RSS.
-Tokenization and a per-document Counter may exceed it for one large document;
-the block itself flushes incrementally while consuming that Counter.
-"""
+"""Build SPIMI blocks and sorted intermediate runs with a soft memory budget."""
 
 import shutil
 import tempfile

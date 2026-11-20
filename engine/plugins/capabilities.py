@@ -1,9 +1,4 @@
-"""Explicit capability declarations for plugins.
-
-Capabilities are declarations by the provider, never inferred from the mere
-presence of a method. The SQL layer uses them to reject incomplete results and
-unsafe DML instead of guessing.
-"""
+"""Explicit capability declarations for plugins."""
 
 from dataclasses import dataclass, field
 

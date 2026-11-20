@@ -1,10 +1,4 @@
-"""Frozen contract for concurrency control.
-
-Concurrency strategies are swappable: the rest of the engine depends on
-:class:`ConcurrencyStrategy`, never on a concrete implementation. The
-pessimistic strict 2PL strategy is one implementation; optimistic control,
-MVCC or timestamp ordering can be added later without touching callers.
-"""
+"""Frozen contract for concurrency control."""
 
 from abc import ABC, abstractmethod
 from enum import Enum

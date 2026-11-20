@@ -1,11 +1,4 @@
-"""Paged sequential file sorted by a configurable key.
-
-Records are grouped into logical buckets: a main page plus its overflow
-chain. Overflow never moves a live record -- insert only ever writes a
-brand-new slot, so a record's RID never changes once assigned. Page order
-is tracked via persistent chain pointers (page 0 is always the first main
-page), not physical page_id, since overflow pages break that assumption.
-"""
+"""Paged sequential file sorted by a configurable key."""
 
 from collections.abc import Callable, Iterator
 from typing import Any

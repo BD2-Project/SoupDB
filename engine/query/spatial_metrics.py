@@ -1,67 +1,9 @@
-"""Métricas de distancia espacial: euclidiana y haversine.
-
-Módulo puro y sin estado: sin E/S, sin dependencias del motor y con la misma
-convención que la capa de consulta, de modo que el baseline secuencial de
-``benchmarks/spatial_baseline.py`` pueda reutilizar estas funciones como oráculo
-y ambos caminos coincidan exactamente.
-
-Convención de coordenadas
--------------------------
-Un punto es un par ``(x, y)`` interpreted en grados geográficos:
-
-* ``x`` = longitud (lon) en el rango ``[-180, 180]``;
-* ``y`` = latitud (lat) en el rango ``[-90, 90]``.
-
-La convención se mantiene en las dos métricas: ``x`` es siempre el eje
-horizontal (longitud) y ``y`` el vertical (latitud). Lo único que cambia es la
-unidad del resultado, porque son métricas de Naturaleza distinta:
-
-* ``euclidean``: distancia en el plano, en las unidades de la coordenada (grados
-  si el punto se lee como par lon/lat). Es el plano cartesiano tal cual, con
-  ``hypot``, sin ninguna conversión.
-* ``haversine``: distancia geodésica sobre la esfera en metros, calculada con
-  la fórmula del haversine y el radio terrestre medio :data:`EARTH_RADIUS_M`.
-
-Coherencia del radio terrestre: :data:`EARTH_RADIUS_M` es el único factor de
-escala y se aplica una sola vez, en :func:`haversine_distance`, tanto si el
-primer o el segundo operando es el punto de referencia (la distancia es
-simétrica). :func:`euclidean_distance` no lo multiplica porque su unidad es la
-del plano: escalar la métrica euclidiana por el radio terrestre rompería los
-radios ya expresados en grados y no describe ninguna distancia real. Por eso los
-radios de ``WHERE distance(...) < r`` se interpretan siempre en la unidad de la
-métrica elegida (grados para ``euclidean``, metros para ``haversine``).
-
-Coordenadas inválidas
----------------------
-El módulo **rechaza** en lugar de devolver ``nan`` o un valor sin sentido:
-
-* coordenadas no finitos (``nan``, ``inf``) se rechazan en ambas métricas;
-* fuera de rango geográfico (lon fuera de ``[-180, 180]`` o lat fuera de
-  ``[-90, 90]``) se rechaza solo en ``haversine``, donde esos valores no
-  describen un punto de la superficie terrestre y el resultado sería arbitrario.
-  ``euclidean`` es una métrica de plano y por eso acepta cualquier par finito.
-
-No se normalizan las coordenadas: ``lon = 190`` es un error y no ``-170``. Es lo
-mismo que hace el resto del motor ante un valor inválido (fallar temprano y con
-un mensaje claro) en vez de devolver silenciosamente un número engañoso.
-
-Errores
--------
-El módulo es puro y no importa la jerarquía de errores del motor: viola el
-contrato lanzando :class:`ValueError` con un mensaje que incluye el valor
-rechazado. Quien lo usa decide el tipo final: ``engine.query.evaluator`` lo
-convierte en :class:`~engine.common.errors.QueryExecutionError` y
-``engine.query.parser`` en :class:`~engine.common.errors.QueryParseError`, de modo
-que un mismo fallo se reporte según la capa donde se detecta.
-"""
+"""Métricas de distancia espacial: euclidiana y haversine."""
 
 import math
 from collections.abc import Callable, Sequence
 
-#: Radio terrestre medio en metros (IUGG). Escala única de la métrica geodésica:
-#: 1 grado de latitud sobre un meridiano son ~111 195 m y un par antípodal
-#: exactamente ``pi * EARTH_RADIUS_M``. En metros y no en kilómetros porque el
-#: enunciado (2.2.3) escribe los radios así: ``distancia(...) < 5000`` para 5 km.
+#: Radio terrestre medio IUGG en metros.
 EARTH_RADIUS_M = 6_371_008.8
 
 #: Nombre canónico de la métrica euclidiana (plano, en unidades de la coordenada).
@@ -112,9 +54,7 @@ def haversine_distance(a: Point2D, b: Point2D) -> float:
     # El redondeo en coma flotante puede dejar h en (0, 1] + epsilon; sin este
     # recorte asin(>1) lanzaría ValueError en el par antípodal.
     h = min(1.0, max(0.0, h))
-    # El factor se aplica al arco (2 * asin) y no al radio para que el par
-    # antípodal dé exactamente ``pi * EARTH_RADIUS_M`` y el borde se pueda
-    # comparar con ese valor sin sorpresas de redondeo.
+    # Aplica el factor al arco para conservar el valor exacto de la distancia ant?poda.
     return EARTH_RADIUS_M * (2.0 * math.asin(math.sqrt(h)))
 
 

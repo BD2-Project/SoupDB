@@ -1,7 +1,4 @@
-"""Record identifier: unique reference to a record on disk.
-
-Frozen contract. Do not change without team agreement.
-"""
+"""Record identifier: unique reference to a record on disk."""
 
 from typing import NamedTuple
 

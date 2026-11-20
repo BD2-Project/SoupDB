@@ -1,19 +1,4 @@
-"""Persistencia paginada del R-Tree sobre DiskManager/BufferManager.
-
-El árbol sigue viviendo en memoria como ``RTreeNode``; esta capa lo vuelca a
-una página por nodo (``_page_codec``) y lo reconstruye al cargar.
-
-Página 0 = metadata (big-endian, rellena con ceros hasta ``page_size``):
-
-.. code-block::
-
-    magic "RTM1" (4B) | version u8 | reserved u8 = 0 | order u16 | root_page_id i64
-
-``root_page_id = -1`` indica árbol vacío.
-
-Limitación: no hay free-list; las páginas de nodos podados por borrados quedan
-huérfanas y no se reutilizan.
-"""
+"""Persistencia paginada del R-Tree sobre DiskManager/BufferManager."""
 
 import struct
 from dataclasses import dataclass

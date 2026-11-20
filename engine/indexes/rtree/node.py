@@ -1,9 +1,4 @@
-"""Nodos del R-Tree: estructura fija con capacidad acotada.
-
-Un nodo hoja guarda ``(Point, RID)``; un nodo interno guarda ``(MBR, RTreeNode)``.
-Cada nodo mantiene su propio MBR (actualizado tras mutaciones) para poder podar
-en búsquedas y elegir subárbol en inserciones.
-"""
+"""Nodos del R-Tree: estructura fija con capacidad acotada."""
 
 from dataclasses import dataclass
 from typing import Any

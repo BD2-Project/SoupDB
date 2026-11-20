@@ -1,9 +1,4 @@
-"""DML-maintained inverted index: base postings plus an exact delta layer.
-
-The SPIMI index is immutable once built. This wrapper keeps added documents and
-removed RIDs in a small sidecar so SQL ``INSERT``/``DELETE`` are reflected by
-``SEARCH`` without rebuilding the corpus, and survive reopening the database.
-"""
+"""DML-maintained inverted index: base postings plus an exact delta layer."""
 
 from __future__ import annotations
 

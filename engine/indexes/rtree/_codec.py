@@ -1,14 +1,4 @@
-"""Codec binario del R-Tree: serialización memoria <-> disco.
-
-Formato (big-endian):
-
-.. code-block::
-
-    magic "RT" (2B) | version 0x01 (1B) | order u16 BE (2B) | has_root (1B)
-    [nodo]  is_leaf (1B) | count u32 BE (4B)
-            hoja   : por entrada point x,y (f64 f64) + rid page,slot (q q)
-            interna: por entrada mbr (f64 f64 f64 f64) + hijo (recursivo)
-"""
+"""Codec binario del R-Tree: serialización memoria <-> disco."""
 
 import struct
 

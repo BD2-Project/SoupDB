@@ -1,14 +1,4 @@
-"""Núcleo del R-Tree en memoria.
-
-Estructura fija (capacidad por nodo = ``order``), inserción con elección de
-subárbol por menor enlargement y **Quadratic Split**, actualización de MBRs,
-búsqueda puntual y por rango, borrado simple (sin condense/reinsert) y una
-interfaz de persistencia ``save``/``load``/``open`` (memoria <-> disco).
-
-Es una implementación de :class:`engine.indexes.base.Index`; para cumplir la
-conformance suite del gestor, las claves escalares se mapean a puntos sobre el
-eje X (ver ``Point.from_key``).
-"""
+"""Núcleo del R-Tree en memoria."""
 
 from pathlib import Path
 

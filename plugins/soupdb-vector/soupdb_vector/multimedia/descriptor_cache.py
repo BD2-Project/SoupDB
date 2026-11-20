@@ -1,11 +1,4 @@
-"""Caché en disco de descriptores: un ``.npy`` por objeto multimedia.
-
-objeto -> clave -> ¿existe el archivo? -> sí: cargarlo / no: extraer, guardar y devolver.
-
-La clave es el SHA-256 de (tipo, ruta, parámetros de extracción): nombres largos o
-con caracteres raros no dan problemas y cambiar un parámetro da otra entrada.
-Reanudar una ejecución interrumpida sale gratis: lo ya guardado se lee de aquí.
-"""
+"""Caché en disco de descriptores: un ``.npy`` por objeto multimedia."""
 
 import hashlib
 import json

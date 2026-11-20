@@ -1,16 +1,4 @@
-"""Hierarchical Navigable Small World graph persisted on pages (Malkov & Yashunin).
-
-The index is a directory with three files:
-
-- ``vectors.db``: a :class:`VectorStore`; the vid of a vector is its node id.
-- ``layer0.db``: one fixed record per node with its top level, where its upper
-  layers start in ``upper.db`` and its up to ``2*M`` neighbors in layer 0.
-- ``upper.db``: one fixed record per (node, layer >= 1) with up to ``M``
-  neighbors. A node of level ``L`` owns ``L`` consecutive records.
-
-Fixed-size records make every neighbor list addressable by arithmetic, so a
-hop of the greedy search costs one page pin.
-"""
+"""Hierarchical Navigable Small World graph persisted on pages (Malkov & Yashunin)."""
 
 import heapq
 import math

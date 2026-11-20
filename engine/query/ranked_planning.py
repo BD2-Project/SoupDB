@@ -1,8 +1,4 @@
-"""Bind and plan ranked full-text SELECT using an injected catalog.
-
-The fake and eventual persistent catalog use the same ranked_indexes_for
-contract. No full-text scoring, tokenizer, or table scan is implemented here.
-"""
+"""Bind and plan ranked full-text SELECT using an injected catalog."""
 
 from dataclasses import fields, is_dataclass
 from typing import Any

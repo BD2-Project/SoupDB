@@ -1,7 +1,4 @@
-"""Vector de una imagen: SIFT -> palabras visuales -> histograma -> tf-idf -> L2.
-
-Antes de SIFT: imagen grande -> resize proporcional -> grayscale -> SIFT.
-"""
+"""Vector de una imagen: SIFT -> palabras visuales -> histograma -> tf-idf -> L2."""
 
 from collections.abc import Sequence
 from pathlib import Path

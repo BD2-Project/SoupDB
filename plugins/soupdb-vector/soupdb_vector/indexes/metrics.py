@@ -1,9 +1,4 @@
-"""Distance and similarity metrics of 2.4.2, in pure Python.
-
-Every metric is exposed as a score where higher is better, so the indexes rank
-with one rule regardless of the metric. The norm of each stored vector is
-precomputed at insert time, so cosine costs one dot product per candidate.
-"""
+"""Distance and similarity metrics of 2.4.2, in pure Python."""
 
 import math
 from collections.abc import Callable, Sequence

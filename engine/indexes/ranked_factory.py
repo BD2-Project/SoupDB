@@ -1,9 +1,4 @@
-"""Provider boundary for ranked CREATE INDEX / database reopen.
-
-The SQL subsystem does not implement indexing algorithms here. Both creation
-and reloading must be supplied by an explicitly configured plugin registry or
-by the legacy algorithm->factory mapping kept for compatibility.
-"""
+"""Provider boundary for ranked CREATE INDEX / database reopen."""
 
 from collections.abc import Mapping
 from typing import Protocol

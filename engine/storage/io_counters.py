@@ -1,12 +1,4 @@
-"""Vista agregada de los contadores de E/S de varios archivos.
-
-Cada tabla y cada índice tienen su propio ``DiskManager``, pero el plan de
-ejecución necesita una sola cifra por operador: las páginas que ese operador
-tocó, sin importar en qué archivo. Esta clase suma los contadores de todos los
-archivos abiertos y expone la misma interfaz mínima (``reads``/``writes``) que
-un ``DiskManager``, de modo que los operadores no distinguen entre una cosa y
-la otra.
-"""
+"""Vista agregada de los contadores de E/S de varios archivos."""
 
 from collections.abc import Callable, Iterable
 

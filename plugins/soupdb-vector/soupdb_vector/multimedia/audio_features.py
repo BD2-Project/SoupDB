@@ -1,9 +1,4 @@
-"""Vector de un audio: MFCC -> palabras acústicas -> histograma -> tf-idf -> L2.
-
-Para el dataset, cada pista se parte en segmentos consecutivos de duración fija
-(5 s por defecto, sin solapamiento) y cada segmento es un objeto independiente,
-identificado como ``ruta#segment=000000``.
-"""
+"""Vector de un audio: MFCC -> palabras acústicas -> histograma -> tf-idf -> L2."""
 
 from collections.abc import Iterator, Sequence
 from pathlib import Path

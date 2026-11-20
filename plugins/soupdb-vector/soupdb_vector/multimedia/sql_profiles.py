@@ -1,8 +1,4 @@
-"""SQL multimedia profiles: stable codebooks shared by indexed rows and queries.
-
-Images use SIFT, audio segments use MFCC. The registered profile fixes the
-codebook, dataset root and descriptor cache; no implicit training occurs here.
-"""
+"""SQL multimedia profiles: stable codebooks shared by indexed rows and queries."""
 
 from __future__ import annotations
 

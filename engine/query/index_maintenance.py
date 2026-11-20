@@ -1,8 +1,4 @@
-"""Reversible ranked-index maintenance, independent of table storage.
-
-Opt-in providers must support atomic, idempotent single-record mutations. The
-SQL layer does not infer mutability from a top_k method or a nonempty index.
-"""
+"""Reversible ranked-index maintenance, independent of table storage."""
 
 from typing import Protocol, runtime_checkable
 

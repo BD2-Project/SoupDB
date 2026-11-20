@@ -1,25 +1,4 @@
-"""Binary wire protocol v1 between the gestor and the rsoup driver.
-
-Frame layout (big-endian):
-
-.. code-block::
-
-    +--------+---------+---------+------------+------------------+
-    | magic  | version | opcode  | length     | payload          |
-    | 2B "SP"| 1B 0x01 | 1B      | 4B (u32 BE)| (length bytes)   |
-    +--------+---------+---------+------------+------------------+
-
-Requests: PING 0x01, BEGIN 0x03, COMMIT 0x04, ROLLBACK 0x05, QUERY 0x06,
-PREPARE 0x07, EXECUTE 0x08, DEALLOCATE 0x09, FETCH 0x0A.
-Responses: PONG 0x02, OK 0x10, RESULT 0x11, ERROR 0x12, DOCUMENT 0x13.
-
-Tipos de columna: INT 0x01, FLOAT 0x02, VARCHAR 0x03, TEXT 0x04, BOOL 0x05,
-POINT 0x06. Tags de valor: NULL 0x00, INT 0x01, FLOAT 0x02, TEXT 0x03, BOOL 0x04,
-POINT 0x05 (dos doubles big-endian, x = longitud e y = latitud).
-
-Payload encodings are documented in ``docs/protocolo.md``; both codecs
-(Python here, Rust in ``rsoup/src/protocol.rs``) implement the same contract.
-"""
+"""Codec del protocolo binario TCP de SoupDB (v1 y v2)."""
 
 from __future__ import annotations
 

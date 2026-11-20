@@ -1,16 +1,4 @@
-"""Del manifest a ``codebook.npz`` y ``vectores.bin``.
-
-manifest -> descriptores (caché) -> muestra -> K-Means -> histogramas -> idf -> codebook
-manifest -> descriptores (caché) -> palabras -> histograma -> tf-idf -> L2 -> vectores.bin
-
-Un manifest es de un solo tipo (todo ``image`` o todo ``audio_segment``): imagen y
-audio nunca comparten codebook. Los descriptores salen de la caché en disco, así que
-repetir el comando tras un corte no recalcula SIFT/MFCC ya guardados.
-
-Uso:
-    python -m soupdb_vector.multimedia.build_vectors MANIFEST ROOT CACHE CODEBOOK VECTORES \\
-        --k 128 --max-descriptors 50000 --seed 42
-"""
+"""Del manifest a ``codebook.npz`` y ``vectores.bin``."""
 
 import argparse
 from collections.abc import Iterator

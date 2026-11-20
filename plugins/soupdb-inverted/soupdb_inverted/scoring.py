@@ -1,9 +1,4 @@
-"""Raw-TF TF-IDF cosine and positive-IDF Okapi BM25 formulas.
-
-TF-IDF weight = tf * log(N/df). Norms use the entire document vector; zero
-vectors score zero. BM25 uses log(1 + (N-df+0.5)/(df+0.5)) and raw query
-frequency as a multiplier. Matching is determined by postings, never score.
-"""
+"""Raw-TF TF-IDF cosine and positive-IDF Okapi BM25 formulas."""
 
 import math
 

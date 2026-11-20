@@ -23,9 +23,7 @@ DEFAULT_PAGE_SIZE = 4096
 DEFAULT_NLIST = 4
 DEFAULT_BUFFER_CAPACITY = 16
 
-#: Both IVF and HNSW must resolve query vectors through the *same* vectorizer
-#: instance when their stored configuration is identical. The cache makes that
-#: true even though each plugin class owns its own factory reference.
+#: IVF and HNSW share one vectorizer per stored configuration.
 _FACTORY_CACHE: dict[str, OnDiskVectorFactory] = {}
 
 

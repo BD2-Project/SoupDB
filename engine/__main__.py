@@ -1,28 +1,4 @@
-"""Punto de entrada del gestor: ``python -m engine``.
-
-Levanta el servidor TCP que habla el protocolo binario con el driver y con
-SoupChef. Sin esto el motor solo se puede usar escribiendo Python a mano, y el
-contenedor no sirve nada en su puerto.
-
-Toda la configuración llega por variables de entorno, que es lo que espera
-``docker-compose.yml``:
-
-====================  ==========================  ======================
-Variable              Valor por defecto           Qué controla
-====================  ==========================  ======================
-``SOUPDB_DATA``       ``data``                    Directorio de la base
-``SOUPDB_DOCUMENT_ROOT``  (sin default)          Raíz de los documentos servibles
-``DRIVER_HOST``       ``0.0.0.0``                 Interfaz de escucha
-``DRIVER_PORT``       ``55432``                   Puerto
-``PAGE_SIZE``         ``4096``                    Tamaño de página
-``BUFFER_POOL_SIZE``  ``1024``                    Páginas en el buffer pool
-``MAX_CONNECTIONS``   ``100``                     Conexiones simultáneas
-``LOCK_TIMEOUT_MS``   ``5000``                    Espera máxima por un lock
-====================  ==========================  ======================
-
-Escucha en ``0.0.0.0`` y no en ``127.0.0.1`` porque dentro de un contenedor una
-escucha en loopback no es alcanzable desde el host.
-"""
+"""Arranca el servidor TCP de SoupDB con configuraci?n de entorno."""
 
 import os
 import signal

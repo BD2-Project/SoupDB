@@ -1,7 +1,4 @@
-"""Tunable parameters of the vector indexes.
-
-Kept apart so the benchmarks can vary them without touching the structures.
-"""
+"""Tunable parameters of the vector indexes."""
 
 #: Métrica por defecto cuando la consulta no indica ``metric``.
 DEFAULT_METRIC = "euclidean"

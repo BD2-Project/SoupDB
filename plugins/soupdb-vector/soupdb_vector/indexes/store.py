@@ -1,9 +1,4 @@
-"""Paged storage of float32 vectors with the RID they point to.
-
-Each record is ``(rid.page_id, rid.slot, norm, v_0 .. v_{K-1})``. The norm is
-stored so cosine needs a single dot product per candidate. Vectors are
-addressed by a dense internal id (``vid``) that IVF and HNSW use as pointer.
-"""
+"""Paged storage of float32 vectors with the RID they point to."""
 
 import struct
 from collections.abc import Iterator, Sequence

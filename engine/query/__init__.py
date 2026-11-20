@@ -1,9 +1,4 @@
-"""Public API of the SQL query processing domain.
-
-``execute_sql`` parses, plans and executes a SQL statement against a
-duck-typed catalog (see ``engine.query.planner``) returning an internal
-``ResultSet``.
-"""
+"""Public API of the SQL query processing domain."""
 
 from typing import Any
 

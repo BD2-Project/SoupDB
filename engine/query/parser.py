@@ -1,15 +1,4 @@
-"""Recursive descent SQL parser producing an AST.
-
-The parser consumes the token stream from :mod:`engine.query.lexer` and builds
-:mod:`engine.query.ast` nodes. Entry point is :func:`parse`.
-
-Expression precedence (low to high):
-
-``OR`` < ``AND`` < ``NOT`` < comparison (``= <> != < <= > >=``,
-``BETWEEN``, ``IN``, ``LIKE``) < additive (``+ -``) < multiplicative
-(``* / %``) < primary. ``IS [NOT] NULL`` is a predicate suffix that binds at
-the comparison level.
-"""
+"""Recursive descent SQL parser producing an AST."""
 
 from engine.query.ast import (
     BeginTransactionStatement,

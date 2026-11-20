@@ -1,8 +1,4 @@
-"""Frozen contract for every index structure.
-
-All indexes point to RIDs. Every implementation of :class:`Index` must pass
-the conformance suite in ``tests/unit/indexes/test_index_contract.py``.
-"""
+"""Frozen contract for every index structure."""
 
 from abc import ABC, abstractmethod
 from typing import Any

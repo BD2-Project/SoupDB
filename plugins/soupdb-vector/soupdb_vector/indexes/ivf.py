@@ -1,17 +1,4 @@
-"""Inverted File index (IVF-Flat) persisted on pages.
-
-Layout of the single file:
-
-- page 0: header (dim, nlist, count and where the centroids and the list
-  directory start).
-- centroid pages: ``(norm, c_0 .. c_{K-1})`` per centroid.
-- directory pages: ``(head, tail, size)`` of each inverted list.
-- list pages: ``(next, count)`` followed by ``(rid, norm, vector)`` records.
-
-The vectors live inside their list, so a query reads only the pages of the
-``nprobe`` lists it visits. The centroids are kept in memory once loaded: they
-are the coarse quantizer, ``nlist`` vectors, and every query needs all of them.
-"""
+"""Inverted File index (IVF-Flat) persisted on pages."""
 
 import heapq
 import random

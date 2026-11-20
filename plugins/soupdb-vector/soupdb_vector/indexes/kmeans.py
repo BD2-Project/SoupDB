@@ -1,9 +1,4 @@
-"""K-Means (Lloyd + k-means++) and reservoir sampling, in pure Python.
-
-numpy is only allowed for feature extraction, never inside a data structure,
-so the IVF trains its own centroids. Training runs over a bounded sample, so
-its memory does not grow with the collection.
-"""
+"""K-Means (Lloyd + k-means++) and reservoir sampling, in pure Python."""
 
 import math
 import random

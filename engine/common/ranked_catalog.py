@@ -1,8 +1,4 @@
-"""Persistent ranked metadata independent of the legacy SysIndexes layout.
-
-Metadata are *not* search indexes. A registry entry is only searchable once an
-explicit factory has reloaded a compatible RankedIndex provider.
-"""
+"""Persistent ranked metadata independent of the legacy SysIndexes layout."""
 
 from dataclasses import dataclass
 

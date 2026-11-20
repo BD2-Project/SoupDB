@@ -1,9 +1,4 @@
-"""Pessimistic strict two-phase locking (strict 2PL) strategy.
-
-Locks (S/U/X) are granted following the classic compatibility matrix and are
-held until ``release_all`` (commit or rollback), which guarantees isolation
-and serializable schedules. Deadlock is handled by lock timeout.
-"""
+"""Pessimistic strict two-phase locking (strict 2PL) strategy."""
 
 import threading
 import time

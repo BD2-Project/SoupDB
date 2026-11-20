@@ -1,23 +1,4 @@
-"""Metadata for tables and indexes.
-
-The :class:`Catalog` is the persistent, duck-typed contract consumed by the
-planner and executor. It stores its own metadata in three system tables - each
-a regular heap file managed through :class:`engine.storage.file_manager.FileManager`
-- so the catalog bootstraps itself on first open and reloads on later opens:
-
-- ``SysTables``: one row per table (including the system tables themselves)
-  with its name, physical file id and storage strategy (HEAP or SEQUENTIAL).
-- ``SysColumns``: one row per column: owner table, name, SQL type and the
-  declared length (character count for VARCHAR, 0 otherwise). The byte size of
-  a value is computed per record by the codec.
-- ``SysIndexes``: one row per index: name, owner table, indexed column and
-  structure type (BTREE, HASH or RTREE).
-
-``RTREE`` is the spatial structure (:mod:`engine.indexes.rtree`): it indexes a
-POINT column and only answers box (range) queries, so it is registered apart
-from the scalar structures and the catalog validates the column type at
-``create_index`` time.
-"""
+"""Metadata for tables and indexes."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -670,9 +651,7 @@ class Catalog:
             return
         stored = self._read_sys_rows("SysPlugins", SYS_PLUGINS_SCHEMA)
         if not stored:
-            # No plugin was persisted for this database: keep metadata-only
-            # entries instead of trying to reopen artifacts that were never
-            # registered with a plugin configuration.
+            # Keep ranked metadata without reopening artifacts if no plugin was configured.
             self._plugin_registry = registry
             return
         for row in stored:

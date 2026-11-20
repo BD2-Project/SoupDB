@@ -1,10 +1,4 @@
-"""Array of fixed-size records over pages of a DiskManager.
-
-Page 0 is a header (magic, record size, record count and a free area for the
-owner's metadata); record ``i`` lives at page ``1 + i // per_page``. Fixed
-size lets a record be addressed by arithmetic instead of a slot directory,
-which is what vectors and HNSW adjacency lists need.
-"""
+"""Array of fixed-size records over pages of a DiskManager."""
 
 import struct
 from collections.abc import Iterator

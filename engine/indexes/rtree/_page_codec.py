@@ -1,15 +1,4 @@
-"""Codec binario de página para nodos R-Tree (un nodo por página).
-
-Formato (big-endian), la página ocupa exactamente ``page_size`` bytes:
-
-.. code-block::
-
-    header  : magic "RN" (2B) | version u8 | node_type u8 (0 interno, 1 hoja)
-              | entry_count u16 | max_entries u16 | reserved u64 = 0
-    hoja    : por entrada point x,y (f64 f64) + rid page_id,slot (q q)
-    interna : por entrada mbr min_x,min_y,max_x,max_y (f64 x4) + child_page_id (q)
-    resto   : ceros
-"""
+"""Codec binario de página para nodos R-Tree (un nodo por página)."""
 
 import struct
 from dataclasses import dataclass

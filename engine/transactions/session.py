@@ -1,12 +1,4 @@
-"""Transactional session: executes statements inside transactions with locking.
-
-The session wraps a catalog so that every access path goes through strict 2PL
-locks. Each thread holds its own active transaction (thread-local); statements
-run inside ``BEGIN/COMMIT`` explicitly or are auto-committed as a single
-statement transaction when no transaction is active. Boundaries can also be
-driven from SQL text (``BEGIN [TRANSACTION]`` / ``END [TRANSACTION]``), which
-this session intercepts before the auto-commit path.
-"""
+"""Transactional session: executes statements inside transactions with locking."""
 
 import os
 import threading

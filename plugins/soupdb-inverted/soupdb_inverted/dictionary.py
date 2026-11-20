@@ -1,9 +1,4 @@
-"""ExtendibleHash term lookup with auxiliary RIDs into a binary metadata sidecar.
-
-Auxiliary RID ordinal = page_id * 65536 + slot; these are never document RIDs.
-The sidecar contains term UTF-8 bytes and uint64 df/offset/length. Only its record
-offsets are kept in memory; term lookup always uses ExtendibleHash.search.
-"""
+"""ExtendibleHash term lookup with auxiliary RIDs into a binary metadata sidecar."""
 
 import struct
 from collections.abc import Iterator

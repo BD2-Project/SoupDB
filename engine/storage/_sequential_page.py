@@ -1,8 +1,4 @@
-"""Page header for SequentialFile: main/overflow chain metadata.
-
-The body (page[HEADER_SIZE:]) is the unmodified _slotted_page format,
-accessed through a memoryview so its functions work unchanged.
-"""
+"""Page header for SequentialFile: main/overflow chain metadata."""
 
 import struct
 

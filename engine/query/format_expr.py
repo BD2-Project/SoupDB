@@ -1,10 +1,4 @@
-"""Render de expresiones del AST como SQL legible.
-
-El panel de plan de ejecución muestra el detalle de cada operador. Sin esto el
-predicado aparece como el ``repr`` del dataclass —
-``CompareExpr(left=ColumnRef(name='nota'), op='>=', right=Literal(value=14))`` —
-que es ilegible para quien mira la consulta, no el código.
-"""
+"""Render de expresiones del AST como SQL legible."""
 
 from engine.query.ast import (
     BetweenExpr,

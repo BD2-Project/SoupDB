@@ -1,9 +1,4 @@
-"""Wrapper over storage managers: one physical file per logical name.
-
-A :class:`FileManager` owns a root directory and opens or creates a
-``(DiskManager, BufferManager)`` pair per logical file name. Callers ask for a
-name and receive the cached managers; closing the manager flushes every file.
-"""
+"""Wrapper over storage managers: one physical file per logical name."""
 
 from pathlib import Path
 

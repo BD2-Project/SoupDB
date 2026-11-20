@@ -1,9 +1,4 @@
-"""Candidate cardinality policy for text-ranked SQL.
-
-A bounded top-k is safe only when no downstream operation can remove or
-reorder the first k hits. Otherwise the provider must guarantee an exact,
-exhaustive list and expose the indexed universe's cardinality.
-"""
+"""Candidate cardinality policy for text-ranked SQL."""
 
 from dataclasses import dataclass
 

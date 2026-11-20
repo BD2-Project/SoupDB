@@ -1,10 +1,4 @@
-"""Demostración de concurrencia con hilos (Avance 1).
-
-Corre transferencias simultáneas sobre la tabla ``accounts`` comparando el
-acceso directo sin control de concurrencia (race condition / actualizaciones
-perdidas) contra el acceso transaccional con strict 2PL (resultado
-serializable, con reintento tras deadlocks).
-"""
+"""Demostración de concurrencia con hilos (Avance 1)."""
 
 import threading
 import time
@@ -96,10 +90,7 @@ def transactional_result(
             while True:
                 try:
                     with session.transaction():
-                        # Lock exclusivo de tabla para todo el read-modify-write:
-                        # con DELETE+INSERT el registro desaparece fisicamente entre
-                        # ambas sentencias y un S lock de tabla no esconderia ese
-                        # hueco ante otros lectores. Serializa la transferencia.
+                        # El lock exclusivo oculta a otros lectores el hueco entre DELETE e INSERT.
                         session._lock(("table", "accounts"), LockMode.EXCLUSIVE)
                         rows = session.execute(
                             f"SELECT balance FROM accounts WHERE id = {account_id}"

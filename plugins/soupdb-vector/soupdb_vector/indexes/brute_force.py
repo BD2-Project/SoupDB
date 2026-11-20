@@ -1,8 +1,4 @@
-"""Exact k-NN by scanning every stored vector.
-
-It is the sequential baseline of the comparison 2.4.4 and the oracle the
-recall of IVF and HNSW is measured against.
-"""
+"""Exact k-NN by scanning every stored vector."""
 
 import heapq
 from collections.abc import Sequence

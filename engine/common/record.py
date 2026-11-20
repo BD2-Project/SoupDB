@@ -1,13 +1,4 @@
-"""Record serialization / deserialization.
-
-Rows are encoded to a packed byte blob and stored in :class:`Record.data`.
-Each column starts with a flag byte: ``0x00`` marks NULL and then no column
-bytes follow. Otherwise the column payload follows the flag: INT 4 bytes,
-FLOAT 8 bytes, POINT 16 bytes (two little-endian doubles), BOOL 1 byte
-(``0x01`` True, ``0x02`` False), and VARCHAR/TEXT as a ``uint32`` length prefix
-followed by the UTF-8 bytes. All integers are little-endian; no alignment.
-Empty rows encode to ``b""``.
-"""
+"""Record serialization / deserialization."""
 
 import struct
 from dataclasses import dataclass

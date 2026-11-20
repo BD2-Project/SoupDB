@@ -1,8 +1,4 @@
-"""Catalog-independent metadata for SQL ranked-search indexes.
-
-This module complements ``RankedIndex``; it does not change the existing
-scalar ``Index`` interface or implement index persistence.
-"""
+"""Catalog-independent metadata for SQL ranked-search indexes."""
 
 from dataclasses import dataclass
 

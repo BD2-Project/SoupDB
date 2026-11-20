@@ -1,7 +1,4 @@
-"""Volcano operator model.
-
-Frozen contract between query processing and the rest of the engine.
-"""
+"""Volcano operator model."""
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator

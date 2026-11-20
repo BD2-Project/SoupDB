@@ -1,9 +1,4 @@
-"""Minimum Bounding Rectangle del R-Tree.
-
-MBR es un rectángulo alineado a los ejes que agrupa puntos (hojas) o cajas de
-hijos (nodos internos). Todas las operaciones son inmutables: devuelven un
-nuevo MBR.
-"""
+"""Minimum Bounding Rectangle del R-Tree."""
 
 from dataclasses import dataclass
 

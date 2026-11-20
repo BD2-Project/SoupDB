@@ -1,8 +1,4 @@
-"""Bind prepared-statement parameters into a parsed AST.
-
-Parameters are replaced before planning, so the parser runs once per prepared
-statement and the binder never interpolates SQL text (no injection surface).
-"""
+"""Bind prepared-statement parameters into a parsed AST."""
 
 from dataclasses import fields, is_dataclass, replace
 from typing import Any

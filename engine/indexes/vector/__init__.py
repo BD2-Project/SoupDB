@@ -1,9 +1,4 @@
-"""Compatibility shim: vector-index code moved to the ``soupdb-vector`` plugin.
-
-Importing this package requires the plugin to be installed. The submodules are
-aliased into this namespace so existing ``engine.indexes.vector.*`` imports
-keep working during the migration window.
-"""
+"""Compatibility shim: vector-index code moved to the ``soupdb-vector`` plugin."""
 
 import sys as _sys
 

@@ -1,8 +1,4 @@
-"""Lock manager facade.
-
-Delegates to an injectable :class:`ConcurrencyStrategy`, so strategies can be
-swapped without touching callers.
-"""
+"""Lock manager facade."""
 
 from engine.transactions.base import ConcurrencyStrategy, LockMode, Resource
 from engine.transactions.strategies.strict_2pl import StrictTwoPhaseLocking

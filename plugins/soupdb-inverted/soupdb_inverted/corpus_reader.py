@@ -1,8 +1,4 @@
-"""Read JSONL documents, logging malformed lines and rejecting duplicate IDs.
-
-The seen-ID set grows with corpus size. Source IDs are strings and are not
-storage RIDs. Blank documents remain valid, so N includes empty documents.
-"""
+"""Read JSONL documents, logging malformed lines and rejecting duplicate IDs."""
 
 import json
 import logging

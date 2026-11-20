@@ -1,8 +1,4 @@
-"""Column types and variable-length type handling.
-
-Canonical location for the column type enum and the column definition used by
-the engine. ``engine.query.ast`` re-exports both to keep the query namespace.
-"""
+"""Column types and variable-length type handling."""
 
 from dataclasses import dataclass
 from enum import Enum

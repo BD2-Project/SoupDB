@@ -1,8 +1,4 @@
-"""Formato vectores.bin: puente entre la extracción multimedia y los índices vectoriales.
-
-Little-endian. Cabecera ``<4sIII`` (magic, version, count, dimension) seguida de
-``count`` registros ``(id: int64, path_len: uint32, path: UTF-8, vector: K float32)``.
-"""
+"""Formato vectores.bin: puente entre la extracción multimedia y los índices vectoriales."""
 
 import random
 import struct

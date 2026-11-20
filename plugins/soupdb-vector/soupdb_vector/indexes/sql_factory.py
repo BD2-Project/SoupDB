@@ -1,8 +1,4 @@
-"""Disk-backed SQL factory for real IVF and HNSW over multimedia references.
-
-The catalog owns a RankedBinding; this factory creates, persists, reloads and
-removes the physical vector index without changing IVF/HNSW internals.
-"""
+"""Disk-backed SQL factory for real IVF and HNSW over multimedia references."""
 
 from __future__ import annotations
 

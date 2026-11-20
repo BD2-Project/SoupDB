@@ -1,9 +1,4 @@
-"""Plan executor that runs volcano plans and DML/DDL statements.
-
-SELECT plans are streamed through the operator tree; INSERT/DELETE/CREATE
-statements are executed directly against the catalog (duck-typed, see the
-planner contract) and report the affected-row count.
-"""
+"""Plan executor that runs volcano plans and DML/DDL statements."""
 
 import json
 from collections.abc import Iterator

@@ -1,17 +1,4 @@
-"""Gestor TCP server: the connection pool that receives rsoup drivers.
-
-The gestor owns the connection handling: a listener accepts up to
-``MAX_CONNECTIONS`` clients; each connection runs on its own worker thread with
-a :class:`TransactionalSession` that shares the server-wide
-:class:`TransactionManager` and catalog, so concurrent clients are isolated by
-strict 2PL locks. Connections beyond the limit wait in the accept backlog
-(PgBouncer-style ``max_client_conn``).
-
-Config via env (see ``docs/08-variables-entorno``): ``DRIVER_HOST``,
-``DRIVER_PORT``, ``MAX_CONNECTIONS``, ``SOCKET_TIMEOUT``,
-``LOCK_TIMEOUT_MS`` and ``SOUPDB_DOCUMENT_ROOT`` (raíz de los documentos que
-sirve ``OP_FETCH``; sin ella, ``FETCH`` responde ``UNSUPPORTED``).
-"""
+"""Servidor TCP de SoupDB con una sesi?n por conexi?n."""
 
 import logging
 import os

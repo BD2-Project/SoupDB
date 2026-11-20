@@ -1,8 +1,4 @@
-"""Bind ranked-search scores to a private FLOAT slot in a temporary row.
-
-This module has no index access and does not change persistent Record/RID.
-It is used by ranked planning; it is not a general-purpose SQL evaluator.
-"""
+"""Bind ranked-search scores to a private FLOAT slot in a temporary row."""
 
 from dataclasses import fields, is_dataclass
 

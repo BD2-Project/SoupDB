@@ -1,8 +1,4 @@
-"""Slotted-page codec used internally by HeapFile.
-
-Layout: header (num_slots, free_space_offset), followed by (offset, length)
-slots. Records grow backward from the page end; offset == 0 marks a tombstone.
-"""
+"""Slotted-page codec used internally by HeapFile."""
 
 import struct
 

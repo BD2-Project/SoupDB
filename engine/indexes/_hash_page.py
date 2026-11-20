@@ -1,9 +1,4 @@
-"""Page codecs used internally by ExtendibleHash.
-
-Three page kinds share the same file: the metadata page (page 0), directory
-pages holding bucket page ids, and bucket pages holding (key, RID) entries.
-Every page is read and written through the BufferManager.
-"""
+"""Page codecs used internally by ExtendibleHash."""
 
 import struct
 from collections.abc import Iterator, Sequence

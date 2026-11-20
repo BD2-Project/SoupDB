@@ -1,9 +1,4 @@
-"""Punto espacial: la clave del R-Tree.
-
-Para poder pasar la conformance suite de ``Index`` (que usa claves escalares),
-``from_key`` mapea claves 1D a puntos sobre el eje X; las claves string se
-mapean a un punto estable por hash.
-"""
+"""Punto espacial: la clave del R-Tree."""
 
 import hashlib
 from typing import NamedTuple

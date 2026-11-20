@@ -1,10 +1,4 @@
-"""Deterministic ES/EN tokenization without external language resources.
-
-NFKC and casefold normalize width/case; accents and ñ remain significant.
-Words and numbers are retained; punctuation and underscores split tokens.
-Stopwords are removed before stemming. The stemmer is a bilingual heuristic,
-not Porter or a language detector; its rules and configuration are versioned.
-"""
+"""Deterministic ES/EN tokenization without external language resources."""
 
 import re
 import unicodedata

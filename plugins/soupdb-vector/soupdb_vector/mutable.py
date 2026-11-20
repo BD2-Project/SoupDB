@@ -1,9 +1,4 @@
-"""DML-maintained ANN index: native inserts plus persistent tombstones.
-
-IVF and HNSW support incremental insertion but not physical deletion. This
-wrapper records removed RIDs in a sidecar and filters them from results, so
-``DELETE`` is reflected immediately and survives reopening the database.
-"""
+"""DML-maintained ANN index: native inserts plus persistent tombstones."""
 
 from __future__ import annotations
 

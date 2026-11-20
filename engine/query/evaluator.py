@@ -1,20 +1,4 @@
-"""Evaluation of SQL expressions against tuple rows.
-
-The evaluator is a pure module: :func:`evaluate` resolves scalar expressions and
-predicates, :func:`evaluate_aggregate` computes aggregate functions over a group
-of rows. Rows are plain ``tuple`` of values and the schema is the ordered tuple
-of :class:`engine.common.schema.ColumnDef` nodes (column ``i`` maps to
-``row[i]``).
-
-Comparisons are strict: operands must share the exact same type
-(``type(a) is type(b)``); an int is never coerced to a float.
-
-``distance(a, b)`` and ``distance(a, b, 'metrica')`` delegate to
-:mod:`engine.query.spatial_metrics`: ``'euclidean'`` (default, plane distance in
-coordinate units) or ``'haversine'`` (geodesic distance in kilometres). Both
-metrics always return a float, so the strict comparison rule above applies to
-their results as well.
-"""
+"""Evaluation of SQL expressions against tuple rows."""
 
 import math
 import re

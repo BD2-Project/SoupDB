@@ -1,9 +1,4 @@
-"""Protocols every SoupDB index/search plugin must satisfy.
-
-The engine core never imports a concrete plugin implementation. It discovers
-plugins through :class:`engine.plugins.registry.PluginRegistry` and talks to
-them only through these protocols.
-"""
+"""Protocols every SoupDB index/search plugin must satisfy."""
 
 from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable

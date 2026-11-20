@@ -1,8 +1,4 @@
-"""Volcano leaf operators for ranked index hits backed by real table RIDs.
-
-The ranked index is shared/borrowed: neither closing this operator nor a failed
-query closes the binding's RankedIndex instance.
-"""
+"""Volcano leaf operators for ranked index hits backed by real table RIDs."""
 
 from collections.abc import Mapping
 from math import isfinite

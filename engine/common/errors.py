@@ -1,7 +1,4 @@
-"""Own exceptions for the engine.
-
-Nothing in the engine raises a bare ``Exception``.
-"""
+"""Own exceptions for the engine."""
 
 
 class SoupDBError(Exception):

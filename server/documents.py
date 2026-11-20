@@ -1,16 +1,4 @@
-"""Servido de documentos multimedia del gestor.
-
-Vive **fuera de `engine/`** a propósito: las reglas duras del proyecto prohíben
-que el motor abra archivos directamente o cargue un archivo completo en memoria
-(toda la E/S de datos pasa por ``DiskManager``). Servir documentos externos es
-una responsabilidad del servidor, no del motor: el ``ConnectionHandler`` solo
-transporta los frames, y este módulo resuelve y lee los archivos en streaming.
-
-Las tablas guardan **referencias relativas** (p. ej. ``gatos/001.jpg``). El
-``root`` es configuración del despliegue (``SOUPDB_DOCUMENT_ROOT``): en local
-apunta a la carpeta del usuario y en un contenedor al volumen montado. El
-cliente nunca reconstruye rutas; el gestor resuelve contra su propio filesystem.
-"""
+"""Servido de documentos multimedia del gestor."""
 
 from __future__ import annotations
 

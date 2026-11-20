@@ -1,9 +1,4 @@
-"""Compatibility shim: multimedia code moved to the ``soupdb-vector`` plugin.
-
-Importing this package requires the plugin to be installed. The submodules are
-aliased into this namespace so existing ``engine.multimedia.*`` imports keep
-working during the migration window.
-"""
+"""Compatibility shim: multimedia code moved to the ``soupdb-vector`` plugin."""
 
 import sys as _sys
 
