@@ -10,9 +10,7 @@ services:
       HASH_GLOBAL_DEPTH_MAX: ${HASH_GLOBAL_DEPTH_MAX:-16}
       MAX_CONNECTIONS: ${MAX_CONNECTIONS:-100}
       LOCK_TIMEOUT_MS: ${LOCK_TIMEOUT_MS:-5000}
-      # Raíz de los documentos servibles por FETCH/DOCUMENT (ruta DENTRO del
-      # contenedor, donde se monta el volumen de abajo). Las filas guardan
-      # referencias relativas (p. ej. "gatos/001.jpg"), nunca rutas del host.
+      # Raíz de los documentos en el contenedor. FETCH acepta referencias relativas.
       SOUPDB_DOCUMENT_ROOT: ${SOUPDB_DOCUMENT_ROOT:-/app/documents}
       SOUPDB_PLUGINS: ${SOUPDB_PLUGINS:-0}
       SOUPDB_PLUGINS_DIR: /opt/soupdb/plugins
@@ -24,9 +22,7 @@ services:
       - ./dist/plugins:/opt/soupdb/plugins:ro
 
   postgres:
-    # PostGIS sobre PostgreSQL 16: la comparación 2.2.4 necesita distancias en metros
-    # sobre `geography`. El tipo `point` nativo solo da distancia euclidiana en grados,
-    # que no es comparable con el haversine del motor.
+    # La comparación espacial usa PostGIS geography para medir en metros.
     image: postgis/postgis:16-3.4
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-soupdb}
@@ -36,12 +32,6 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-
-  # web:
-  #   build:
-  #     context: https://github.com/BD2-Project/SoupChef.git
-  #   ports:
-  #     - "8080:8080"
 
 volumes:
   engine-data:

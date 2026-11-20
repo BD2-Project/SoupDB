@@ -1,12 +1,7 @@
 name: plugins-release
 
-# Publica el core y los plugins en PyPI.
-# - Tag dedicado `plugins-v*` (no cada release del gestor, para evitar
-#   republicar versiones ya existentes).
-# - O manualmente con workflow_dispatch (target: all | core | inverted | vector | plugins).
-#
-# Requiere el secret PYPI_TOKEN (o configurar Trusted Publishing en PyPI y
-# reemplazar el paso por pypa/gh-action-pypi-publish).
+# Publica en PyPI mediante tags plugins-v* o ejecución manual.
+# La publicación usa el secreto PYPI_TOKEN.
 on:
   push:
     tags: ["plugins-v*"]

@@ -1,8 +1,5 @@
 #!/bin/sh
-# SoupDB container entrypoint.
-#
-# Base image: core engine only. To add plugins without rebuilding the image,
-# mount wheels under $SOUPDB_PLUGINS_DIR and set SOUPDB_PLUGINS=1.
+# Mount plugin wheels under $SOUPDB_PLUGINS_DIR and set SOUPDB_PLUGINS=1 to install them.
 set -eu
 
 plugins_dir="${SOUPDB_PLUGINS_DIR:-/opt/soupdb/plugins}"
