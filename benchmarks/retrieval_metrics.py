@@ -73,12 +73,14 @@ def parse_qrels(lines: Iterable[str | bytes]) -> Qrels:
             raise ValueError(f"invalid qrels JSON at line {line_number}") from exc
         if not isinstance(row, dict):
             raise ValueError(f"qrels row {line_number} must be an object")
-        query_id, document_id, grade = (
-            row.get("query-id"), row.get("corpus-id"), row.get("score")
-        )
-        if (not isinstance(query_id, str) or not query_id.strip()
-                or not isinstance(document_id, str) or not document_id.strip()
-                or type(grade) not in (int, float, str)):
+        query_id, document_id, grade = (row.get("query-id"), row.get("corpus-id"), row.get("score"))
+        if (
+            not isinstance(query_id, str)
+            or not query_id.strip()
+            or not isinstance(document_id, str)
+            or not document_id.strip()
+            or type(grade) not in (int, float, str)
+        ):
             raise ValueError(f"invalid qrels fields at line {line_number}")
         try:
             numeric_grade = float(grade)
@@ -99,8 +101,9 @@ def parse_qrels(lines: Iterable[str | bytes]) -> Qrels:
     return {query_id: frozenset(document_ids) for query_id, document_ids in relevant.items()}
 
 
-def restrict_qrels_to_corpus(qrels: Mapping[str, Iterable[str]],
-                             corpus_ids: Iterable[str]) -> Qrels:
+def restrict_qrels_to_corpus(
+    qrels: Mapping[str, Iterable[str]], corpus_ids: Iterable[str]
+) -> Qrels:
     """Use only judged relevant documents present in a sampled corpus.
 
     Recall from this result is conditional on the sample containing a judged
@@ -121,8 +124,9 @@ def precision_at_k(retrieved: Sequence[str], relevant: Iterable[str], k: int = 1
     return sum(document_id in relevant_ids for document_id in retrieved[:k]) / k
 
 
-def recall_at_k(retrieved: Sequence[str], relevant_in_corpus: Iterable[str],
-                k: int = 10) -> float | None:
+def recall_at_k(
+    retrieved: Sequence[str], relevant_in_corpus: Iterable[str], k: int = 10
+) -> float | None:
     """Recall@k against judged relevant documents inside this corpus sample.
 
     Returns None when the query has no judged relevant documents in the sample;

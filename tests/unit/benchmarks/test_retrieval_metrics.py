@@ -18,10 +18,14 @@ def _qrel(qid, docid, grade):
 
 
 def test_parse_positive_graded_judgments_and_ignore_zero_unjudged():
-    qrels = parse_qrels([
-        _qrel("1", "partial", 1), _qrel("1", "full", 2),
-        _qrel("1", "nonrelevant", 0), _qrel("1", "unjudged", -1),
-    ])
+    qrels = parse_qrels(
+        [
+            _qrel("1", "partial", 1),
+            _qrel("1", "full", 2),
+            _qrel("1", "nonrelevant", 0),
+            _qrel("1", "unjudged", -1),
+        ]
+    )
     assert qrels == {"1": frozenset({"partial", "full"})}
 
 
@@ -38,12 +42,19 @@ def test_qrels_accept_numeric_grades_encoded_as_strings():
     assert parse_qrels(rows) == {"q": frozenset({"d1"})}
 
 
-@pytest.mark.parametrize("rows", [
-    ["{"], ["[]"], [_qrel("", "d", 1)], [_qrel("q", "", 1)],
-    [_qrel("q", "d", -2)], [_qrel("q", "d", 3)],
-    [json.dumps({"query-id": "q", "corpus-id": "d", "score": True})],
-    [_qrel("q", "d", 1), _qrel("q", "d", 2)],
-])
+@pytest.mark.parametrize(
+    "rows",
+    [
+        ["{"],
+        ["[]"],
+        [_qrel("", "d", 1)],
+        [_qrel("q", "", 1)],
+        [_qrel("q", "d", -2)],
+        [_qrel("q", "d", 3)],
+        [json.dumps({"query-id": "q", "corpus-id": "d", "score": True})],
+        [_qrel("q", "d", 1), _qrel("q", "d", 2)],
+    ],
+)
 def test_invalid_or_conflicting_qrels_are_rejected(rows):
     with pytest.raises(ValueError):
         parse_qrels(rows)
@@ -71,8 +82,7 @@ def test_trec_covid_query_ablation_preserves_48_topic_ids_and_exact_buckets():
     rows = query_file.read_text(encoding="utf-8").splitlines()
     variants = build_query_length_ablation(rows)
     expected_ids = {
-        row["_id"] for row in map(json.loads, rows)
-        if len(DEFAULT_TOKENIZER(row["text"])) >= 5
+        row["_id"] for row in map(json.loads, rows) if len(DEFAULT_TOKENIZER(row["text"])) >= 5
     }
     assert len(expected_ids) == 48
     assert set(variants) == {"1", "3", "5+"}

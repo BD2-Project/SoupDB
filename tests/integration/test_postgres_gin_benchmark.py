@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from benchmarks.scripts.postgres_gin import (
-    benchmark_gin,
     _judged_relevant,
+    benchmark_gin,
     parse_memory_mib,
     precision_recall_at_10,
 )
@@ -22,18 +22,17 @@ CONTAINER_ID = os.environ.get("SOUPDB_PG_CONTAINER_ID")
 def test_memory_and_relevance_helpers() -> None:
     assert parse_memory_mib("1.5GiB") == 1536
     assert parse_memory_mib("512MiB") == 512
-    metrics = precision_recall_at_10(
-        ["relevant", "other"], relevant_ids={"relevant"}, k=2
-    )
+    metrics = precision_recall_at_10(["relevant", "other"], relevant_ids={"relevant"}, k=2)
     assert metrics["precision_at_k"] == 0.5
     assert metrics["recall_at_k_conditional"] == 1.0
-    assert _judged_relevant(
-        {"q1": frozenset({"relevant"})}, "q1", {"relevant", "other"}
-    ) == {"relevant"}
+    assert _judged_relevant({"q1": frozenset({"relevant"})}, "q1", {"relevant", "other"}) == {
+        "relevant"
+    }
 
 
 @pytest.mark.skipif(not DSN, reason="SOUPDB_PG_DSN is not configured")
 def test_postgres_gin_build_query_and_relevance(tmp_path: Path) -> None:
+    pytest.importorskip("psycopg2", reason="psycopg2-binary is not installed")
     corpus = tmp_path / "corpus.jsonl"
     corpus.write_text(
         "".join(

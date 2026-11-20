@@ -8,12 +8,15 @@ from scripts.sample_nested_corpora import nested_sample, write_nested_corpora
 
 def _lines(count: int):
     for number in range(count):
-        yield json.dumps({
-            "_id": f"doc-{number:04d}",
-            "title": f"Título {number}",
-            "text": f"document text {number}",
-            "ignored": "not copied",
-        }, ensure_ascii=False)
+        yield json.dumps(
+            {
+                "_id": f"doc-{number:04d}",
+                "title": f"Título {number}",
+                "text": f"document text {number}",
+                "ignored": "not copied",
+            },
+            ensure_ascii=False,
+        )
 
 
 def test_samples_are_reproducible_nested_and_preserve_only_schema_fields():
@@ -49,7 +52,10 @@ def test_writer_creates_hashed_manifest_and_nested_jsonl_files(tmp_path):
     assert set(written_ids[0]) <= set(written_ids[1]) <= set(written_ids[2])
     assert json.loads((output / "manifest.json").read_text(encoding="utf-8")) == manifest
     assert {path.name for path in output.iterdir()} == {
-        "manifest.json", "corpus_5.jsonl", "corpus_10.jsonl", "corpus_25.jsonl"
+        "manifest.json",
+        "corpus_5.jsonl",
+        "corpus_10.jsonl",
+        "corpus_25.jsonl",
     }
     with pytest.raises(FileExistsError):
         write_nested_corpora(_lines(30), output, sizes=(5, 10, 25))

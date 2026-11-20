@@ -11,20 +11,19 @@ import sys
 import tempfile
 import threading
 import time
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from engine.common.rid import RID
-from engine.indexes.inverted.corpus_reader import read_corpus
-from engine.indexes.inverted.index import InvertedIndex
-from engine.indexes.inverted.tokenizer import DEFAULT_TOKENIZER
 from benchmarks.retrieval_metrics import (
     build_query_length_ablation,
     parse_qrels,
     restrict_qrels_to_corpus,
 )
 from benchmarks.scripts.postgres_gin import benchmark_gin
+from engine.common.rid import RID
+from engine.indexes.inverted.corpus_reader import read_corpus
+from engine.indexes.inverted.index import InvertedIndex
+from engine.indexes.inverted.tokenizer import DEFAULT_TOKENIZER
 
 
 def _query_rows(queries_path: Path) -> dict[str, list[dict[str, Any]]]:
@@ -32,8 +31,7 @@ def _query_rows(queries_path: Path) -> dict[str, list[dict[str, Any]]]:
         buckets = build_query_length_ablation(file)
     return {
         bucket: [
-            {"query_id": query_id, "text": text,
-             "length_words": len(DEFAULT_TOKENIZER(text))}
+            {"query_id": query_id, "text": text, "length_words": len(DEFAULT_TOKENIZER(text))}
             for query_id, text in sorted(values.items())
         ]
         for bucket, values in buckets.items()
@@ -51,8 +49,11 @@ def _source_ids(items: list[tuple[str, RID]], documents: list[Any]) -> dict[RID,
 
 def _macro(rows: list[dict[str, Any]]) -> dict[str, Any]:
     p = [row["precision_at_10"] for row in rows]
-    recalls = [row["recall_at_10_conditional"] for row in rows
-               if row["recall_at_10_conditional"] is not None]
+    recalls = [
+        row["recall_at_10_conditional"]
+        for row in rows
+        if row["recall_at_10_conditional"] is not None
+    ]
     latencies = [row["latency_median_seconds"] for row in rows]
     return {
         "query_count": len(rows),
@@ -61,8 +62,9 @@ def _macro(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "queries_with_relevant_in_sample": len(recalls),
         "queries_without_relevant_in_sample": len(rows) - len(recalls),
         "latency_median_seconds_macro": statistics.fmean(latencies) if latencies else None,
-        "latency_p95_seconds": sorted(latencies)[math.ceil(.95 * len(latencies)) - 1]
-        if latencies else None,
+        "latency_p95_seconds": sorted(latencies)[math.ceil(0.95 * len(latencies)) - 1]
+        if latencies
+        else None,
     }
 
 
@@ -82,11 +84,16 @@ class _ProcessMemorySampler:
 
         class _CountersEx(ctypes.Structure):
             _fields_ = [
-                ("cb", ctypes.c_ulong), ("PageFaultCount", ctypes.c_ulong),
-                ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
-                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t),
+                ("cb", ctypes.c_ulong),
+                ("PageFaultCount", ctypes.c_ulong),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
                 ("PrivateUsage", ctypes.c_size_t),
             ]
 
@@ -130,13 +137,18 @@ class _ProcessMemorySampler:
             "baseline_bytes": baseline,
             "peak_observed_bytes": peak,
             "delta_peak_from_baseline_bytes": peak - baseline
-            if peak is not None and baseline is not None else None,
+            if peak is not None and baseline is not None
+            else None,
         }
 
 
 def _run_soupdb(
-    corpus_path: Path, queries_by_bucket: dict[str, list[dict[str, Any]]],
-    qrels: dict[str, frozenset[str]], *, memory_limit_bytes: int, repeats: int,
+    corpus_path: Path,
+    queries_by_bucket: dict[str, list[dict[str, Any]]],
+    qrels: dict[str, frozenset[str]],
+    *,
+    memory_limit_bytes: int,
+    repeats: int,
 ) -> dict[str, Any]:
     documents = list(read_corpus(corpus_path))
     if not documents:
@@ -175,21 +187,29 @@ def _run_soupdb(
                         hit_ids = [source_ids[rid] for rid, _score in hits]
                         relevant = available_qrels.get(query_id, frozenset())
                         found = sum(doc_id in relevant for doc_id in hit_ids[:10])
-                        results[method].append({
-                            "query_id": query_id,
-                            "length_bucket": bucket,
-                            "query_length_words": query["length_words"],
-                            "query": query_text,
-                            "latency_seconds": latencies,
-                            "latency_median_seconds": statistics.median(latencies),
-                            "hits": [
-                                {"document_id": source_ids[rid], "rid": list(rid), "score": score}
-                                for rid, score in hits
-                            ],
-                            "precision_at_10": found / 10,
-                            "recall_at_10_conditional": found / len(relevant) if relevant else None,
-                            "relevant_in_sample": len(relevant),
-                        })
+                        results[method].append(
+                            {
+                                "query_id": query_id,
+                                "length_bucket": bucket,
+                                "query_length_words": query["length_words"],
+                                "query": query_text,
+                                "latency_seconds": latencies,
+                                "latency_median_seconds": statistics.median(latencies),
+                                "hits": [
+                                    {
+                                        "document_id": source_ids[rid],
+                                        "rid": list(rid),
+                                        "score": score,
+                                    }
+                                    for rid, score in hits
+                                ],
+                                "precision_at_10": found / 10,
+                                "recall_at_10_conditional": found / len(relevant)
+                                if relevant
+                                else None,
+                                "relevant_in_sample": len(relevant),
+                            }
+                        )
         finally:
             index.close()
     return {
@@ -201,9 +221,14 @@ def _run_soupdb(
 
 
 def compare(
-    corpus_path: str | Path, queries_path: str | Path, qrels_path: str | Path, *,
-    dsn: str, docker_container_id: str | None = None,
-    memory_limit_bytes: int = 8 * 1024 * 1024, repeats: int = 5,
+    corpus_path: str | Path,
+    queries_path: str | Path,
+    qrels_path: str | Path,
+    *,
+    dsn: str,
+    docker_container_id: str | None = None,
+    memory_limit_bytes: int = 8 * 1024 * 1024,
+    repeats: int = 5,
 ) -> dict[str, Any]:
     """Run all rankers against one exact sample and shared topic IDs."""
     corpus_path, queries_path, qrels_path = map(Path, (corpus_path, queries_path, qrels_path))
@@ -213,23 +238,37 @@ def compare(
     qrels = _qrels(qrels_path)
     if not queries["1"] or len({q["query_id"] for q in queries["1"]}) != 48:
         raise ValueError("expected the 48 shared TREC-COVID topics with original length >= 5")
-    soupdb = _run_soupdb(corpus_path, queries, qrels,
-                         memory_limit_bytes=memory_limit_bytes, repeats=repeats)
+    soupdb = _run_soupdb(
+        corpus_path, queries, qrels, memory_limit_bytes=memory_limit_bytes, repeats=repeats
+    )
     # The same query IDs, exact query strings, and class metadata go to GIN.
     flat_queries = [query for bucket in ("1", "3", "5+") for query in queries[bucket]]
     gin = benchmark_gin(
-        corpus_path, flat_queries, qrels, dsn=dsn, k=10, repeats=repeats,
-        docker_container_id=docker_container_id, force_gin=True,
+        corpus_path,
+        flat_queries,
+        qrels,
+        dsn=dsn,
+        k=10,
+        repeats=repeats,
+        docker_container_id=docker_container_id,
+        force_gin=True,
     )
     if any(not row["used_gin_plan"] for row in gin["queries"]):
         raise RuntimeError("PostgreSQL did not use the GIN index for every query")
     gin_rows = {
         "postgresql_gin_ts_rank_cd": [
-            {**row, "length_bucket": (
-                "1" if row["query_length_words"] == 1 else
-                "3" if row["query_length_words"] == 3 else "5+"
-            ), "precision_at_10": row["precision_at_k"],
-                "recall_at_10_conditional": row["recall_at_k_conditional"]}
+            {
+                **row,
+                "length_bucket": (
+                    "1"
+                    if row["query_length_words"] == 1
+                    else "3"
+                    if row["query_length_words"] == 3
+                    else "5+"
+                ),
+                "precision_at_10": row["precision_at_k"],
+                "recall_at_10_conditional": row["recall_at_k_conditional"],
+            }
             for row in gin["queries"]
         ]
     }
@@ -253,7 +292,8 @@ def compare(
             "queries": gin_rows["postgresql_gin_ts_rank_cd"],
             "build_phases_seconds": {
                 "insert_and_vectorize": gin["insert_and_vectorize_seconds"],
-                "gin_build": gin["gin_build_seconds"], "analyze": gin["analyze_seconds"],
+                "gin_build": gin["gin_build_seconds"],
+                "analyze": gin["analyze_seconds"],
             },
         },
     }
@@ -261,21 +301,30 @@ def compare(
     for system, values in systems.items():
         summary[system] = {}
         for bucket in ("1", "3", "5+"):
-            summary[system][bucket] = _macro([
-                row for row in values["queries"] if row["length_bucket"] == bucket
-            ])
+            summary[system][bucket] = _macro(
+                [row for row in values["queries"] if row["length_bucket"] == bucket]
+            )
     return {
         "dataset": "TREC-COVID",
         "corpus_path": str(corpus_path),
         "documents": len(list(read_corpus(corpus_path))),
         "query_source": "MTEB TREC-COVID queries; 1/3-token prefix ablations reuse parent qrels",
         "query_ids_per_length_bucket": 48,
-        "qrels_rule": "grades 1/2 relevant; 0/-1 not relevant; recall conditional on relevant docs in sample",
+        "qrels_rule": (
+            "grades 1/2 relevant; 0/-1 not relevant; recall conditional on relevant docs in sample"
+        ),
         "postgresql": {key: value for key, value in gin.items() if key != "queries"},
         "systems": systems,
         "summary_by_system_and_length": summary,
-        "tokenizer_note": "SoupDB Spanish/English heuristic tokenizer; PostgreSQL uses English text search configuration.",
-        "memory_note": "SoupDB process working set and PostgreSQL whole-container memory are sampled. Their scopes differ and sample intervals can miss short peaks; do not treat as directly equivalent exact peaks.",
+        "tokenizer_note": (
+            "SoupDB Spanish/English heuristic tokenizer; "
+            "PostgreSQL uses English text search configuration."
+        ),
+        "memory_note": (
+            "SoupDB process working set and PostgreSQL whole-container memory are sampled. "
+            "Their scopes differ and sample intervals can miss short peaks; "
+            "do not treat as directly equivalent exact peaks."
+        ),
     }
 
 
@@ -290,15 +339,22 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     import os
+
     dsn = args.dsn or os.environ.get("SOUPDB_PG_DSN")
     if not dsn:
         parser.error("pass --dsn or set SOUPDB_PG_DSN")
-    report = compare(args.corpus, args.queries, args.qrels, dsn=dsn,
-                     docker_container_id=args.docker_container_id,
-                     repeats=args.repeats)
+    report = compare(
+        args.corpus,
+        args.queries,
+        args.qrels,
+        dsn=dsn,
+        docker_container_id=args.docker_container_id,
+        repeats=args.repeats,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2)+"\n",
-                           encoding="utf-8")
+    args.output.write_text(
+        json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2) + "\n", encoding="utf-8"
+    )
     print(json.dumps(report["summary_by_system_and_length"], ensure_ascii=False, indent=2))
 
 

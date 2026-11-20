@@ -29,12 +29,14 @@ def _document(line: str | bytes, line_number: int) -> dict[str, object]:
 
 
 def _priority(seed: int, source_id: str) -> int:
-    payload = f"{seed}\0{source_id}".encode("utf-8")
+    payload = f"{seed}\0{source_id}".encode()
     return int.from_bytes(hashlib.sha256(payload).digest(), "big")
 
 
 def nested_sample(
-    lines: Iterable[str | bytes], *, sizes: tuple[int, ...] = (1_000, 10_000, 100_000),
+    lines: Iterable[str | bytes],
+    *,
+    sizes: tuple[int, ...] = (1_000, 10_000, 100_000),
     seed: int = 7,
 ) -> tuple[list[dict[str, object]], int]:
     """Keep the lowest stable ID hashes so each smaller sample nests in larger.
@@ -79,8 +81,11 @@ def nested_sample(
 
 
 def write_nested_corpora(
-    lines: Iterable[str | bytes], output_dir: str | Path, *,
-    sizes: tuple[int, ...] = (1_000, 10_000, 100_000), seed: int = 7,
+    lines: Iterable[str | bytes],
+    output_dir: str | Path,
+    *,
+    sizes: tuple[int, ...] = (1_000, 10_000, 100_000),
+    seed: int = 7,
     source: str = CORPUS_URL,
 ) -> dict[str, object]:
     """Publish all JSONL sizes and a SHA-256 manifest as one directory rename."""
@@ -103,8 +108,7 @@ def write_nested_corpora(
                     ).encode("utf-8")
                     file.write(payload)
                     digest.update(payload)
-            samples[str(size)] = {"file": filename, "documents": size,
-                                  "sha256": digest.hexdigest()}
+            samples[str(size)] = {"file": filename, "documents": size, "sha256": digest.hexdigest()}
         manifest: dict[str, object] = {
             "source": source,
             "source_documents": total,
@@ -129,8 +133,9 @@ def write_nested_corpora(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, help="Local source JSONL instead of downloading")
-    parser.add_argument("--output-dir", type=Path,
-                        default=Path("benchmarks/data/trec_covid_nested"))
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("benchmarks/data/trec_covid_nested")
+    )
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
     if args.input is None:

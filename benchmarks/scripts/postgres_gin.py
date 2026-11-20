@@ -19,9 +19,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import psycopg2
-from psycopg2.extras import execute_values
-
 from engine.indexes.inverted.corpus_reader import read_corpus
 
 _UNIT_MB = {"b": 1 / 1048576, "kb": 1 / 1024, "mb": 1, "gb": 1024, "tb": 1048576}
@@ -54,7 +51,10 @@ class DockerMemorySampler:
         try:
             result = subprocess.run(
                 ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", self.container_id],
-                check=True, capture_output=True, text=True, timeout=10,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             used = result.stdout.strip().split(" / ", maxsplit=1)[0]
             self.samples_mib.append(parse_memory_mib(used))
@@ -105,9 +105,7 @@ def _judged_relevant(
         relevant = (str(doc_id) for doc_id, grade in judgments.items() if grade >= 1)
     else:
         relevant = (str(doc_id) for doc_id in judgments)
-    return {
-        document_id for document_id in relevant if document_id in sample_ids
-    }
+    return {document_id for document_id in relevant if document_id in sample_ids}
 
 
 def precision_recall_at_10(
@@ -148,6 +146,13 @@ def benchmark_gin(
         raise ValueError("PostgreSQL DSN is required")
     if type(k) is not int or k <= 0 or type(repeats) is not int or repeats < 1:
         raise ValueError("k must be positive and repeats must be at least one")
+    try:
+        import psycopg2
+        from psycopg2.extras import execute_values
+    except ImportError as exc:
+        raise RuntimeError(
+            "psycopg2-binary is required to run the PostgreSQL GIN benchmark"
+        ) from exc
     documents = list(read_corpus(corpus_path))
     if len({document.source_id for document in documents}) != len(documents):
         raise ValueError("corpus contains duplicate source IDs")
@@ -174,7 +179,7 @@ def benchmark_gin(
             # Generate tsvector server-side in batches; body+title use the same
             # concatenation convention as the SoupDB inverted provider.
             for start in range(0, len(documents), 1000):
-                batch = documents[start:start + 1000]
+                batch = documents[start : start + 1000]
                 with connection.cursor() as cursor:
                     execute_values(
                         cursor,
@@ -189,16 +194,20 @@ def benchmark_gin(
 
             index_start = time.perf_counter()
             with connection.cursor() as cursor:
-                cursor.execute("CREATE INDEX gin_benchmark_documents_gin "
-                               "ON gin_benchmark_documents USING GIN (document_vector)")
+                cursor.execute(
+                    "CREATE INDEX gin_benchmark_documents_gin "
+                    "ON gin_benchmark_documents USING GIN (document_vector)"
+                )
             connection.commit()
             gin_build_seconds = time.perf_counter() - index_start
             analyze_start = time.perf_counter()
             with connection.cursor() as cursor:
                 cursor.execute("ANALYZE gin_benchmark_documents")
-                cursor.execute("SELECT pg_relation_size('gin_benchmark_documents'), "
-                               "pg_relation_size('gin_benchmark_documents_gin'), "
-                               "pg_total_relation_size('gin_benchmark_documents')")
+                cursor.execute(
+                    "SELECT pg_relation_size('gin_benchmark_documents'), "
+                    "pg_relation_size('gin_benchmark_documents_gin'), "
+                    "pg_total_relation_size('gin_benchmark_documents')"
+                )
                 heap_bytes, index_bytes, total_bytes = cursor.fetchone()
             connection.commit()
             analyze_seconds = time.perf_counter() - analyze_start
@@ -220,8 +229,7 @@ def benchmark_gin(
                           WHERE document_vector @@ plainto_tsquery('english', %s)
                           ORDER BY score DESC, document_id ASC LIMIT %s"""
                 with connection.cursor() as cursor:
-                    cursor.execute("EXPLAIN (FORMAT TEXT) " + sql,
-                                   (query_text, query_text, k))
+                    cursor.execute("EXPLAIN (FORMAT TEXT) " + sql, (query_text, query_text, k))
                     plan = "\n".join(row[0] for row in cursor.fetchall())
                 latency: list[float] = []
                 top_ids: list[str] = []
@@ -234,18 +242,21 @@ def benchmark_gin(
                     if repeat:
                         latency.append(elapsed)
                     top_ids = [row[0] for row in rows]
-                results.append({
-                    "query_id": query_id,
-                    "query": query_text,
-                    "query_length_words": length_words,
-                    "latency_seconds": latency,
-                    "latency_median_seconds": statistics.median(latency),
-                    "hits": [{"document_id": doc_id, "score": float(score)}
-                             for doc_id, score in rows],
-                    **precision_recall_at_10(top_ids, relevant_ids=relevant, k=k),
-                    "used_gin_plan": "gin_benchmark_documents_gin" in plan,
-                    "explain_plan": plan,
-                })
+                results.append(
+                    {
+                        "query_id": query_id,
+                        "query": query_text,
+                        "query_length_words": length_words,
+                        "latency_seconds": latency,
+                        "latency_median_seconds": statistics.median(latency),
+                        "hits": [
+                            {"document_id": doc_id, "score": float(score)} for doc_id, score in rows
+                        ],
+                        **precision_recall_at_10(top_ids, relevant_ids=relevant, k=k),
+                        "used_gin_plan": "gin_benchmark_documents_gin" in plan,
+                        "explain_plan": plan,
+                    }
+                )
     finally:
         connection.rollback()
         connection.close()
@@ -292,14 +303,19 @@ def main() -> None:
     if not args.dsn:
         parser.error("pass --dsn or set SOUPDB_PG_DSN")
     report = benchmark_gin(
-        args.corpus, json.loads(args.queries.read_text(encoding="utf-8")),
-        json.loads(args.qrels.read_text(encoding="utf-8")), dsn=args.dsn,
-        k=args.k, repeats=args.repeats, docker_container_id=args.docker_container_id,
+        args.corpus,
+        json.loads(args.queries.read_text(encoding="utf-8")),
+        json.loads(args.qrels.read_text(encoding="utf-8")),
+        dsn=args.dsn,
+        k=args.k,
+        repeats=args.repeats,
+        docker_container_id=args.docker_container_id,
         force_gin=args.force_gin,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                           encoding="utf-8")
+    args.output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     print(json.dumps({key: value for key, value in report.items() if key != "queries"}, indent=2))
 
 
