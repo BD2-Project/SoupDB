@@ -54,6 +54,22 @@ El **driver `rsoup`** es el cliente Rust que los consumidores usan para conectar
 El protocolo binario TCP (puerto `55432`) es la **interfaz remota general del gestor**.
 El núcleo `engine/` no expone REST ni GraphQL.
 
+### Servido de documentos multimedia
+
+Las tablas guardan **referencias relativas** (p. ej. `gatos/001.jpg`), no rutas
+absolutas ni los bytes. Al servir, el gestor resuelve la referencia contra
+`SOUPDB_DOCUMENT_ROOT` y devuelve el archivo con `FETCH`/`DOCUMENT` (media type +
+bytes) por el mismo canal TCP, así que el cliente no reconstruye rutas y funciona
+igual en local que en un contenedor con el dataset montado como volumen.
+
+```bash
+SOUPDB_DOCUMENT_ROOT=/ruta/al/dataset uv run python -m engine
+```
+
+Sin esa variable, `FETCH` responde `UNSUPPORTED`. Para que la indexación
+multimedia y el servido coincidan, `SOUPDB_DOCUMENT_ROOT` debe apuntar a la misma
+carpeta que el `root` del perfil multimedia.
+
 ## Dependencias
 
 | Dependencia | Uso | Instalación |
@@ -98,7 +114,26 @@ DRIVER_PORT=55435 POSTGRES_PORT=55434 docker compose up
 
 Configuración por variables de entorno: `SOUPDB_DATA` (directorio de datos),
 `DRIVER_HOST`, `DRIVER_PORT`, `PAGE_SIZE`, `BUFFER_POOL_SIZE`,
-`MAX_CONNECTIONS` y `LOCK_TIMEOUT_MS`.
+`MAX_CONNECTIONS`, `LOCK_TIMEOUT_MS` y `SOUPDB_DOCUMENT_ROOT` (raíz de los
+documentos servibles por `FETCH`).
+
+### Documentos multimedia servibles (local y contenedor)
+
+Las filas guardan referencias **relativas** (p. ej. `gatos/001.jpg`). El gestor
+las resuelve contra `SOUPDB_DOCUMENT_ROOT` y las sirve por `FETCH`/`DOCUMENT`
+(streaming), así que el cliente nunca reconstruye rutas:
+
+- **Local:** `SOUPDB_DOCUMENT_ROOT=/ruta/al/dataset uv run python -m engine`
+- **Docker Compose:** se monta la carpeta del host en `/app/documents:ro` y se
+  define `SOUPDB_DOCUMENT_ROOT=/app/documents` (ya viene así en el compose).
+  ```bash
+  # ./documents por defecto, o apunta a tu dataset:
+  SOUPDB_DOCUMENTS_HOST=/ruta/al/dataset docker compose up engine
+  ```
+  Los `INSERT` usan la misma referencia relativa (`gatos/001.jpg`) tanto en local
+  como en el contenedor: solo cambia la raíz configurada, no las filas.
+
+Sin `SOUPDB_DOCUMENT_ROOT`, `FETCH` responde `UNSUPPORTED`.
 
 ## Gestión de paquete y contenedor
 

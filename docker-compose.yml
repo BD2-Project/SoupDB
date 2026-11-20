@@ -10,12 +10,17 @@ services:
       HASH_GLOBAL_DEPTH_MAX: ${HASH_GLOBAL_DEPTH_MAX:-16}
       MAX_CONNECTIONS: ${MAX_CONNECTIONS:-100}
       LOCK_TIMEOUT_MS: ${LOCK_TIMEOUT_MS:-5000}
+      # Raíz de los documentos servibles por FETCH/DOCUMENT (ruta DENTRO del
+      # contenedor, donde se monta el volumen de abajo). Las filas guardan
+      # referencias relativas (p. ej. "gatos/001.jpg"), nunca rutas del host.
+      SOUPDB_DOCUMENT_ROOT: ${SOUPDB_DOCUMENT_ROOT:-/app/documents}
       SOUPDB_PLUGINS: ${SOUPDB_PLUGINS:-0}
       SOUPDB_PLUGINS_DIR: /opt/soupdb/plugins
     ports:
       - "${DRIVER_PORT:-55432}:55432"
     volumes:
       - engine-data:/app/data
+      - ${SOUPDB_DOCUMENTS_HOST:-./documents}:/app/documents:ro
       - ./dist/plugins:/opt/soupdb/plugins:ro
 
   postgres:

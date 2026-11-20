@@ -9,8 +9,9 @@ Frame layout (big-endian):
     | 2B "SP"| 1B 0x01 | 1B      | 4B (u32 BE)| (length bytes)   |
     +--------+---------+---------+------------+------------------+
 
-Requests: PING 0x01, BEGIN 0x03, COMMIT 0x04, ROLLBACK 0x05, QUERY 0x06.
-Responses: PONG 0x02, OK 0x10, RESULT 0x11, ERROR 0x12.
+Requests: PING 0x01, BEGIN 0x03, COMMIT 0x04, ROLLBACK 0x05, QUERY 0x06,
+PREPARE 0x07, EXECUTE 0x08, DEALLOCATE 0x09, FETCH 0x0A.
+Responses: PONG 0x02, OK 0x10, RESULT 0x11, ERROR 0x12, DOCUMENT 0x13.
 
 Tipos de columna: INT 0x01, FLOAT 0x02, VARCHAR 0x03, TEXT 0x04, BOOL 0x05,
 POINT 0x06. Tags de valor: NULL 0x00, INT 0x01, FLOAT 0x02, TEXT 0x03, BOOL 0x04,
@@ -58,12 +59,16 @@ OP_QUERY = 0x06
 OP_PREPARE = 0x07
 OP_EXECUTE = 0x08
 OP_DEALLOCATE = 0x09
+#: Descarga los bytes de un documento multimedia por su referencia (carpeta global).
+OP_FETCH = 0x0A
 
 # Opcodes de response
 OP_PONG = 0x02
 OP_OK = 0x10
 OP_RESULT = 0x11
 OP_ERROR = 0x12
+#: Respuesta a ``OP_FETCH``: media type + bytes del documento.
+OP_DOCUMENT = 0x13
 
 # Tags de valor en las celdas de RESULT
 TAG_NULL = 0x00
@@ -96,9 +101,16 @@ ERR_UNSUPPORTED = 0x08
 
 def encode_frame(opcode: int, payload: bytes = b"", *, version: int = VERSION) -> bytes:
     """Encode a full frame: magic + version + opcode + length + payload."""
+    return encode_frame_header(opcode, len(payload), version=version) + payload
+
+
+def encode_frame_header(opcode: int, payload_length: int, *, version: int = VERSION) -> bytes:
+    """Encode solo el header de un frame cuyo payload se envía en streaming."""
     if version not in SUPPORTED_VERSIONS:
         raise ProtocolError(f"unsupported protocol version {version}")
-    return MAGIC + struct.pack(">BBI", version, opcode, len(payload)) + payload
+    if payload_length > 0xFFFFFFFF:
+        raise ProtocolError("frame payload is larger than the u32 length field")
+    return MAGIC + struct.pack(">BBI", version, opcode, payload_length)
 
 
 def decode_frame(data: bytes) -> tuple[int, bytes]:
@@ -207,6 +219,21 @@ def decode_deallocate(payload: bytes) -> str:
     return _decode_name(payload, 0)[0]
 
 
+def encode_fetch(reference: str) -> bytes:
+    """Payload de ``OP_FETCH``: ``[ref_len u32][reference UTF-8]``."""
+    data = reference.encode("utf-8")
+    return struct.pack(">I", len(data)) + data
+
+
+def decode_fetch(payload: bytes) -> str:
+    if len(payload) < 4:
+        raise ProtocolError("FETCH payload shorter than its length prefix")
+    (length,) = struct.unpack_from(">I", payload, 0)
+    if len(payload) != 4 + length:
+        raise ProtocolError("FETCH payload length does not match its text")
+    return payload[4:].decode("utf-8")
+
+
 # --- Payloads de response -----------------------------------------------
 
 
@@ -227,6 +254,41 @@ def encode_error(code: int, message: str) -> bytes:
 def decode_error(payload: bytes) -> tuple[int, str]:
     code, length = struct.unpack_from(">BH", payload, 0)
     return code, payload[3 : 3 + length].decode("utf-8")
+
+
+def encode_document(media_type: str, data: bytes) -> bytes:
+    """Payload de ``OP_DOCUMENT``: media type + bytes del documento.
+
+    Es la forma completa (header + datos) que usan tests y clientes. El servidor
+    envía el header con :func:`encode_document_header` y luego los trozos del
+    archivo, sin cargarlo entero en memoria.
+    """
+    return encode_document_header(media_type, len(data)) + data
+
+
+def encode_document_header(media_type: str, size: int) -> bytes:
+    """Header del payload ``OP_DOCUMENT``: ``mime + tamaño total de datos``."""
+    mime = media_type.encode("utf-8")
+    if not mime or len(mime) > 0xFFFF:
+        raise ProtocolError("document media type is empty or too long")
+    if size < 0 or size > 0xFFFFFFFF:
+        raise ProtocolError("document size does not fit the u32 data length")
+    return struct.pack(">H", len(mime)) + mime + struct.pack(">I", size)
+
+
+def decode_document(payload: bytes) -> tuple[str, bytes]:
+    if len(payload) < 6:
+        raise ProtocolError("DOCUMENT payload shorter than its header")
+    (mime_length,) = struct.unpack_from(">H", payload, 0)
+    offset = 2 + mime_length
+    if len(payload) < offset + 4:
+        raise ProtocolError("DOCUMENT payload truncated before its data length")
+    media_type = payload[2:offset].decode("utf-8")
+    (data_length,) = struct.unpack_from(">I", payload, offset)
+    offset += 4
+    if len(payload) != offset + data_length:
+        raise ProtocolError("DOCUMENT payload length does not match its data")
+    return media_type, payload[offset:]
 
 
 def encode_resultset(result: ResultSet, *, version: int = VERSION) -> bytes:
