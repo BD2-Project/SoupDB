@@ -21,6 +21,7 @@ COPY --from=build /app/.venv ./.venv
 # de plugins en caliente (SOUPDB_PLUGINS=1).
 RUN python -m ensurepip --upgrade
 COPY engine ./engine
+COPY server ./server
 COPY docker/entrypoint.sh /usr/local/bin/soupdb-entrypoint
 RUN chmod +x /usr/local/bin/soupdb-entrypoint
 EXPOSE 55432
