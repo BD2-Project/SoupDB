@@ -29,9 +29,11 @@ Todos los enteros van en **big-endian**.
 | `COMMIT` | `0x04` | cliente → gestor | Confirma transacción |
 | `ROLLBACK` | `0x05` | cliente → gestor | Deshace transacción |
 | `QUERY` | `0x06` | cliente → gestor | Ejecuta SQL |
+| `FETCH` | `0x0A` | cliente → gestor | Descarga un documento multimedia por referencia |
 | `OK` | `0x10` | gestor → cliente | Éxito (DML/DDL con `affected`) |
 | `RESULT` | `0x11` | gestor → cliente | Resultado de SELECT |
 | `ERROR` | `0x12` | gestor → cliente | Error con código + mensaje |
+| `DOCUMENT` | `0x13` | gestor → cliente | Media type + bytes de un documento |
 
 ## Payloads
 
@@ -39,6 +41,24 @@ Todos los enteros van en **big-endian**.
 ```
 length u32 BE | sql (UTF-8, length bytes)
 ```
+
+### FETCH
+```
+ref_length u32 BE | reference (UTF-8, ref_length bytes)
+```
+
+La referencia es **relativa** a `SOUPDB_DOCUMENT_ROOT` y canónica (sin `.`/`..`,
+sin `\`, sin salirse de la raíz). El cliente nunca envía rutas absolutas: el
+gestor resuelve el archivo en su propio filesystem, así que funciona igual en
+local que en un contenedor con el dataset montado como volumen. Sin
+`SOUPDB_DOCUMENT_ROOT` el gestor responde `UNSUPPORTED`.
+
+### DOCUMENT
+```
+mime_length u16 BE | mime (UTF-8) | data_length u32 BE | data
+```
+
+El archivo entero viaja en un frame (límite `u32` del `length` del frame).
 
 ### OK
 ```

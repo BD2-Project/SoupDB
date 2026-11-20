@@ -11,6 +11,7 @@ Toda la configuración llega por variables de entorno, que es lo que espera
 Variable              Valor por defecto           Qué controla
 ====================  ==========================  ======================
 ``SOUPDB_DATA``       ``data``                    Directorio de la base
+``SOUPDB_DOCUMENT_ROOT``  (sin default)          Raíz de los documentos servibles
 ``DRIVER_HOST``       ``0.0.0.0``                 Interfaz de escucha
 ``DRIVER_PORT``       ``55432``                   Puerto
 ``PAGE_SIZE``         ``4096``                    Tamaño de página
@@ -30,8 +31,10 @@ from pathlib import Path
 from types import FrameType
 
 from engine.common.catalog import Catalog
+from engine.common.errors import UnsupportedOperation
 from engine.transactions.connection_handler import ConnectionHandler
 from engine.transactions.transaction_manager import TransactionManager
+from server.documents import DocumentStore
 
 
 def _env_int(name: str, default: int) -> int:
@@ -48,6 +51,12 @@ def main() -> None:
     data_dir = Path(os.environ.get("SOUPDB_DATA", "data"))
     data_dir.mkdir(parents=True, exist_ok=True)
 
+    document_root = os.environ.get("SOUPDB_DOCUMENT_ROOT") or None
+    try:
+        documents = DocumentStore(document_root) if document_root is not None else None
+    except UnsupportedOperation as exc:
+        raise SystemExit(f"SOUPDB_DOCUMENT_ROOT inválido: {exc}") from None
+
     catalog = Catalog(
         data_dir,
         page_size=_env_int("PAGE_SIZE", 4096),
@@ -60,6 +69,7 @@ def main() -> None:
         port=_env_int("DRIVER_PORT", 55432),
         max_connections=_env_int("MAX_CONNECTIONS", 100),
         lock_timeout_ms=_env_int("LOCK_TIMEOUT_MS", 5000),
+        document_loader=documents,
     )
     handler.bind()
 

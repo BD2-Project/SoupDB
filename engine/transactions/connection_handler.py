@@ -8,14 +8,18 @@ strict 2PL locks. Connections beyond the limit wait in the accept backlog
 (PgBouncer-style ``max_client_conn``).
 
 Config via env (see ``docs/08-variables-entorno``): ``DRIVER_HOST``,
-``DRIVER_PORT``, ``MAX_CONNECTIONS``, ``SOCKET_TIMEOUT`` and ``LOCK_TIMEOUT_MS``.
+``DRIVER_PORT``, ``MAX_CONNECTIONS``, ``SOCKET_TIMEOUT``,
+``LOCK_TIMEOUT_MS`` and ``SOUPDB_DOCUMENT_ROOT`` (raíz de los documentos que
+sirve ``OP_FETCH``; sin ella, ``FETCH`` responde ``UNSUPPORTED``).
 """
 
 import logging
 import os
 import socket
 import threading
-from typing import Any
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 from engine.common.errors import ProtocolError, SoupDBError
 from engine.query.params import bind_parameters
@@ -25,6 +29,31 @@ from engine.transactions.session import TransactionalSession
 from engine.transactions.transaction_manager import TransactionManager
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class DocumentHandle(Protocol):
+    """Documento resuelto que el servidor lee en trozos (sin cargarlo entero)."""
+
+    media_type: str
+    size: int
+
+    def read_chunks(self, chunk_size: int = ...) -> Iterable[bytes]: ...
+
+
+class DocumentLoader(Protocol):
+    """Resuelve una referencia relativa a un documento bajo la raíz global."""
+
+    def resolve(self, reference: str) -> DocumentHandle: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentResponse:
+    """Respuesta ``DOCUMENT`` que se envía en streaming por el socket."""
+
+    payload_length: int
+    header: bytes
+    chunks: Iterable[bytes]
+
 
 DEFAULT_HOST = os.getenv("DRIVER_HOST", "0.0.0.0")
 DEFAULT_PORT = int(os.getenv("DRIVER_PORT", "55432"))
@@ -45,6 +74,7 @@ class ConnectionHandler:
         max_connections: int = DEFAULT_MAX_CONNECTIONS,
         socket_timeout: float = DEFAULT_SOCKET_TIMEOUT,
         lock_timeout_ms: int = DEFAULT_LOCK_TIMEOUT_MS,
+        document_loader: DocumentLoader | None = None,
     ) -> None:
         self._catalog = catalog
         self._tm = transaction_manager or TransactionManager()
@@ -53,6 +83,8 @@ class ConnectionHandler:
         self._max_connections = max_connections
         self._socket_timeout = socket_timeout
         self._lock_timeout_ms = lock_timeout_ms
+        # El motor no toca el filesystem de documentos: el loader se inyecta.
+        self._documents = document_loader
         self._listener: socket.socket | None = None
         self._slots = threading.BoundedSemaphore(max_connections)
         self._threads: list[threading.Thread] = []
@@ -115,7 +147,11 @@ class ConnectionHandler:
                 elif opcode == proto.OP_DEALLOCATE:
                     conn.sendall(self._deallocate(payload, prepared, version))
                 else:
-                    conn.sendall(self._dispatch(opcode, payload, session, version))
+                    response = self._dispatch(opcode, payload, session, version)
+                    if isinstance(response, DocumentResponse):
+                        self._send_document(conn, response, version)
+                    else:
+                        conn.sendall(response)
         except ProtocolError as exc:
             try:
                 conn.sendall(self._error(proto.ERR_GENERIC, str(exc), proto.VERSION))
@@ -134,7 +170,7 @@ class ConnectionHandler:
         payload: bytes,
         session: TransactionalSession,
         version: int = proto.VERSION,
-    ) -> bytes:
+    ) -> bytes | DocumentResponse:
         try:
             if opcode == proto.OP_PING:
                 return proto.encode_frame(proto.OP_PONG, version=version)
@@ -151,6 +187,8 @@ class ConnectionHandler:
                 sql = proto.decode_query(payload)
                 result = session.execute(sql)
                 return self._result_frame(result, version)
+            if opcode == proto.OP_FETCH:
+                return self._document_response(payload, version)
             _LOGGER.warning("unknown opcode %s", opcode)
             return self._error(proto.ERR_GENERIC, f"unknown opcode {opcode}", version)
         except SoupDBError as exc:
@@ -201,6 +239,43 @@ class ConnectionHandler:
                 version=version,
             )
         return proto.encode_frame(proto.OP_OK, proto.encode_ok(result.affected), version=version)
+
+    def _document_response(
+        self, payload: bytes, version: int
+    ) -> bytes | DocumentResponse:
+        """Prepara el ``DOCUMENT`` de un documento bajo ``SOUPDB_DOCUMENT_ROOT``.
+
+        El cliente solo manda la referencia relativa; la raíz la conoce el gestor.
+        Así el mismo gestor sirve en local o en un contenedor con el volumen
+        montado, sin que el cliente reconstruya rutas. El archivo se lee en
+        trozos; el motor no carga el documento completo en memoria.
+        """
+        if self._documents is None:
+            return self._error(proto.ERR_UNSUPPORTED, "document root not configured", version)
+        try:
+            reference = proto.decode_fetch(payload)
+            document = self._documents.resolve(reference)
+            header = proto.encode_document_header(document.media_type, document.size)
+            return DocumentResponse(
+                payload_length=len(header) + document.size,
+                header=header,
+                chunks=document.read_chunks(),
+            )
+        except OSError as exc:
+            return self._error(proto.ERR_EXECUTION, f"cannot read document: {exc}", version)
+        except SoupDBError as exc:
+            return self._error(proto.error_code(exc), str(exc), version)
+
+    def _send_document(
+        self, conn: socket.socket, response: DocumentResponse, version: int
+    ) -> None:
+        conn.sendall(
+            proto.encode_frame_header(proto.OP_DOCUMENT, response.payload_length, version=version)
+        )
+        conn.sendall(response.header)
+        for chunk in response.chunks:
+            if chunk:
+                conn.sendall(chunk)
 
     def _error(self, code: int, message: str, version: int = proto.VERSION) -> bytes:
         return proto.encode_frame(

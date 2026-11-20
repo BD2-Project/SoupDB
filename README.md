@@ -54,6 +54,22 @@ El **driver `rsoup`** es el cliente Rust que los consumidores usan para conectar
 El protocolo binario TCP (puerto `55432`) es la **interfaz remota general del gestor**.
 El núcleo `engine/` no expone REST ni GraphQL.
 
+### Servido de documentos multimedia
+
+Las tablas guardan **referencias relativas** (p. ej. `gatos/001.jpg`), no rutas
+absolutas ni los bytes. Al servir, el gestor resuelve la referencia contra
+`SOUPDB_DOCUMENT_ROOT` y devuelve el archivo con `FETCH`/`DOCUMENT` (media type +
+bytes) por el mismo canal TCP, así que el cliente no reconstruye rutas y funciona
+igual en local que en un contenedor con el dataset montado como volumen.
+
+```bash
+SOUPDB_DOCUMENT_ROOT=/ruta/al/dataset uv run python -m engine
+```
+
+Sin esa variable, `FETCH` responde `UNSUPPORTED`. Para que la indexación
+multimedia y el servido coincidan, `SOUPDB_DOCUMENT_ROOT` debe apuntar a la misma
+carpeta que el `root` del perfil multimedia.
+
 ## Dependencias
 
 | Dependencia | Uso | Instalación |

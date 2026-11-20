@@ -27,6 +27,7 @@ Convención formalizada el 2026-11-02 tras la auditoría de ramas, tags y milest
 | `v0.6.0` | 2026-11-06 | **Plugins y protocolo v2** | #152 | `SEARCH(...) USING <plugin>`, `SCORE()` único, DDL genérico, protocolo v2 con tipos por nombre y prepared statements, Docker con instalación en caliente |
 | `v0.7.0` | 2026-11-06 | **`CREATE EXTENSION`** | #160 / #161 | Activación de plugins por SQL (persistente en `SysPlugins`), `DROP EXTENSION` con RESTRICT |
 | `v0.7.1` | 2026-11-06 | **Fix vectorizador + profiles JSON** | #166 / #167 / #168 / #169 | `CREATE EXTENSION ivf WITH (storage_root=...)` ya no exige un vectorizador compartido con plugins solo descubiertos; `profiles` acepta JSON en SQL |
+| `v0.8.0` | 2026-11-19 | **Servido multimedia por TCP** | pendiente | `FETCH`/`DOCUMENT` sirven documentos (imagen/audio/vídeo/texto) por referencia relativa desde `SOUPDB_DOCUMENT_ROOT`; streaming en trozos y render en SoupChef |
 
 Histórico de rescates:
 
@@ -34,7 +35,7 @@ Histórico de rescates:
 
 ## Próxima versión
 
-- **v0.8.0**: cierre de *Avance 3* — benchmarks de texto contra PostgreSQL GIN (10k/100k) y validación independiente de recall/scores con datos reales (issues #125–#130).
+- **v0.9.0**: cierre de *Avance 3* — benchmarks de texto contra PostgreSQL GIN (10k/100k) y validación independiente de recall/scores con datos reales (issues #125–#130).
 
 ## Cómo publicar una entrega
 
