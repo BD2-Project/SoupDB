@@ -21,18 +21,7 @@ Homepage = "https://github.com/BD2-Project/SoupDB"
 Documentation = "https://BD2-Project.github.io/SoupDB"
 
 [dependency-groups]
-# Aplicación de la Parte 5 (similitud/copyright/remixes de audio): todo lo que
-# necesita el servidor real. `soupdb-vector` trae HNSW y el pipeline MFCC (y con
-# él librosa, numpy, scikit-learn, soundfile...). No es dependencia del núcleo:
-# el paquete `soupdb` sigue sin dependencias externas.
-copyright-api = [
-  "fastapi>=0.162.5",
-  "python-multipart>=0.0.33",
-  "soupdb-vector",
-  "uvicorn>=0.54.0",
-]
 dev = [
-  { include-group = "copyright-api" },
   "httpx>=0.28.1",
   "hypothesis>=6.0",
   "pytest>=8.0",
