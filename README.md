@@ -8,18 +8,11 @@
 
 Motor de base de datos **multimodal** (relacional, espacial y vectorial) construido desde cero en Python, con integración de IA.
 
-La aplicación final (Parte 5) es una **aplicación de análisis de similitud de audio** para
-detectar posibles coincidencias entre un audio consultado y las canciones originales del
-catálogo (copyright/remixes). Combina el catálogo relacional, el pipeline multimedia
-MFCC/TF-IDF y el índice HNSW de SoupDB, y se expone al frontend por una API REST. Devuelve
-**similitud acústica y evidencia temporal**, no un veredicto jurídico de infracción.
-
 ## IA aplicada
 
 - **Búsqueda vectorial** (HNSW, IVF) para similitud entre descriptores.
 - **Recuperación léxica** (índice invertido, BM25) con el plugin `soupdb-inverted`.
 - **Extracción de características multimodales** (SIFT, MFCC, K-Means, bag of words TF-IDF).
-- **Similitud de audio por segmentos** con evidencia temporal (aplicación de la Parte 5).
 
 <p align="center"><sub>Proyecto académico · UTEC · Base de Datos 2 · ciclo 2026-2</sub></p>
 
@@ -61,59 +54,21 @@ El **driver `rsoup`** es el cliente Rust que los consumidores usan para conectar
 El protocolo binario TCP (puerto `55432`) es la **interfaz remota general del gestor**.
 El núcleo `engine/` no expone REST ni GraphQL.
 
-## Aplicación de la Parte 5: similitud de audio (copyright/remixes)
+### Servido de documentos multimedia
 
-Código en [`applications/copyright_detection/`](applications/copyright_detection/);
-guía completa (instalación, demo, API, decisiones y limitaciones) en
-[docs/copyright_api.md](docs/copyright_api.md).
-
-**Modalidades integradas:**
-
-- **Relacional:** tablas `songs` y `audio_segments` en el motor SoupDB (B+ sobre los ids).
-- **Multimedia/vectorial:** audio → MFCC → codebook K=128 → TF-IDF L2 → HNSW (euclidean)
-  sobre `audio_segments.audio_ref`; cada hit del HNSW se resuelve por RID a su fila relacional.
-
-```mermaid
-flowchart TD
-    FE["Frontend"] -->|"HTTP REST: multipart / JSON<br/>/api/v1/..."| API["FastAPI<br/>(adaptador REST de la aplicación)"]
-    API --> AN["CopyrightAnalyzer"]
-    AN -->|"SQL"| REL[("songs / audio_segments<br/>catálogo relacional")]
-    AN -->|"SQL SIMILAR_TO ... USING HNSW"| HN[("HNSW sobre audio_ref")]
-    HN --- PIPE["MFCC → codebook K=128 → TF-IDF L2"]
-```
-
-La API FastAPI es el adaptador REST de la aplicación sobre las capacidades relacionales y
-vectoriales de SoupDB. El frontend solo consume `/api/v1/...`; nunca toca el `Catalog`, el
-HNSW, los archivos internos, el protocolo TCP ni SQL. El gestor sigue ofreciendo su propio
-protocolo TCP (`rsoup`, puerto `55432`) para los clientes generales; son dos fronteras distintas.
-
-Además de `POST /api/v1/analyze`, el API ofrece al frontend el catálogo de solo lectura
-(`GET /catalog`, `/catalog/{song_id}`), el audio original con soporte `Range`
-(`/catalog/{song_id}/audio`), el historial de análisis guardado en SoupDB (`GET /analyses`,
-`/analyses/{analysis_id}`) y su exportación a JSON/CSV. El historial guarda resultados y
-metadata, nunca el audio subido. Detalle en
-[docs/copyright_api.md](docs/copyright_api.md#api-para-el-frontend).
-
-Demo autocontenida (audio sintético generado en runtime, sin descargas):
+Las tablas guardan **referencias relativas** (p. ej. `gatos/001.jpg`), no rutas
+absolutas ni los bytes. Al servir, el gestor resuelve la referencia contra
+`SOUPDB_DOCUMENT_ROOT` y devuelve el archivo con `FETCH`/`DOCUMENT` (media type +
+bytes) por el mismo canal TCP, así que el cliente no reconstruye rutas y funciona
+igual en local que en un contenedor con el dataset montado como volumen.
 
 ```bash
-uv sync --group copyright-api
-uv run --group copyright-api python -m applications.copyright_detection.demo prepare --root .demo/copyright
-# exporta las variables COPYRIGHT_* que imprime el comando anterior, y luego:
-uv run --group copyright-api python -m applications.copyright_detection.runtime
-curl -F "file=@.demo/copyright/sample_query.wav" http://127.0.0.1:8000/api/v1/analyze
+SOUPDB_DOCUMENT_ROOT=/ruta/al/dataset uv run python -m engine
 ```
 
-La demo académica puede prepararse con un subconjunto balanceado de FMA Small. Por defecto
-se seleccionan 10 pistas de cada uno de sus 8 géneros (80 pistas), configurable por CLI.
-Los tests automáticos usan solo el audio sintético; FMA no se versiona y se descarga a
-mano de la fuente oficial (ver [docs/copyright_api.md](docs/copyright_api.md#catalogo-real-fma-small)):
-
-```bash
-uv run --group copyright-api python -m applications.copyright_detection.fma_catalog prepare \
-  --audio-root D:/datasets/fma_small --tracks-csv D:/datasets/fma_metadata/tracks.csv \
-  --output-root .demo/fma --per-genre 10
-```
+Sin esa variable, `FETCH` responde `UNSUPPORTED`. Para que la indexación
+multimedia y el servido coincidan, `SOUPDB_DOCUMENT_ROOT` debe apuntar a la misma
+carpeta que el `root` del perfil multimedia.
 
 ## Dependencias
 
@@ -130,9 +85,6 @@ uv run --group copyright-api python -m applications.copyright_detection.fma_cata
 ```bash
 # Instalar dependencias y crear el entorno
 uv sync --all-groups
-
-# Solo lo necesario para el servidor de la Parte 5 (FastAPI + soupdb-vector)
-uv sync --group copyright-api
 
 # Tests y lint
 uv run pytest
@@ -162,7 +114,26 @@ DRIVER_PORT=55435 POSTGRES_PORT=55434 docker compose up
 
 Configuración por variables de entorno: `SOUPDB_DATA` (directorio de datos),
 `DRIVER_HOST`, `DRIVER_PORT`, `PAGE_SIZE`, `BUFFER_POOL_SIZE`,
-`MAX_CONNECTIONS` y `LOCK_TIMEOUT_MS`.
+`MAX_CONNECTIONS`, `LOCK_TIMEOUT_MS` y `SOUPDB_DOCUMENT_ROOT` (raíz de los
+documentos servibles por `FETCH`).
+
+### Documentos multimedia servibles (local y contenedor)
+
+Las filas guardan referencias **relativas** (p. ej. `gatos/001.jpg`). El gestor
+las resuelve contra `SOUPDB_DOCUMENT_ROOT` y las sirve por `FETCH`/`DOCUMENT`
+(streaming), así que el cliente nunca reconstruye rutas:
+
+- **Local:** `SOUPDB_DOCUMENT_ROOT=/ruta/al/dataset uv run python -m engine`
+- **Docker Compose:** se monta la carpeta del host en `/app/documents:ro` y se
+  define `SOUPDB_DOCUMENT_ROOT=/app/documents` (ya viene así en el compose).
+  ```bash
+  # ./documents por defecto, o apunta a tu dataset:
+  SOUPDB_DOCUMENTS_HOST=/ruta/al/dataset docker compose up engine
+  ```
+  Los `INSERT` usan la misma referencia relativa (`gatos/001.jpg`) tanto en local
+  como en el contenedor: solo cambia la raíz configurada, no las filas.
+
+Sin `SOUPDB_DOCUMENT_ROOT`, `FETCH` responde `UNSUPPORTED`.
 
 ## Gestión de paquete y contenedor
 

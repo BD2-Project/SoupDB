@@ -167,3 +167,29 @@ def test_point_value_tag_is_distinct_from_float() -> None:
     # Un punto no debe confundirse con dos flotantes sueltos al decodificar.
     assert proto.TAG_POINT != proto.TAG_FLOAT
     assert proto.TYPE_POINT != proto.TYPE_FLOAT
+
+
+def test_fetch_roundtrip() -> None:
+    reference = "gatos/añejo 001.jpg"
+    assert proto.decode_fetch(proto.encode_fetch(reference)) == reference
+
+
+def test_fetch_rejects_truncated_payload() -> None:
+    with pytest.raises(ProtocolError):
+        proto.decode_fetch(b"\x00\x00\x00\x05ab")
+
+
+def test_document_roundtrip() -> None:
+    data = bytes(range(256))
+    payload = proto.encode_document("image/png", data)
+    assert proto.decode_document(payload) == ("image/png", data)
+
+
+def test_document_roundtrip_with_empty_bytes() -> None:
+    payload = proto.encode_document("application/octet-stream", b"")
+    assert proto.decode_document(payload) == ("application/octet-stream", b"")
+
+
+def test_document_rejects_truncated_payload() -> None:
+    with pytest.raises(ProtocolError):
+        proto.decode_document(b"\x00\x09image/png")

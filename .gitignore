@@ -269,5 +269,5 @@ Thumbs.db
 benchmarks/data/
 docs/
 
-# Demo de la API de copyright (python -m applications.copyright_detection.demo prepare).
+# Datos generados por demos locales.
 .demo/
