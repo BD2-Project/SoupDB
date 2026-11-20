@@ -1,26 +1,4 @@
-"""Comparación 2.2.4 contra PostgreSQL con índice GiST.
-
-Corre las mismas consultas por radio y k-NN que
-``benchmarks.scripts.compare_spatial_indexes``, sobre los mismos puntos y los
-mismos centros, para que las tres técnicas sean comparables fila a fila.
-
-Requiere el servicio ``postgres`` del ``docker-compose.yml`` levantado:
-
-    docker compose up -d postgres
-    uv run python -m benchmarks.scripts.compare_postgres_gist
-
-Se usa PostGIS con ``geography`` porque el tipo ``point`` nativo de PostgreSQL
-mide distancia euclidiana en grados, que no es comparable con el haversine en
-metros del motor. Con ``geography`` los conteos coinciden con los del baseline
-secuencial, y esa coincidencia es la verificación de que la comparación es válida.
-
-``ST_DWithin`` se llama con ``use_spheroid => false``: por defecto PostGIS mide
-sobre el elipsoide WGS84 mientras que el motor usa una esfera, y esa diferencia
-de medio por mil movía los puntos que caen justo en el borde del radio.
-
-No se agrega ninguna dependencia de Python: se habla con la base por ``psql``
-dentro del contenedor, igual que lo haría una consola.
-"""
+"""Comparación 2.2.4 contra PostgreSQL con índice GiST."""
 
 import json
 import subprocess
@@ -236,9 +214,7 @@ def run(sizes: tuple[int, ...] = DATASET_SIZES) -> list[SpatialResult]:
         _prepare(entries)
 
         for metric, column, radii, spheroid in (
-            # `use_spheroid => false`: PostGIS mide sobre el elipsoide WGS84 por
-            # defecto y el motor usa una esfera; esa diferencia movía los puntos
-            # que caen justo sobre el borde del radio.
+            # use_spheroid=false iguala la distancia esf?rica de PostGIS a la del motor.
             ("haversine", "ubicacion", BENCHMARK_RADIUS_VALUES_M, ", false"),
             ("euclidean", "plano", BENCHMARK_RADIUS_VALUES_DEG, ""),
         ):

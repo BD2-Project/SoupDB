@@ -1,9 +1,4 @@
-"""Spatial index over the persistent catalog: registration, maintenance, reopen.
-
-The in-memory tests already pin the operator and the planner; these exercise the
-real :class:`engine.common.catalog.Catalog` in a temporary directory, where the
-index has to survive ``close``/reopen and coexist with the physical files.
-"""
+"""Spatial index over the persistent catalog: registration, maintenance, reopen."""
 
 from pathlib import Path
 

@@ -1,9 +1,4 @@
-"""El gestor se levanta con `python -m engine`.
-
-Sin un punto de entrada el motor solo se puede usar escribiendo Python a mano y
-el contenedor no sirve nada en su puerto, por lo que el frontend no puede
-conectarse al motor real.
-"""
+"""El gestor se levanta con `python -m engine`."""
 
 import os
 import socket

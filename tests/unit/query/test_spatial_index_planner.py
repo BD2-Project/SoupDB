@@ -1,11 +1,4 @@
-"""Planner and executor tests for the spatial-index access path.
-
-The planner must swap the full scan for a ``SpatialIndexScan`` only when it can
-prove the bounding box contains every row of the radius, and must leave every
-other predicate exactly as it was. The dataset is small enough to know the
-answer by hand and has a point (3, 3) inside the box but outside the circle, so
-a wrong box or a missing exact filter is visible.
-"""
+"""Planner and executor tests for the spatial-index access path."""
 
 import random
 
@@ -26,9 +19,7 @@ EXTRA = (
     ColumnDef("otra", ColumnType.POINT),
 )
 
-# (0, 0) y (-1, 0) están dentro del radio 4; (3, 3) está dentro de la caja
-# [-4, 4]² pero fuera del círculo (distancia 4.24); (0, 4) cae justo en el
-# borde de la caja y del círculo.
+# (3, 3) est? en la caja, fuera del c?rculo. (0, 4) est? en ambos bordes.
 ROWS = (
     ("A", (0.0, 0.0)),
     ("B", (3.0, 4.0)),
@@ -218,9 +209,7 @@ def test_limit_and_offset_combine_with_the_index() -> None:
     scanned = run(sql, make_catalog(index=False))
     assert len(indexed.rows) == 2
     assert len(scanned.rows) == 2
-    # Sin ORDER BY el orden no está garantizado, así que ambos caminos pueden
-    # elegir un subconjunto distinto del mismo conjunto de coincidencias; lo que
-    # sí se fija es el tamaño y que ninguna fila de fuera del radio se cuele.
+    # Sin ORDER BY se comprueban cardinalidad y pertenencia al c?rculo.
     matches = set(names(run(base, make_catalog(index=False))))
     assert set(names(indexed)) <= matches
     assert set(names(scanned)) <= matches

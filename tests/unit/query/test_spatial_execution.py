@@ -1,6 +1,4 @@
-"""End-to-end spatial queries: POINT columns, INSERT POINT(), WHERE distance
-and ORDER BY distance ... LIMIT through the full parse -> plan -> execute path.
-"""
+"""Pruebas SQL de columnas POINT y de filtros por distancia."""
 
 from engine.common.schema import ColumnDef, ColumnType
 from engine.query.executor import execute

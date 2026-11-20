@@ -1,8 +1,4 @@
-"""``PRIMARY KEY`` en la definición de columna.
-
-No es una anotación decorativa: declarar la clave crea un índice B+ sobre esa
-columna, que es lo que hace que una búsqueda por clave no recorra la tabla.
-"""
+"""``PRIMARY KEY`` en la definición de columna."""
 
 import pytest
 

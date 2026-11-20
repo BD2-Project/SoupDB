@@ -1,8 +1,4 @@
-"""Conformance suite for every ConcurrencyStrategy implementation.
-
-The suite parametrizes over all implementations; the pessimistic strict 2PL
-strategy joins the params when it exists.
-"""
+"""Conformance suite for every ConcurrencyStrategy implementation."""
 
 import pytest
 

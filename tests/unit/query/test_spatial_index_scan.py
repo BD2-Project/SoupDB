@@ -1,11 +1,4 @@
-"""Tests for the SpatialIndexScan volcano operator.
-
-The operator asks a spatial index for the bounding box ``center ± radius`` and
-hands the records to the ``Filter`` planned on top, so these tests pin the two
-properties the rest of the engine relies on: the box is a SUPERCONSET of the
-circle (nothing that could match is ever lost), and it is not the circle itself
-(the extra candidates are the ones the exact predicate has to discard).
-"""
+"""Tests for the SpatialIndexScan volcano operator."""
 
 import pytest
 
@@ -23,9 +16,7 @@ LUGARES = (
     ColumnDef("ubicacion", ColumnType.POINT),
 )
 
-# (0, 0) y (-1, 0) están dentro del radio 4; (3, 3) está dentro de la caja
-# [-4, 4]² pero fuera del círculo (distancia 4.24), y (0, 4) está justo en el
-# borde de la caja y del círculo.
+# (3, 3) est? en la caja, fuera del c?rculo. (0, 4) est? en ambos bordes.
 ROWS = (
     ("A", (0.0, 0.0)),
     ("B", (3.0, 4.0)),

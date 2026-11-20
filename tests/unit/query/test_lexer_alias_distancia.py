@@ -1,9 +1,4 @@
-"""`distancia(...)` es el nombre que usa el enunciado para la función de distancia.
-
-Se acepta como alias de `distance(...)`, pero solo cuando abre una llamada: de lo
-contrario `distancia` dejaría de servir como nombre de columna, que es un nombre
-muy probable en una base de datos escrita en español.
-"""
+"""`distancia(...)` es el nombre que usa el enunciado para la función de distancia."""
 
 import pytest
 

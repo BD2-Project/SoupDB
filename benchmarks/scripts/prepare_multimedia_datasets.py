@@ -1,16 +1,4 @@
-"""Manifests reproducibles de 1k / 10k / 100k objetos para COCO 2017 y FMA Medium.
-
-No descarga nada: recibe las carpetas ya extraídas (ver docs/datasets_multimedia.md).
-
-Se genera una sola vez el manifest más grande con ``engine.multimedia.manifest`` y
-los menores se cortan de él línea a línea, así ``1k ⊂ 10k ⊂ 100k`` byte a byte: los
-primeros 1.000 IDs y rutas de los tres coinciden exactamente.
-
-Uso::
-
-    uv run --group multimedia python -m benchmarks.scripts.prepare_multimedia_datasets \\
-        --coco D:/datasets/coco/train2017 --fma D:/datasets/fma_medium
-"""
+"""Manifests reproducibles de 1k / 10k / 100k objetos para COCO 2017 y FMA Medium."""
 
 import argparse
 import os

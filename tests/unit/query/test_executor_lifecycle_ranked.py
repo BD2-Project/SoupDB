@@ -1,8 +1,4 @@
-"""C06: SELECT and EXPLAIN ANALYZE always close their operator root.
-
-The executor owns a query's operator lifecycle even if opening, reading,
-explaining or decoding fails. Cleanup errors must not hide the first failure.
-"""
+"""C06: SELECT and EXPLAIN ANALYZE always close their operator root."""
 
 import json
 

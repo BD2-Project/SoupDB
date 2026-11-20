@@ -1,10 +1,4 @@
-"""In-memory ranked index oracle implementing the RankedIndex contract.
-
-Scores every stored item against the query by brute force, so it is the
-reference the fuzz tests compare IVF, HNSW and the inverted index against.
-The scorers are written independently from ``engine/`` on purpose: an oracle
-that reuses the code under test cannot catch its bugs.
-"""
+"""In-memory ranked index oracle implementing the RankedIndex contract."""
 
 import json
 import math

@@ -1,9 +1,4 @@
-"""Tests for the SQL parser: binary arithmetic expressions.
-
-Precedence (high to low) inside a predicate operand: primary >
-``* / %`` > ``+ -`` > comparison. A leading minus glued to a number is a
-literal, while ``-`` between two operands is a binary operator.
-"""
+"""Tests for the SQL parser: binary arithmetic expressions."""
 
 import pytest
 

@@ -264,9 +264,7 @@ def benchmark_gin(
             memory.__exit__(None, None, None)
 
     if memory is not None:
-        # The table is session-local and gone after the connection closes;
-        # sample container memory through the DDL/query phases inside session.
-        # A separate context is intentionally not used to avoid changing it.
+        # Sample memory inside the session because the temporary table is session-local.
         memory_summary = memory.summary()
     else:
         memory_summary = None

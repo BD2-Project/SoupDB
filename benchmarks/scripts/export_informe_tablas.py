@@ -1,11 +1,4 @@
-"""Genera las tablas LaTeX de la sección experimental del informe.
-
-Los números se leen de los CSV de `benchmarks/results/`, no se transcriben a
-mano: una tabla escrita a mano se desactualiza en cuanto alguien vuelve a correr
-el benchmark, y un dígito mal copiado en el informe es indefendible.
-
-    uv run python -m benchmarks.scripts.export_informe_tablas > tablas.tex
-"""
+"""Genera las tablas LaTeX de la sección experimental del informe."""
 
 import csv
 import glob

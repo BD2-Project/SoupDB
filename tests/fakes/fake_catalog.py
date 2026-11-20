@@ -1,14 +1,4 @@
-"""In-memory catalog oracle for planner and executor tests.
-
-Mimics the duck-typed interface the planner docs: ``schema``, ``file_org``,
-``indexes``, ``indexes_for``, ``create_table``, ``index_location``,
-``drop_table`` and ``drop_index`` plus extra test helpers (``insert``,
-``add_index``, ``add_spatial_index``).
-
-``add_spatial_index`` registers a real :class:`engine.indexes.rtree.RTree` so the
-spatial access path is exercised against the same structure the persistent
-catalog uses, not against a stand-in that could hide a mismatch.
-"""
+"""In-memory catalog oracle for planner and executor tests."""
 
 from engine.common.errors import QueryExecutionError
 from engine.common.ranked import RankedBinding, validate_ranked_binding

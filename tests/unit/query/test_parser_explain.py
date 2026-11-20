@@ -1,10 +1,4 @@
-"""Tests for the SQL parser: EXPLAIN statement.
-
-EXPLAIN keeps the raw inner SQL text plus its parsed AST. The parser stores the
-original SQL string, extracts ``sql`` by slicing from the offset of the first
-inner token, and then parses the remaining tokens in place via ``parse_statement``
-(no re-tokenization, so trailing-token bookkeeping stays correct).
-"""
+"""Tests for the SQL parser: EXPLAIN statement."""
 
 import pytest
 

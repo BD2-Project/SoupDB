@@ -1,18 +1,4 @@
-"""Every reader locks the table, whichever path it reads by.
-
-A reader that finds its rows through an index and then fetches them one RID at a
-time used to take no lock on the table: ``fetch`` locks the record, and a record
-lock does not conflict with the table lock an uncommitted INSERT holds. The
-consequence was a dirty read that depended on the DATA rather than on the
-statement - the same query blocked or not depending on whether the plan fell back
-to a scan, and reading by index was the only way to see another transaction's
-uncommitted row.
-
-These tests pin the property for the index readers: with a writer holding the
-table, they block exactly as a ``TableScan`` does, and once the writer is done
-they only see committed rows. Each one first checks that the query really reaches
-the index reader, so no test can pass by falling back to a scan.
-"""
+"""Every reader locks the table, whichever path it reads by."""
 
 import pytest
 
@@ -32,9 +18,7 @@ LUGARES = (
     ColumnDef("ubicacion", ColumnType.POINT),
 )
 
-# Cada camino: como se llama, la tabla, la fila que el escritor deja sin commitear,
-# la consulta del lector, el operador por el que tiene que pasar y el valor que el
-# lector jamas puede ver.
+# Cada caso identifica la ruta, la fila no confirmada, la consulta y el valor prohibido.
 CAMINOS = [
     ("igualdad", "partes", "(3, 'tres')", 3, "SELECT id FROM partes WHERE id = 3", "IndexLookup"),
     (

@@ -1,11 +1,4 @@
-"""Arranca el servidor TCP del gestor (pool de conexiones).
-
-Lee la configuracion desde variables de entorno (ver docs/08):
-DRIVER_HOST, DRIVER_PORT, MAX_CONNECTIONS, SOCKET_TIMEOUT, LOCK_TIMEOUT_MS
-y SOUP_DB_PATH (ruta de la base de datos, default ./data).
-
-Uso: uv run python scripts/run_server.py
-"""
+"""Arranca el servidor TCP del gestor (pool de conexiones)."""
 
 import logging
 import os

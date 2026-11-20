@@ -1,9 +1,4 @@
-"""El plan reporta los accesos a disco reales.
-
-El costo en accesos es la métrica que evalúa el curso, porque no depende de la
-máquina. Si el `PlanNode` reporta cero en todos los operadores, el panel de plan
-de ejecución no dice nada útil.
-"""
+"""El plan reporta los accesos a disco reales."""
 
 from pathlib import Path
 

@@ -1,9 +1,4 @@
-"""Conformance suite for every RankedIndex implementation.
-
-Each case knows how to build an index over a fixed dataset, how to reopen it
-from the same path and which options make it answer exactly (for approximate
-indexes, probing everything), so the same tests apply to all of them.
-"""
+"""Conformance suite for every RankedIndex implementation."""
 
 import random
 from collections.abc import Callable

@@ -1,8 +1,4 @@
-"""C21: official ranked SQL scenarios through public API and actual TCP sockets.
-
-The providers are scripted fakes: this verifies SQL/TCP integration, not real
-TF-IDF/BM25 scoring or IVF/HNSW recall.
-"""
+"""C21: official ranked SQL scenarios through public API and actual TCP sockets."""
 
 import json
 import socket

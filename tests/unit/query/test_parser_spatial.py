@@ -1,8 +1,4 @@
-"""Tests for the SQL parser: POINT(lat, lon) and distance(a, b) expressions.
-
-El literal se escribe `POINT(latitud, longitud)` como fija el enunciado (2.2.3);
-el AST guarda `PointExpr(x=longitud, y=latitud)`, que es el orden interno.
-"""
+"""Tests for the SQL parser: POINT(lat, lon) and distance(a, b) expressions."""
 
 import pytest
 

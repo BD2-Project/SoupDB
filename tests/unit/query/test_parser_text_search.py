@@ -1,7 +1,4 @@
-"""Parser-only tests for Part 3 ranked full-text SQL syntax.
-
-Execution and index binding are intentionally tested in later commits.
-"""
+"""Parser-only tests for Part 3 ranked full-text SQL syntax."""
 
 import pytest
 

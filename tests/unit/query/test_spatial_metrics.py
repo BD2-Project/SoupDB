@@ -1,10 +1,4 @@
-"""Tests for the pure spatial metrics module: euclidean and haversine.
-
-``engine.query.spatial_metrics`` holds the convention (x = lon, y = lat, Earth
-radius, invalid coordinates rejected) that both the query engine and the
-benchmark baseline share, so it is tested as a unit with an independent
-spherical-law-of-cosines oracle.
-"""
+"""Tests for the pure spatial metrics module: euclidean and haversine."""
 
 import math
 

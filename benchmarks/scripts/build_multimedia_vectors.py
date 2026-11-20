@@ -1,24 +1,4 @@
-"""codebook.npz + vectores.bin para cada manifest de 1k / 10k / 100k, y su validación.
-
-Llama a ``engine.multimedia.build_vectors.build`` sin cambiar nada del pipeline.
-Todos los tamaños comparten la misma caché de descriptores: como 1k ⊂ 10k ⊂ 100k,
-al pasar de 1k a 10k solo se extraen los 9.000 objetos nuevos, y si se corta una
-ejecución, repetir el comando lee de la caché lo ya calculado.
-
-Cada tamaño entrena su propio codebook con su propio manifest.
-
-Salida (por defecto bajo benchmarks/data/multimedia, ignorada por Git)::
-
-    manifests/images_1k.jsonl ...      (prepare_multimedia_datasets)
-    cache/image/..., cache/audio_segment/...
-    images/1000/codebook.npz, vectores.bin, params.json
-    audio/100000/...
-
-Uso::
-
-    uv run --group multimedia python -m benchmarks.scripts.build_multimedia_vectors \\
-        image --root D:/datasets/coco/train2017 --sizes 1000 10000 100000
-"""
+"""codebook.npz + vectores.bin para cada manifest de 1k / 10k / 100k, y su validación."""
 
 import argparse
 import json

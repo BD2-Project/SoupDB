@@ -1,15 +1,4 @@
-"""Undo keeps the indexes in step with the table.
-
-Undoing a DELETE puts the row back with a NEW RID, and undoing an INSERT removes
-the row the INSERT indexed. If the undo only touched storage, a ROLLBACK would
-leave a row that is live in the table and missing from every index - and an index
-that does not describe its table answers wrongly and silently, with no error to
-hint at it: a lookup just reads a table it no longer matches.
-
-These tests pin both directions for both index families, plus the NULL rule: a
-spatial index has no key for a NULL coordinate, so such a row stays out of it in
-either direction.
-"""
+"""Undo keeps the indexes in step with the table."""
 
 from engine.common.schema import ColumnDef, ColumnType
 from engine.indexes.rtree import RTree, SpatialQueries
@@ -188,9 +177,7 @@ def test_a_rolled_back_insert_of_a_null_coordinate_does_not_raise() -> None:
 
 
 def test_the_restored_row_is_reachable_through_the_index() -> None:
-    # El undo reinserta la fila con OTRO RID: la entrada tiene que verse ahí, y no
-    # solo el punto. Si se indexara el RID viejo, el índice describiría una fila
-    # que ya no existe.
+    # Comprueba que el undo indexa el nuevo RID de la fila reinsertada.
     catalog = make_lugares()
     session = session_of(catalog)
     session.begin()
@@ -206,10 +193,7 @@ def test_the_restored_row_is_reachable_through_the_index() -> None:
 
 
 def test_after_a_rollback_the_index_matches_the_table_when_reopened() -> None:
-    # El índice espacial es una estructura DERIVADA: Catalog lo reconstruye al
-    # reabrir (engine/common/catalog.py::_build_index). Esta es la comprobación de
-    # persistencia del arreglo: lo que el undo dejó en disco tiene que volver a
-    # describir la misma tabla.
+    # Al reabrir, el ?ndice reconstruido debe reflejar la fila restaurada por undo.
     import tempfile
     from pathlib import Path
 

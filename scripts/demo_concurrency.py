@@ -1,13 +1,4 @@
-"""Demostración de concurrencia con hilos (Avance 1).
-
-Ejecuta transferencias simultáneas sobre la tabla ``accounts``:
-
-1. Sin control de concurrencia: se ven actualizaciones perdidas (race condition).
-2. Con transacciones strict 2PL: resultado serializable, con deadlocks
-   detectados y resueltos automáticamente.
-
-Uso: uv run python scripts/demo_concurrency.py
-"""
+"""Demostración de concurrencia con hilos (Avance 1)."""
 
 import tempfile
 from pathlib import Path

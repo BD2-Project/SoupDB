@@ -1,7 +1,4 @@
-"""Tests for C05 score binding and scalar evaluation.
-
-Scores are read from a temporary FLOAT slot, not recalculated from an index.
-"""
+"""Tests for C05 score binding and scalar evaluation."""
 
 import math
 from dataclasses import FrozenInstanceError

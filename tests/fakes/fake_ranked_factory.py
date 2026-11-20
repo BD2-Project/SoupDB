@@ -1,8 +1,4 @@
-"""In-process ranked index factory used only by DDL tests.
-
-The fake's shared state models persisted providers for reopen tests; it does
-not claim that real IVF/HNSW or inverted-index structures persist.
-"""
+"""In-process ranked index factory used only by DDL tests."""
 
 from dataclasses import replace
 

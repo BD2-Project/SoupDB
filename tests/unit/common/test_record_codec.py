@@ -1,9 +1,4 @@
-"""Tests for the binary row codec.
-
-Layout (one flag byte per column): ``0x00`` marks NULL and then no column
-bytes follow. Otherwise ``0x01`` (INT/FLOAT/VARCHAR/TEXT) or ``0x01``/``0x02``
-(BOOL: True/False) precedes the column payload.
-"""
+"""Tests for the binary row codec."""
 
 import struct
 

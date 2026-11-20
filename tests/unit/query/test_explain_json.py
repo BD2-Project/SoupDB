@@ -1,8 +1,4 @@
-"""``EXPLAIN (FORMAT JSON)`` devuelve el árbol serializado.
-
-El panel de plan del frontend necesita el árbol estructurado: no puede
-reconstruirlo a partir de las líneas indentadas del dibujo de texto.
-"""
+"""``EXPLAIN (FORMAT JSON)`` devuelve el árbol serializado."""
 
 import json
 from pathlib import Path

@@ -1,38 +1,4 @@
-"""Baseline espacial secuencial: recorre todas las entradas en cada consulta.
-
-Sirve como oráculo de búsqueda lineal frente a R-Tree y PostgreSQL GiST, por lo
-que no usa índices, poda ni ordenamiento previo. La métrica de distancia la
-aporta el llamador.
-
-Métricas
---------
-``radius_search`` y ``knn`` reciben un ``distance_fn`` con la misma firma para
-las dos métricas soportadas, así que el mismo baseline compara el coste con y
-sin índice **y** entre métrica euclidiana y haversine:
-
-* :data:`EUCLIDEAN_DISTANCE` (nomeclatura de SQL ``distance(a, b)``): distancia
-  en el plano, en las unidades de la coordenada.
-* :data:`HAVERSINE_DISTANCE` (SQL ``distance(a, b, 'haversine')``): distancia
-  geodésica en kilómetros.
-* :func:`distance_function` resuelve un nombre de métrica, y
-  :func:`metric_functions` las expone todas.
-
-Las funciones se importan de :mod:`engine.query.spatial_metrics` a propósito: el
-oráculo y el motor deben aplicar la misma convención (lon en x, lat en y, radio
-terrestre :data:`~engine.query.spatial_metrics.EARTH_RADIUS_M`) para que una
-diferencia de resultados entre R-Tree y baseline sea un fallo del índice y no un
-desacuerdo de fórmula. Como el módulo es puro, importarlo no arrastra el motor.
-El radio de ``radius_search`` y la distancia de ``knn`` están en la unidad de la
-métrica elegida (grados para la euclidiana, km para la haversine).
-
-Comparación con y sin índice
-----------------------------
-:class:`SequentialSpatialScan` es el camino *sin* índice. La misma consulta por
-radio servida por el R-Tree (caja envolvente + predicado exacto encima, tal
-como la planifica el motor) se mide contra él en
-:func:`compare_radius_with_and_without_index`, que devuelve el coste de los dos
-caminos, el número de candidatos que devuelve la caja y si ambos coinciden.
-"""
+"""Baseline espacial secuencial: recorre todas las entradas en cada consulta."""
 
 import heapq
 from collections.abc import Callable, Iterable

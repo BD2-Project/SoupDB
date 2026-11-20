@@ -1,13 +1,4 @@
-"""Salida CSV de la comparación espacial, según el protocolo del informe (§6.3).
-
-El `harness` general escribe una fila por operación con un solo tiempo. El
-protocolo espacial exige media, mediana y p95 sobre 100 consultas, las dos
-métricas de distancia y la memoria pico, así que esta suite usa su propio
-esquema en vez de forzar el del harness y romper los otros benchmarks.
-
-La columna `elapsed_ms` repite la mediana para que las herramientas que leen el
-formato común —el panel de benchmarks del frontend— sigan funcionando.
-"""
+"""Salida CSV de la comparación espacial, según el protocolo del informe (§6.3)."""
 
 import csv
 import statistics

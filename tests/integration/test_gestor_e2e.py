@@ -1,9 +1,4 @@
-"""Suite de integración del gestor: conexiones TCP reales y transacciones.
-
-Usa el Catalog real en disco (tmp_path) y el ConnectionHandler real sobre
-puertos efímeros. Tests intensivos: corren por defecto en el CI; desactivar
-con `SKIP_INTEGRATION=1` (ver conftest.py).
-"""
+"""Suite de integración del gestor: conexiones TCP reales y transacciones."""
 
 import socket
 import threading

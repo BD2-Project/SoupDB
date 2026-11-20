@@ -1,9 +1,4 @@
-"""Comparar INT con FLOAT no debe fallar.
-
-Un radio se escribe `< 5000`, no `< 5000.0`, y `distance(...)` siempre devuelve
-float: sin promoción numérica el ejemplo de consulta espacial del enunciado
-termina en un error de tipos.
-"""
+"""Comparar INT con FLOAT no debe fallar."""
 
 import pytest
 

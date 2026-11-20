@@ -1,22 +1,4 @@
-"""Comparación experimental espacial: búsqueda secuencial contra R-Tree.
-
-Sigue el protocolo declarado en el informe (§6.3): 100 consultas por combinación,
-media/mediana/p95 por consulta, las dos métricas de distancia, memoria pico y
-validación de resultados contra el baseline antes de aceptar cada medición.
-
-Sobre el conteo de accesos a disco
-----------------------------------
-Las consultas del R-Tree corren sobre el árbol en memoria: ``RTreePageStore``
-persiste y carga el árbol entero, no página por página, así que un
-``DiskManager`` no vería ninguna lectura durante una búsqueda. Reportar cero
-sería engañoso, porque la poda por MBR es justamente lo que se quiere mostrar.
-
-Como un nodo del R-Tree ocupa exactamente una página en ``_page_store``, se
-cuenta una lectura por nodo visitado. Para la búsqueda secuencial, que no tiene
-índice y recorre todas las entradas, se cuentan todas las páginas de su archivo.
-Las dos cifras miden lo mismo —páginas que habría que traer de disco— y por eso
-son comparables entre sí. La construcción sí se mide con un ``DiskManager`` real.
-"""
+"""Comparación experimental espacial: búsqueda secuencial contra R-Tree."""
 
 import resource
 import sys
@@ -47,9 +29,7 @@ DATASET_SIZES = (1_000, 10_000, 100_000)
 QUERIES = 100
 SEED = 20260404
 
-# Un nodo por página: con 4096 bytes caben 127 entradas de hoja y 102 de nodo
-# interno. Con el orden por defecto (8) cada nodo gastaría una página entera para
-# ocho entradas y el conteo de accesos mediría ese desperdicio, no la poda.
+# Ajusta cada nodo a una p?gina de 4096 bytes: 127 entradas de hoja o 102 internas.
 RTREE_ORDER = 102
 
 # Una entrada persistida del scan secuencial: dos coordenadas y un RID.

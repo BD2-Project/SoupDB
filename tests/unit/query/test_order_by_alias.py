@@ -1,11 +1,4 @@
-"""ORDER BY resolution of projection aliases.
-
-``Sort`` is planned below ``Project`` so a key can name a column that is not
-projected, which means the projection aliases are not in the schema the keys
-are validated against. The planner resolves them explicitly: an ORDER BY key
-that names an alias is rewritten to the aliased expression before validation,
-and an alias shadows a base column with the same name.
-"""
+"""ORDER BY resolution of projection aliases."""
 
 import pytest
 

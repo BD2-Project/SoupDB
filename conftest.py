@@ -1,12 +1,4 @@
-"""Configuración de pytest.
-
-Los tests marcados con ``integration`` (intensivos) corren por defecto — el CI
-los incluye. Para desactivarlos:
-
-- ``SKIP_INTEGRATION=1 uv run pytest``
-- o ``uv run pytest -m "not integration"``
-- o solo integración: ``uv run pytest -m integration``
-"""
+"""Configuración de pytest."""
 
 import os
 

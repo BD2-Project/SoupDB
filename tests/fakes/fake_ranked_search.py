@@ -1,8 +1,4 @@
-"""Deterministic RankedIndex fake for SQL integration tests.
-
-Scripted responses model provider behavior without calculating ranking scores.
-Every response is tied to an exact query and set of search options.
-"""
+"""Deterministic RankedIndex fake for SQL integration tests."""
 
 from typing import Any
 

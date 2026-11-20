@@ -1,14 +1,4 @@
-"""Planner tests for the k-NN spatial access path.
-
-``ORDER BY distance(columna, POINT(...)) LIMIT k`` must reach the spatial index
-only when the index can answer the same question the full scan answers, and the
-result must be the scan's result - including its ORDER OF rows, because a ``Sort``
-is stable and a tie is resolved by table order.
-
-The planner refuses the index (full scan) for: a WHERE, a GROUP BY / aggregate /
-DISTINCT, no LIMIT, ``LIMIT 0``, a DESC distance, a non-euclidean metric, a
-non-literal centre, a non-POINT column and a column with no spatial index.
-"""
+"""Planner tests for the k-NN spatial access path."""
 
 import math
 import random
@@ -24,9 +14,7 @@ LUGARES = (
     ColumnDef("ubicacion", ColumnType.POINT),
 )
 
-# Las cuatro primeras filas están empatadas a distancia 1 del centro (0, 0) y las
-# dos últimas a distancia 5. Con datos sin empate el operador saca las k filas del
-# índice; con este empate cae al escaneo, y ambos caminos deben coincidir igual.
+# Cuatro filas empatan a distancia 1, y las otras dos quedan a distancia 5.
 ROWS = (
     ("A", (1.0, 0.0)),
     ("B", (-1.0, 0.0)),
@@ -200,9 +188,7 @@ def test_offset_counts_towards_the_k() -> None:
 
 
 def test_a_second_sort_key_falls_back_to_the_full_scan() -> None:
-    # Con dos criterios, un empate de distancia lo resuelve el segundo, y si ése
-    # también empata vuelve a mandar el orden del escaneo: el operador no puede
-    # garantizarlo, así que no se le pregunta al índice.
+    # El escaneo conserva el orden cuando ambas claves empatan.
     sql = "SELECT nombre FROM lugares ORDER BY distance(ubicacion, POINT(0, 0)), nombre LIMIT 3"
     assert not any("SpatialKnnScan" in line for line in explained(sql))
     assert names(run(sql, make_catalog(index=True))) == names(run(sql, make_catalog(index=False)))
@@ -374,19 +360,14 @@ def test_matches_brute_force_oracle_with_many_exact_duplicates() -> None:
 
 
 def test_the_knn_path_blocks_like_a_scan_instead_of_reading_uncommitted_rows() -> None:
-    # El lector por índice toma el lock de tabla antes de fetch. Sin él devolvería
-    # la fila que otra transacción tiene escrita y sin commitear, porque al INSERT
-    # le basta con el lock de tabla: la fila nueva no tiene lock de registro que la
-    # detenga.
+    # El lector por ?ndice necesita un lock de tabla para excluir INSERT pendientes.
     import threading
 
     from engine.common.errors import TransactionError
     from engine.transactions.session import TransactionalSession
     from engine.transactions.transaction_manager import TransactionManager
 
-    # Datos SIN empates: así el operador responde con el índice en vez de caer al
-    # escaneo, que es lo que haría la prueba vacuamente cierta (un escaneo ya
-    # bloquea la tabla, con o sin el lock del lector por índice).
+    # Evita empates para comprobar el lock en la ruta por ?ndice.
     catalog = make_catalog(index=True, rows=UNTIED_ROWS)
     assert find(plan(parse(KNN.format(2)), catalog).root.explain(), "SpatialKnnScan")
     manager = TransactionManager()

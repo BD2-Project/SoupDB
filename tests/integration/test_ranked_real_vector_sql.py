@@ -1,8 +1,4 @@
-"""C22: SQL + persistent physical IVF/HNSW over real multimedia codebooks.
-
-Descriptor extraction is mocked to make fixtures tiny and deterministic;
-IVF/HNSW, page storage, ranking, SQL planning and Catalog persistence are real.
-"""
+"""C22: SQL + persistent physical IVF/HNSW over real multimedia codebooks."""
 
 import numpy as np
 import pytest

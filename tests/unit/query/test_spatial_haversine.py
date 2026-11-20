@@ -1,11 +1,4 @@
-"""End-to-end haversine queries over a real persistent Catalog.
-
-Covers ``distance(a, b, 'haversine')`` in WHERE and in ORDER BY (ASC/DESC with
-LIMIT), the parity with the default euclidean metric, the known-value check and
-the error surface (unknown metric, non-literal metric, non-POINT operand, strict
-int/float comparison, coordinates out of range) through the full
-parse -> plan -> execute path.
-"""
+"""End-to-end haversine queries over a real persistent Catalog."""
 
 import math
 from pathlib import Path

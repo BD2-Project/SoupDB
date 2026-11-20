@@ -1,10 +1,4 @@
-"""Measure SequentialFile._reorganize_globally() cost in isolation.
-
-Fragmentation is prepared by tombstoning whole pages directly via _slotted_page
-internals, bypassing SequentialFile.remove() -- remove() itself now triggers
-_reorganize_globally() once the 30% threshold is crossed, which would collapse
-the fragmentation before we get to measure it separately.
-"""
+"""Measure SequentialFile._reorganize_globally() cost in isolation."""
 
 import argparse
 import csv

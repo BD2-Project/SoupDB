@@ -1,14 +1,4 @@
-"""Tests for the SpatialKnnScan volcano operator.
-
-The operator may only answer from the index when the k nearest rows are
-UNAMBIGUOUS - exactly k rows within the k-th distance and all of them at
-different distances. Only then does the result not depend on the order the rows
-arrive in, and the ``Sort`` + ``Limit`` on top agree with the full scan. Every
-other situation (a tie, fewer entries than rows, a RID that no longer resolves)
-must fall back to reading the table, so these tests pin both halves of that
-contract: the index is used when it can be, and a tie or a doubtful index costs
-a scan instead of an answer.
-"""
+"""Tests for the SpatialKnnScan volcano operator."""
 
 import pytest
 
@@ -98,19 +88,14 @@ def test_reads_exactly_the_k_nearest_rows_when_distances_differ() -> None:
 
 
 def test_the_index_answers_instead_of_scanning_the_table() -> None:
-    # Se inserta una cuarta fila SOLO en la tabla, no en el índice. Si el operador
-    # respondiera con el índice devolvería las tres filas indexadas; si leyera la
-    # tabla devolvería las cuatro. La distancia 100 la deja fuera de las tres más
-    # cercanas, así que la diferencia entre ambas respuestas es visible.
+    # La cuarta fila existe solo en la tabla y distingue escaneo de ?ndice.
     fake, tree = build()
     fake.insert(Record(data=encode_row(("D", (0.0, 100.0)), LUGARES)))
     assert names(scan_of(fake, tree, k=3)) == ["A", "B", "C"]
 
 
 def test_a_far_center_still_answers_from_the_index() -> None:
-    # Desde (0, 100) las dos más cercanas son C (91) y B (96). El operador las
-    # entrega en el orden en que el índice las recorre -ordenar es tarea del Sort de
-    # arriba-, así que aquí se comparan como conjunto.
+    # Se comparan conjuntos porque Sort define el orden en el plan.
     fake, tree = build()
     assert sorted(names(scan_of(fake, tree, k=2, center=(0.0, 100.0)))) == ["B", "C"]
 
@@ -137,9 +122,7 @@ def test_the_operator_is_a_leaf() -> None:
 
 
 def test_a_tie_falls_back_to_the_full_scan_in_table_order() -> None:
-    # Las cuatro filas están a distancia 1: SQL deja el empate al orden de
-    # entrada, que aquí es el del escaneo. El índice no puede reproducirlo (desempata
-    # por coordenada), así que el operador lee la tabla y devuelve sus cuatro filas.
+    # El escaneo preserva el orden de entrada entre las cuatro distancias iguales.
     fake, tree = build(TIED_ROWS)
     assert names(scan_of(fake, tree, k=2)) == ["A", "B", "C", "D"]
 
@@ -171,10 +154,7 @@ def test_k_larger_than_the_index_falls_back_and_returns_everything() -> None:
 
 
 def test_a_stale_rid_falls_back_instead_of_dropping_the_row() -> None:
-    # Una entrada del índice que ya no resuelve a una fila viva. Su distancia es
-    # DISTINTA de la de las tres filas reales (0 contra 1, 4 y 9), así que no hay
-    # empate y la única guarda que puede dispararse es la del RID muerto: si el
-    # operador se saltara esa fila en silencio devolvería 0 filas en vez de 3.
+    # El RID muerto tiene una distancia ?nica para aislar la recuperaci?n sin empates.
     fake, tree = build()
     tree.insert((0.0, 0.0), RID(page_id=99, slot=0))
     assert names(scan_of(fake, tree, k=1)) == ["A", "B", "C"]

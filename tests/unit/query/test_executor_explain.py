@@ -1,9 +1,4 @@
-"""Tests for EXPLAIN / EXPLAIN ANALYZE execution.
-
-EXPLAIN renders the operator tree without executing it (all metrics zero).
-EXPLAIN ANALYZE runs the inner statement and reports real per-node metrics in
-the ``QUERY PLAN`` text column.
-"""
+"""Tests for EXPLAIN / EXPLAIN ANALYZE execution."""
 
 import pytest
 
