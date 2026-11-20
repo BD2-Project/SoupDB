@@ -1,5 +1,5 @@
 site_name: SoupDB
-site_description: Motor de base de datos multimodal (relacional, espacial y vectorial) y aplicación de similitud de audio
+site_description: Motor de base de datos multimodal (relacional, espacial y vectorial)
 repo_url: https://github.com/BD2-Project/SoupDB
 site_url: https://BD2-Project.github.io/SoupDB
 
@@ -49,7 +49,6 @@ nav:
   - Plugins: plugins.md
   - Índices vectoriales: vectores.md
   - Datasets multimedia: datasets_multimedia.md
-  - API de copyright: copyright_api.md
   - Protocolo: protocolo.md
   - Driver: driver.md
   - Transacciones: transacciones.md
