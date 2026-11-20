@@ -240,9 +240,7 @@ class ConnectionHandler:
             )
         return proto.encode_frame(proto.OP_OK, proto.encode_ok(result.affected), version=version)
 
-    def _document_response(
-        self, payload: bytes, version: int
-    ) -> bytes | DocumentResponse:
+    def _document_response(self, payload: bytes, version: int) -> bytes | DocumentResponse:
         """Prepara el ``DOCUMENT`` de un documento bajo ``SOUPDB_DOCUMENT_ROOT``.
 
         El cliente solo manda la referencia relativa; la raíz la conoce el gestor.
@@ -266,9 +264,7 @@ class ConnectionHandler:
         except SoupDBError as exc:
             return self._error(proto.error_code(exc), str(exc), version)
 
-    def _send_document(
-        self, conn: socket.socket, response: DocumentResponse, version: int
-    ) -> None:
+    def _send_document(self, conn: socket.socket, response: DocumentResponse, version: int) -> None:
         conn.sendall(
             proto.encode_frame_header(proto.OP_DOCUMENT, response.payload_length, version=version)
         )
