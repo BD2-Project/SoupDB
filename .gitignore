@@ -267,6 +267,7 @@ Thumbs.db
 # Datos multimedia generados (manifests, caché de descriptores, codebooks, vectores.bin).
 # Se regeneran con benchmarks/scripts/{prepare_multimedia_datasets,build_multimedia_vectors}.py
 benchmarks/data/
+docs/
 
 # Datos generados por demos locales.
 .demo/
