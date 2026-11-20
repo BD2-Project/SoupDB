@@ -54,7 +54,7 @@ def haversine_distance(a: Point2D, b: Point2D) -> float:
     # El redondeo en coma flotante puede dejar h en (0, 1] + epsilon; sin este
     # recorte asin(>1) lanzaría ValueError en el par antípodal.
     h = min(1.0, max(0.0, h))
-    # Aplica el factor al arco para conservar el valor exacto de la distancia ant?poda.
+    # Aplica el factor al arco para conservar el valor exacto de la distancia antípoda.
     return EARTH_RADIUS_M * (2.0 * math.asin(math.sqrt(h)))
 
 

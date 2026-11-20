@@ -360,14 +360,14 @@ def test_matches_brute_force_oracle_with_many_exact_duplicates() -> None:
 
 
 def test_the_knn_path_blocks_like_a_scan_instead_of_reading_uncommitted_rows() -> None:
-    # El lector por ?ndice necesita un lock de tabla para excluir INSERT pendientes.
+    # El lector por índice necesita un lock de tabla para excluir INSERT pendientes.
     import threading
 
     from engine.common.errors import TransactionError
     from engine.transactions.session import TransactionalSession
     from engine.transactions.transaction_manager import TransactionManager
 
-    # Evita empates para comprobar el lock en la ruta por ?ndice.
+    # Evita empates para comprobar el lock en la ruta por índice.
     catalog = make_catalog(index=True, rows=UNTIED_ROWS)
     assert find(plan(parse(KNN.format(2)), catalog).root.explain(), "SpatialKnnScan")
     manager = TransactionManager()

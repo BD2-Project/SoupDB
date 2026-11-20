@@ -1,4 +1,4 @@
-"""Servidor TCP de SoupDB con una sesi?n por conexi?n."""
+"""Servidor TCP de SoupDB con una sesión por conexión."""
 
 import logging
 import os

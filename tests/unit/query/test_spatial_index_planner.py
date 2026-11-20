@@ -19,7 +19,7 @@ EXTRA = (
     ColumnDef("otra", ColumnType.POINT),
 )
 
-# (3, 3) est? en la caja, fuera del c?rculo. (0, 4) est? en ambos bordes.
+# (3, 3) está en la caja, fuera del círculo. (0, 4) está en ambos bordes.
 ROWS = (
     ("A", (0.0, 0.0)),
     ("B", (3.0, 4.0)),
@@ -209,7 +209,7 @@ def test_limit_and_offset_combine_with_the_index() -> None:
     scanned = run(sql, make_catalog(index=False))
     assert len(indexed.rows) == 2
     assert len(scanned.rows) == 2
-    # Sin ORDER BY se comprueban cardinalidad y pertenencia al c?rculo.
+    # Sin ORDER BY se comprueban cardinalidad y pertenencia al círculo.
     matches = set(names(run(base, make_catalog(index=False))))
     assert set(names(indexed)) <= matches
     assert set(names(scanned)) <= matches

@@ -88,7 +88,7 @@ def test_reads_exactly_the_k_nearest_rows_when_distances_differ() -> None:
 
 
 def test_the_index_answers_instead_of_scanning_the_table() -> None:
-    # La cuarta fila existe solo en la tabla y distingue escaneo de ?ndice.
+    # La cuarta fila existe solo en la tabla y distingue escaneo de índice.
     fake, tree = build()
     fake.insert(Record(data=encode_row(("D", (0.0, 100.0)), LUGARES)))
     assert names(scan_of(fake, tree, k=3)) == ["A", "B", "C"]
@@ -154,7 +154,7 @@ def test_k_larger_than_the_index_falls_back_and_returns_everything() -> None:
 
 
 def test_a_stale_rid_falls_back_instead_of_dropping_the_row() -> None:
-    # El RID muerto tiene una distancia ?nica para aislar la recuperaci?n sin empates.
+    # El RID muerto tiene una distancia única para aislar la recuperación sin empates.
     fake, tree = build()
     tree.insert((0.0, 0.0), RID(page_id=99, slot=0))
     assert names(scan_of(fake, tree, k=1)) == ["A", "B", "C"]

@@ -214,7 +214,7 @@ def run(sizes: tuple[int, ...] = DATASET_SIZES) -> list[SpatialResult]:
         _prepare(entries)
 
         for metric, column, radii, spheroid in (
-            # use_spheroid=false iguala la distancia esf?rica de PostGIS a la del motor.
+            # use_spheroid=false iguala la distancia esférica de PostGIS a la del motor.
             ("haversine", "ubicacion", BENCHMARK_RADIUS_VALUES_M, ", false"),
             ("euclidean", "plano", BENCHMARK_RADIUS_VALUES_DEG, ""),
         ):

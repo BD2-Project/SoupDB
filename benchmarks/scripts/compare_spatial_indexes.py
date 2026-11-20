@@ -29,7 +29,7 @@ DATASET_SIZES = (1_000, 10_000, 100_000)
 QUERIES = 100
 SEED = 20260404
 
-# Ajusta cada nodo a una p?gina de 4096 bytes: 127 entradas de hoja o 102 internas.
+# Ajusta cada nodo a una página de 4096 bytes: 127 entradas de hoja o 102 internas.
 RTREE_ORDER = 102
 
 # Una entrada persistida del scan secuencial: dos coordenadas y un RID.

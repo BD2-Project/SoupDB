@@ -193,7 +193,7 @@ def test_the_restored_row_is_reachable_through_the_index() -> None:
 
 
 def test_after_a_rollback_the_index_matches_the_table_when_reopened() -> None:
-    # Al reabrir, el ?ndice reconstruido debe reflejar la fila restaurada por undo.
+    # Al reabrir, el índice reconstruido debe reflejar la fila restaurada por undo.
     import tempfile
     from pathlib import Path
 

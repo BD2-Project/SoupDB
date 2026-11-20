@@ -1,4 +1,4 @@
-"""Arranca el servidor TCP de SoupDB con configuraci?n de entorno."""
+"""Arranca el servidor TCP de SoupDB con configuración de entorno."""
 
 import os
 import signal

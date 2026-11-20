@@ -16,7 +16,7 @@ LUGARES = (
     ColumnDef("ubicacion", ColumnType.POINT),
 )
 
-# (3, 3) est? en la caja, fuera del c?rculo. (0, 4) est? en ambos bordes.
+# (3, 3) está en la caja, fuera del círculo. (0, 4) está en ambos bordes.
 ROWS = (
     ("A", (0.0, 0.0)),
     ("B", (3.0, 4.0)),

@@ -200,7 +200,7 @@ def _plan_select(statement: SelectStatement, catalog: Any) -> Plan:
     if statement.where is not None:
         _validate_columns(statement.where, schema)
         root = Filter(root, statement.where, schema, disk_manager)
-    # Filtra distancias nulas antes de ordenar para igualar el ?ndice y el escaneo.
+    # Filtra distancias nulas antes de ordenar para igualar el índice y el escaneo.
     # Actualmente distance() falla ante un operando NULL.
     for expression in _distance_order_keys(order_by):
         root = Filter(root, _is_not_null(expression), schema, disk_manager)
