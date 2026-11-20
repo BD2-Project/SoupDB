@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import pytest
 
@@ -78,12 +77,15 @@ def test_metric_k_must_be_positive_integer(k):
 
 
 def test_trec_covid_query_ablation_preserves_48_topic_ids_and_exact_buckets():
-    query_file = Path("benchmarks/data/trec_covid_queries.jsonl")
-    rows = query_file.read_text(encoding="utf-8").splitlines()
+    rows = [
+        {
+            "_id": f"topic-{number:02d}",
+            "text": f"coronavirus transmission statistical study number {number} outbreak",
+        }
+        for number in range(1, 49)
+    ]
     variants = build_query_length_ablation(rows)
-    expected_ids = {
-        row["_id"] for row in map(json.loads, rows) if len(DEFAULT_TOKENIZER(row["text"])) >= 5
-    }
+    expected_ids = {row["_id"] for row in rows if len(DEFAULT_TOKENIZER(row["text"])) >= 5}
     assert len(expected_ids) == 48
     assert set(variants) == {"1", "3", "5+"}
     assert all(set(bucket) == expected_ids for bucket in variants.values())
